@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node \"C:/Users/rakai/tradingview-mcp-jackson/src/server.js\" --help)",
+      "Bash(timeout 5 node src/server.js)",
+      "Bash(claude mcp:*)",
+      "Bash(git:*)",
+      "mcp__tradingview__tv_health_check",
+      "mcp__tradingview__tv_launch",
+      "Bash(start:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(curl -s http://localhost:9222/json/version)",
+      "mcp__tradingview__watchlist_add",
+      "mcp__tradingview__ui_open_panel",
+      "mcp__tradingview__capture_screenshot",
+      "mcp__tradingview__ui_click",
+      "mcp__tradingview__morning_brief"
+    ]
+  }
+}
