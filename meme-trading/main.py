@@ -14,6 +14,7 @@ import uvicorn
 
 from alerts.telegram import TelegramAlerter
 from config.settings import Settings
+from curation.pipeline import CurationPipeline
 from dashboard.app import create_app
 from dashboard.websocket_manager import WebSocketManager
 from db.database import init_db, get_db, close_db
@@ -164,6 +165,7 @@ async def main():
     convergence = ConvergenceEngine(settings, event_bus, signal_bus)
     position_mgr = PositionManager(settings, alert_bus)
     telegram = TelegramAlerter(settings)
+    curation = CurationPipeline(settings)
 
     logger.info("Starting all services...")
 
@@ -176,6 +178,7 @@ async def main():
             alert_fanout(alert_bus, telegram_queue, ws_manager),
             telegram.run(telegram_queue),
             run_dashboard(settings, ws_manager, db),
+            curation.run_loop(),
         )
     except KeyboardInterrupt:
         logger.info("Shutting down...")
