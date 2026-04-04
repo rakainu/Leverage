@@ -133,9 +133,9 @@
                 <thead><tr>
                     <th>Address</th>
                     <th>Label</th>
-                    <th class="sortable" onclick="sortWallets('score')" style="cursor:pointer">Score <span id="sort-score-arrow"></span></th>
-                    <th class="sortable" onclick="sortWallets('win_rate')" style="cursor:pointer">Win Rate <span id="sort-win_rate-arrow"></span></th>
-                    <th class="sortable" onclick="sortWallets('total_pnl_sol')" style="cursor:pointer">PnL (SOL) <span id="sort-total_pnl_sol-arrow"></span></th>
+                    <th class="sortable" onclick="sortWallets('score')" style="cursor:pointer">Score <span id="sort-score-arrow" class="sort-arrow">&#x25BD;</span></th>
+                    <th class="sortable" onclick="sortWallets('win_rate')" style="cursor:pointer">Win Rate <span id="sort-win_rate-arrow" class="sort-arrow">&#x25BD;</span></th>
+                    <th class="sortable" onclick="sortWallets('total_pnl_sol')" style="cursor:pointer">PnL (SOL) <span id="sort-total_pnl_sol-arrow" class="sort-arrow">&#x25BD;</span></th>
                     <th>Source</th>
                 </tr></thead>
                 <tbody id="wallets-table"></tbody>
@@ -207,14 +207,15 @@ function sortWallets(field) {
         walletSortField = field;
         walletSortDir = 'desc';
     }
-    // Update arrows
+    // Update arrows — active column is blue, inactive are dim
     ['score', 'win_rate', 'total_pnl_sol'].forEach(f => {
         const el = document.getElementById('sort-' + f + '-arrow');
         if (f === field) {
-            el.textContent = walletSortDir === 'desc' ? ' ▼' : ' ▲';
-            el.className = 'sort-arrow blue';
+            el.innerHTML = walletSortDir === 'desc' ? '&#x25BC;' : '&#x25B2;';
+            el.style.color = '#3b82f6';
         } else {
-            el.textContent = '';
+            el.innerHTML = '&#x25BD;';
+            el.style.color = '#475569';
         }
     });
     renderWalletsFromCache();
