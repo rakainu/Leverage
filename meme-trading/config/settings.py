@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Helius
     helius_api_key: str = ""
 
+    # Birdeye
+    birdeye_api_key: str = ""
+
     # Trading mode
     mode: str = "paper"  # "paper" | "live"
 

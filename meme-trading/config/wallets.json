@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "updated_at": "2026-04-04T00:00:00Z",
+  "version": 3,
+  "updated_at": "2026-04-04T13:30:00Z",
   "wallets": [
     {
       "address": "4Be9CvxqHW6BYiRAxW9Q3xu1ycTMWaL5z8NX4HR3ha7t",
@@ -52,6 +52,566 @@
       "score": 70.0,
       "stats": {
         "total_trades": 0,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "gasTzr94Pmp4Gf8vknQnqxeYxdgwFjbgdJa4msYRpnB",
+      "label": "auto-gasTzr94",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "AgmLJBMDCqWynYnQiPCuj9ewsNNsBJXyzoUhD9LJzN51",
+      "label": "auto-AgmLJBMD",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "54Pz1e35z9uoFdnxtzjp7xZQoFiofqhdayQWBMN7dsuy",
+      "label": "auto-54Pz1e35",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "9QYLGAQYaay2yZZRgQnQ5txENtbnW3w4TxPgL1PND8D6",
+      "label": "auto-9QYLGAQY",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 24,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "SUPErMoycPz71hmZXr78P7cXFYQhdpV39Roeoe2DxUC",
+      "label": "auto-SUPErMoy",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "8L2y55D11k63CAftvW7uMM2mBhtMxLoLnivG9uY2bt8j",
+      "label": "auto-8L2y55D1",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "7JCe3GHwkEr3feHgtLXnmuJ1yB3A7coSeyynxTBgdG8k",
+      "label": "auto-7JCe3GHw",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "GgGap6tiUKhD8XeUZaHpVB3rerb3zKWNouWQJHozDujt",
+      "label": "auto-GgGap6ti",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "437E4LvLmFG6Stp3ZRwGBzmsEBXuCBcU4NyVNuAdAeje",
+      "label": "auto-437E4LvL",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "BM8XcwCUMJC1mzMPM87ZRkHL3CWwWQNCz8Z3uTUSnsrB",
+      "label": "auto-BM8XcwCU",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "9c6StdpHGRUFmuPPPtXk5wyvk52t2HFD45nz4xtMYP9a",
+      "label": "auto-9c6StdpH",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "HgXUiReMx6kzM1HQJKGyPvYnvTZZS1pJDSbk44r4dc3P",
+      "label": "auto-HgXUiReM",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "EBAo2Q3MqFfwCxJ3ZDDi4mh6hR2Cc7tMbQkFj47uiMJS",
+      "label": "auto-EBAo2Q3M",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "DcfdE6XWgmg91iCihsNNAYcGvUPDVU1weVxuYCDyWKNF",
+      "label": "auto-DcfdE6XW",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "LvjCuiYEvNiHiXNAMUPUDbuCrmaMTUyubLypXwn22Fm",
+      "label": "auto-LvjCuiYE",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "4LQ1aMgYWugzLRpxLXsKG5BMBTZbkbkXBsQHJh6HjhgL",
+      "label": "auto-4LQ1aMgY",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "D8mzCucxWVHucJzd7GxoSVfeeJEqgoJbmfbgHbMgWioC",
+      "label": "auto-D8mzCucx",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "1eveYYxZ2mDiAnmCh3fnAbJwjgErzokRA1b6UrRybSM",
+      "label": "auto-1eveYYxZ",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "4HKxuU8GSB8dvALXxtDjx5zdEavGY6is44XRozkh9teW",
+      "label": "auto-4HKxuU8G",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "cLGa4Gmzz1nbgynRuKmTvvb1bacygMjtffX5DKDZGmD",
+      "label": "auto-cLGa4Gmz",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "2tYcXQCfTtQg5dKLEpQn26DjrfhTXhGB8Rh1oiv69DJc",
+      "label": "auto-2tYcXQCf",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "GGuNxhn9w45LK5Gh5ZR3fNdc2NqvVeazGTxQMKNaLdj8",
+      "label": "auto-GGuNxhn9",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "ETGitphAfFHhZ8hG752MURh4nziYGFAaQw3APrYYodEE",
+      "label": "auto-ETGitphA",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "5m5LuxdsU8ZhbmVFokQfu6WkB5TCR6vSSKcHCvKbDVFx",
+      "label": "auto-5m5Luxds",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "CszCPpD9aRjC87BasLHVhPr3dLqKiEfs5TsJinDDA1eB",
+      "label": "auto-CszCPpD9",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "8pY1AukbuPgUE3EetyLa59rFLMimJGT94ZzbMEZcQF4w",
+      "label": "auto-8pY1Aukb",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "CjYf1k3RRHFxYmUMvXGFsyjSTqr7KoaoHtfeeBvh4upi",
+      "label": "auto-CjYf1k3R",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "5Ew4WCAH1TrQoCnUdbEnL8NUVNQBNBPYYMQqdHVNuQH5",
+      "label": "auto-5Ew4WCAH",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 26,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "2d3xHwE9eKjVJ9oqkaXNugz3Bu5oBrNZMtr8up6USaME",
+      "label": "auto-2d3xHwE9",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "GAmk8dHPcYnfuRKszhNFMLgfh6wzcQ1QSH62kkpm25xy",
+      "label": "auto-GAmk8dHP",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "GZX91x59NpZfv4Qkp3rrDjoHdsBkmDJiQfVr1rWCJK1t",
+      "label": "auto-GZX91x59",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "4ZwYf8okEL7vgyBDZEcas2mcpDAVujsgtthxRHCMDqyP",
+      "label": "auto-4ZwYf8ok",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "5pTC1Fcs38vXc8ux44jvQj82MLqZLDc7YZMoydC7tu8x",
+      "label": "auto-5pTC1Fcs",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "DdYnke6n4oJV5KcGE62iBbkmMK1thsxcuCA1j7m2DUSz",
+      "label": "auto-DdYnke6n",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "5aEnX5VxJC97DyZHfVMYcuqYnrgucT6qXfvdo8HsHkuU",
+      "label": "auto-5aEnX5Vx",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "3SD2pHV9bKbrv3yV5wHTzF1av6Ah1SJQyhoPin1UPeS9",
+      "label": "auto-3SD2pHV9",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "2tgUbS9UMoQD6GkDZBiqKYCURnGrSb6ocYwRABrSJUvY",
+      "label": "auto-2tgUbS9U",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "DW4kp1UoKZgvgr8BRrgMRPWWhwvv4J4g3w4QJF6jfRPo",
+      "label": "auto-DW4kp1Uo",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "7iVCXQn4u6tiTEfNVqbWSEsRdEi69E9oYsSMiepuECwi",
+      "label": "auto-7iVCXQn4",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "GTiGiXrgG9PsSVLcDPZRtRJAufmyHcoEvcramTKqSzke",
+      "label": "auto-GTiGiXrg",
+      "source": "auto",
+      "added_at": "2026-04-04T13:30:00Z",
+      "score": 90,
+      "stats": {
+        "total_trades": 30,
         "win_rate": 0.0,
         "total_pnl_sol": 0.0,
         "avg_hold_minutes": 0
