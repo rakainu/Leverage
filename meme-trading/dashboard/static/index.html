@@ -17,6 +17,8 @@
         .ws-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
         .ws-connected { background: #22c55e; }
         .ws-disconnected { background: #ef4444; }
+        .sortable:hover { color: #3b82f6; }
+        .sort-arrow { font-size: 10px; }
         table { width: 100%; border-collapse: collapse; }
         th { text-align: left; padding: 8px 12px; color: #94a3b8; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #334155; }
         td { padding: 8px 12px; border-bottom: 1px solid #1e293b; font-size: 13px; }
@@ -131,9 +133,9 @@
                 <thead><tr>
                     <th>Address</th>
                     <th>Label</th>
-                    <th>Score</th>
-                    <th>Win Rate</th>
-                    <th>PnL (SOL)</th>
+                    <th class="sortable" onclick="sortWallets('score')" style="cursor:pointer">Score <span id="sort-score-arrow"></span></th>
+                    <th class="sortable" onclick="sortWallets('win_rate')" style="cursor:pointer">Win Rate <span id="sort-win_rate-arrow"></span></th>
+                    <th class="sortable" onclick="sortWallets('total_pnl_sol')" style="cursor:pointer">PnL (SOL) <span id="sort-total_pnl_sol-arrow"></span></th>
                     <th>Source</th>
                 </tr></thead>
                 <tbody id="wallets-table"></tbody>
@@ -191,6 +193,48 @@ function pnlClass(val) {
 
 function pnlPrefix(val) {
     return val > 0 ? '+' : '';
+}
+
+// Wallet sorting
+let walletSortField = 'score';
+let walletSortDir = 'desc';
+let cachedWallets = [];
+
+function sortWallets(field) {
+    if (walletSortField === field) {
+        walletSortDir = walletSortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+        walletSortField = field;
+        walletSortDir = 'desc';
+    }
+    // Update arrows
+    ['score', 'win_rate', 'total_pnl_sol'].forEach(f => {
+        const el = document.getElementById('sort-' + f + '-arrow');
+        if (f === field) {
+            el.textContent = walletSortDir === 'desc' ? ' ▼' : ' ▲';
+            el.className = 'sort-arrow blue';
+        } else {
+            el.textContent = '';
+        }
+    });
+    renderWalletsFromCache();
+}
+
+function renderWalletsFromCache() {
+    const sorted = [...cachedWallets].sort((a, b) => {
+        const av = a[walletSortField] || 0;
+        const bv = b[walletSortField] || 0;
+        return walletSortDir === 'desc' ? bv - av : av - bv;
+    });
+    const tbody = document.getElementById('wallets-table');
+    tbody.innerHTML = sorted.map(w => `<tr>
+        <td><code>${shortAddr(w.address)}</code></td>
+        <td>${w.label || '--'}</td>
+        <td class="blue">${(w.score || 0).toFixed(0)}</td>
+        <td>${((w.win_rate || 0) * 100).toFixed(0)}%</td>
+        <td class="${pnlClass(w.total_pnl_sol)}">${(w.total_pnl_sol || 0).toFixed(2)}</td>
+        <td class="text-slate-400">${w.source || '--'}</td>
+    </tr>`).join('');
 }
 
 function timeAgo(isoStr) {
@@ -262,16 +306,8 @@ async function renderPositions() {
 }
 
 async function renderWallets() {
-    const wallets = await fetchJSON('/api/wallets');
-    const tbody = document.getElementById('wallets-table');
-    tbody.innerHTML = wallets.map(w => `<tr>
-        <td><code>${shortAddr(w.address)}</code></td>
-        <td>${w.label || '--'}</td>
-        <td class="blue">${(w.score || 0).toFixed(0)}</td>
-        <td>${((w.win_rate || 0) * 100).toFixed(0)}%</td>
-        <td class="${pnlClass(w.total_pnl_sol)}">${(w.total_pnl_sol || 0).toFixed(2)}</td>
-        <td class="text-slate-400">${w.source || '--'}</td>
-    </tr>`).join('');
+    cachedWallets = await fetchJSON('/api/wallets');
+    renderWalletsFromCache();
 }
 
 function refreshAll() {
