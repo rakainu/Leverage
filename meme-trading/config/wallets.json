@@ -1,5 +1,62 @@
 {
   "version": 1,
   "updated_at": "2026-04-04T00:00:00Z",
-  "wallets": []
+  "wallets": [
+    {
+      "address": "4Be9CvxqHW6BYiRAxW9Q3xu1ycTMWaL5z8NX4HR3ha7t",
+      "label": "raydium-flipper",
+      "source": "manual",
+      "added_at": "2026-04-04T00:00:00Z",
+      "score": 75.0,
+      "stats": {
+        "total_trades": 0,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "H72yLkhTnoBfhBTXXaj1RBXuirm8s8G5fcVh2XpQLggM",
+      "label": "whale-minimal-rugs",
+      "source": "manual",
+      "added_at": "2026-04-04T00:00:00Z",
+      "score": 80.0,
+      "stats": {
+        "total_trades": 0,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "8zFZHuSRuDpuAR7J6FzwyF3vKNx4CVW3DFHJerQhc7Zd",
+      "label": "insider-signals",
+      "source": "manual",
+      "added_at": "2026-04-04T00:00:00Z",
+      "score": 70.0,
+      "stats": {
+        "total_trades": 0,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    },
+    {
+      "address": "AVAZvHLR2PcWpDf8BXY4rVxNHYRBytycHkcB5z5QNXYm",
+      "label": "pumpfun-sniper",
+      "source": "manual",
+      "added_at": "2026-04-04T00:00:00Z",
+      "score": 70.0,
+      "stats": {
+        "total_trades": 0,
+        "win_rate": 0.0,
+        "total_pnl_sol": 0.0,
+        "avg_hold_minutes": 0
+      },
+      "active": true
+    }
+  ]
 }

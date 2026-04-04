@@ -1,7 +1,6 @@
 """SMC Trading System — Smart Money Convergence for Solana memecoins."""
 
 import asyncio
-import signal
 import sys
 from pathlib import Path
 
@@ -10,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config.settings import Settings
 from db.database import init_db, close_db
+from scanner.wallet_monitor import WalletMonitor
 from utils.logging import setup_logging
 
 
@@ -30,16 +30,39 @@ async def main():
     await init_db()
     logger.info("Database initialized")
 
-    # Verify Helius connectivity
+    # Verify RPC
     rpc_url = settings.solana_rpc_urls[0]
     helius = "helius" in rpc_url.lower()
     logger.info(f"RPC: {'Helius' if helius else 'Public'} ({rpc_url[:50]}...)")
 
-    logger.info("Phase 1 foundation complete. Scanner (Phase 2) not yet implemented.")
+    # Message buses
+    event_bus = asyncio.Queue()  # BuyEvent: scanner -> engine
 
-    # Cleanup
-    await close_db()
-    logger.info("Shutdown complete.")
+    # Scanner
+    monitor = WalletMonitor(settings, event_bus)
+
+    # Event consumer (temporary — prints events until convergence engine is built)
+    async def event_logger():
+        while True:
+            event = await event_bus.get()
+            logger.info(
+                f"EVENT | {event.wallet_address[:8]}.. | "
+                f"{event.token_mint[:8]}.. | "
+                f"{event.amount_sol:.4f} SOL | {event.dex}"
+            )
+
+    logger.info("Starting scanner...")
+
+    try:
+        await asyncio.gather(
+            monitor.run(),
+            event_logger(),
+        )
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        await close_db()
+        logger.info("Shutdown complete.")
 
 
 if __name__ == "__main__":
