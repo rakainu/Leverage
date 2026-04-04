@@ -1,77 +1,95 @@
-# Meme Trading
+# SMC — Smart Money Convergence Trading System
 
-Solana memecoin spot trading system — fast in-and-out trades on trending tokens.
+Solana memecoin trading system that detects when multiple profitable wallets converge on the same token and trades accordingly.
 
-## Strategy
+## How It Works
 
-- **Approach:** Spot trading (no/minimal leverage), quick entries and exits on trending memecoins
-- **Signal Source:** GMGN.ai trending token detection + smart money tracking
-- **Execution:** Jupiter Swap API (Solana DEX aggregator) for on-chain trades, MEXC for CEX option
-- **Position Management:** Profit targets, stop-losses, time-based exits
+1. **Scanner** monitors 50-100 curated wallet addresses via Solana WebSocket (Helius RPC)
+2. **Convergence Engine** detects when 3+ tracked wallets buy the same token within 60 minutes
+3. **Safety Checker** validates token: mint authority revoked, freeze authority revoked, honeypot simulation (Jupiter buy/sell), top holder concentration
+4. **Executor** opens paper or live trades via Jupiter Swap API
+5. **Position Manager** monitors open positions every 15s for TP/SL/timeout exits
+6. **Dashboard** shows everything at http://localhost:8420 via FastAPI + WebSocket
+7. **Telegram** pushes alerts to @radk9 via lpwade_bot
 
-## Data Sources
+## Running
 
-### GMGN.ai
-- Multi-chain memecoin trading terminal (Solana, ETH, Base, BSC, Tron, Blast, Monad)
-- Smart money wallet tracking, copy trading, token sniping
-- 400+ parameter analysis for token scoring
-- Anti-MEV protection, honeypot detection, liquidity checks
-- 1% per-trade fee, no subscription
-- API available for price data and trending tokens
-- Platforms: web, Chrome extension, Telegram bot, Android app
-
-### MEXC
-- 2,939+ trading pairs including memecoins (PUMP/USDT etc.)
-- Spot fees: 0% maker / 0.05% taker (industry lowest)
-- Futures fees: 0.01% maker / 0.05% taker
-- API: REST + WebSocket, SDKs in Python, JS, Java, Go, .NET
-- KYC required for API futures trading
-- Good for CEX-based memecoin trading if tokens are listed
-
-## Architecture Reference (from Swiper bot analysis)
-
-Swiper (github.com/shakeebshams/swiper) is the closest open-source reference:
-- Python, Jupiter Swap, Supabase for position tracking
-- Buy module: GMGN trending scan -> age filter (<60s) -> Jupiter swap
-- Sell module: poll positions, exit on profit (2.5%), stop-loss (50%), or timeout (5 min)
-- Limitations: scrapes GMGN via curl (fragile), no real sell execution, hardcoded values
-
-## Tech Stack
-
-- **Language:** Python
-- **DEX:** Jupiter Swap API (Solana)
-- **CEX (optional):** MEXC via REST API or ccxt
-- **Data:** GMGN.ai API for trending/price data
-- **Storage:** Supabase or local SQLite for position tracking
-- **Wallet:** Solana keypair (base58), dedicated trading wallet with limited funds
-
-## Key Dependencies
-
-```
-solana, solders, base58          # Solana blockchain interaction
-requests, httpx                   # API calls
-python-dotenv                     # Config management
-supabase / sqlite3                # Position storage
-ccxt                              # Exchange connectivity (MEXC, others)
+```bash
+cd meme-trading
+pip install -r requirements.txt
+cp .env.example .env  # Edit with real keys
+python main.py
 ```
 
-## Risk Controls
+Dashboard: http://localhost:8420
 
-- Dedicated wallet with capped funds (never main wallet)
-- Max concurrent positions limit
-- Per-trade SOL amount cap
-- Mandatory stop-loss on every position
-- Time-based exit to avoid bag-holding
-- Honeypot/rug detection before buying
-- No private keys in version control
+## Configuration (.env with SMC_ prefix)
 
-## Project Structure (planned)
+Key settings:
+- `SMC_MODE` — "paper" (default) or "live"
+- `SMC_CONVERGENCE_THRESHOLD` — min wallets for signal (default: 3)
+- `SMC_CONVERGENCE_WINDOW_MINUTES` — sliding window (default: 60)
+- `SMC_TRADE_AMOUNT_SOL` — per-trade size (default: 0.1)
+- `SMC_TAKE_PROFIT_PCT` / `SMC_STOP_LOSS_PCT` — exit thresholds
+- `SMC_POSITION_TIMEOUT_MINUTES` — max hold time (default: 240)
+
+## Architecture
+
+```
+WalletMonitor (Solana WSS) → event_bus → ConvergenceEngine → signal_bus → signal_router
+  → SafetyChecker → PaperExecutor/LiveExecutor → PositionManager
+  → alert_fanout → TelegramAlerter + WebSocketManager (dashboard)
+```
+
+All async via asyncio.Queue message buses. SQLite (WAL mode) as single source of truth.
+
+## Project Structure
 
 ```
 meme-trading/
-  scanner/          # Token discovery & trending detection
-  trader/           # Buy/sell execution via Jupiter or MEXC
-  positions/        # Position tracking & management
-  safety/           # Honeypot detection, rug checks, risk limits
-  config/           # Environment config, pair lists
+├── main.py                    # Entry point — asyncio.gather all services
+├── config/settings.py         # Pydantic Settings, .env with SMC_ prefix
+├── config/wallets.json        # Tracked wallet addresses (manual + auto)
+├── db/schema.sql              # SQLite tables: buy_events, signals, positions, wallets, stats
+├── db/database.py             # aiosqlite singleton, WAL mode
+├── scanner/wallet_monitor.py  # Solana WS logsSubscribe, chunked connections
+├── scanner/transaction_parser.py  # Decode swap txns into BuyEvent
+├── scanner/rpc_pool.py        # Round-robin RPC with health tracking
+├── engine/convergence.py      # Sliding window detection, dedup
+├── engine/safety.py           # Honeypot sim, mint/freeze auth, holder checks
+├── engine/signal.py           # BuyEvent + ConvergenceSignal dataclasses
+├─�� executor/jupiter.py        # Jupiter Swap API client
+├── executor/paper.py          # Paper trading with 1h/4h/24h snapshots
+├── executor/position_manager.py  # TP/SL/timeout monitoring
+├── executor/live.py           # Real Jupiter swap execution (Phase 7)
+├── curation/discovery.py      # GMGN wallet scraper (Phase 6)
+├── curation/scorer.py         # Wallet scoring 0-100 (Phase 6)
+├── curation/pipeline.py       # Auto wallet refresh (Phase 6)
+├── dashboard/app.py           # FastAPI REST + WebSocket
+├── dashboard/static/index.html  # Single-file dashboard (Tailwind + vanilla JS)
+├── alerts/telegram.py         # Push notifications via lpwade_bot
+└── utils/                     # Logging, constants, Solana helpers
 ```
+
+## External Services
+
+- **Helius** (helius.dev) — Solana RPC + WebSocket, Enhanced Transactions API
+- **Jupiter** (jup.ag) — DEX aggregator for quotes, swaps, price checks
+- **Telegram** — lpwade_bot for push alerts to @radk9
+
+## Wallet Management
+
+`config/wallets.json` is the wallet registry:
+- `"source": "manual"` — never auto-removed, you control these
+- `"source": "auto"` — added/deactivated by curation pipeline based on score
+- Reloaded every 5 minutes by the scanner
+
+## Build Status
+
+- [x] Phase 1: Foundation (config, DB, logging)
+- [x] Phase 2: Scanner (Helius WS, transaction parser)
+- [x] Phase 3: Convergence Engine + Safety Checks
+- [x] Phase 4: Paper Trading + Position Management
+- [x] Phase 5: Dashboard + Telegram Alerts
+- [ ] Phase 6: Wallet Curation (auto-discovery)
+- [ ] Phase 7: Live Trading + VPS Deploy
