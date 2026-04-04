@@ -148,6 +148,11 @@ async def main():
     db = await get_db()
     logger.info("Database initialized")
 
+    # Sync wallets.json to DB on startup
+    curation_init = CurationPipeline(settings)
+    await curation_init._sync_to_db()
+    logger.info("Wallets synced to DB")
+
     # RPC info
     rpc_url = settings.solana_rpc_urls[0]
     helius = "helius" in rpc_url.lower()
