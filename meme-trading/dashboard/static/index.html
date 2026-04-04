@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMC Trading Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0f172a; color: #e2e8f0; font-family: 'Courier New', monospace; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; }
+        .green { color: #22c55e; }
+        .red { color: #ef4444; }
+        .blue { color: #3b82f6; }
+        .yellow { color: #eab308; }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .ws-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .ws-connected { background: #22c55e; }
+        .ws-disconnected { background: #ef4444; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 8px 12px; color: #94a3b8; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #334155; }
+        td { padding: 8px 12px; border-bottom: 1px solid #1e293b; font-size: 13px; }
+        tr:hover { background: #1e293b; }
+    </style>
+</head>
+<body class="min-h-screen p-4">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-4">
+            <h1 class="text-xl font-bold text-white">SMC Trading</h1>
+            <span id="mode-badge" class="px-2 py-1 rounded text-xs font-bold bg-yellow-900 text-yellow-300">PAPER</span>
+        </div>
+        <div class="flex items-center gap-4 text-sm">
+            <span class="text-slate-400">WS: <span id="ws-dot" class="ws-dot ws-disconnected"></span></span>
+            <span class="text-slate-400" id="last-update">--</span>
+        </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
+        <div class="card p-3 text-center">
+            <div class="text-xs text-slate-400">Signals</div>
+            <div class="text-lg font-bold" id="stat-signals">0</div>
+        </div>
+        <div class="card p-3 text-center">
+            <div class="text-xs text-slate-400">Trades</div>
+            <div class="text-lg font-bold" id="stat-trades">0</div>
+        </div>
+        <div class="card p-3 text-center">
+            <div class="text-xs text-slate-400">Open</div>
+            <div class="text-lg font-bold blue" id="stat-open">0</div>
+        </div>
+        <div class="card p-3 text-center">
+            <div class="text-xs text-slate-400">Wins</div>
+            <div class="text-lg font-bold green" id="stat-wins">0</div>
+        </div>
+        <div class="card p-3 text-center">
+            <div class="text-xs text-slate-400">Losses</div>
+            <div class="text-lg font-bold red" id="stat-losses">0</div>
+        </div>
+        <div class="card p-3 text-center">
+            <div class="text-xs text-slate-400">P&L (SOL)</div>
+            <div class="text-lg font-bold" id="stat-pnl">0.0000</div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <!-- Convergence Signals -->
+        <div class="card p-4">
+            <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Convergence Signals</h2>
+            <div class="overflow-x-auto max-h-80 overflow-y-auto">
+                <table>
+                    <thead><tr>
+                        <th>Token</th>
+                        <th>Wallets</th>
+                        <th>SOL</th>
+                        <th>Safety</th>
+                        <th>Action</th>
+                        <th>Time</th>
+                    </tr></thead>
+                    <tbody id="signals-table"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Live Buy Events -->
+        <div class="card p-4">
+            <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Live Buy Events</h2>
+            <div class="overflow-x-auto max-h-80 overflow-y-auto">
+                <table>
+                    <thead><tr>
+                        <th>Wallet</th>
+                        <th>Token</th>
+                        <th>SOL</th>
+                        <th>DEX</th>
+                        <th>Time</th>
+                    </tr></thead>
+                    <tbody id="events-table"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Positions -->
+    <div class="card p-4 mb-6">
+        <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Positions</h2>
+        <div class="overflow-x-auto">
+            <table>
+                <thead><tr>
+                    <th>ID</th>
+                    <th>Token</th>
+                    <th>Mode</th>
+                    <th>Status</th>
+                    <th>Entry</th>
+                    <th>Current</th>
+                    <th>P&L %</th>
+                    <th>P&L SOL</th>
+                    <th>Age</th>
+                    <th>Reason</th>
+                </tr></thead>
+                <tbody id="positions-table"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Tracked Wallets -->
+    <div class="card p-4">
+        <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Tracked Wallets</h2>
+        <div class="overflow-x-auto max-h-60 overflow-y-auto">
+            <table>
+                <thead><tr>
+                    <th>Address</th>
+                    <th>Label</th>
+                    <th>Score</th>
+                    <th>Win Rate</th>
+                    <th>PnL (SOL)</th>
+                    <th>Source</th>
+                </tr></thead>
+                <tbody id="wallets-table"></tbody>
+            </table>
+        </div>
+    </div>
+
+<script>
+// WebSocket
+let ws;
+function connectWS() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+    ws.onopen = () => {
+        document.getElementById('ws-dot').className = 'ws-dot ws-connected';
+    };
+    ws.onclose = () => {
+        document.getElementById('ws-dot').className = 'ws-dot ws-disconnected';
+        setTimeout(connectWS, 3000);
+    };
+    ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        handleWsMessage(data);
+    };
+}
+connectWS();
+
+function handleWsMessage(data) {
+    document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+    // Refresh data on any update
+    refreshAll();
+}
+
+// Data loading
+async function fetchJSON(url) {
+    const r = await fetch(url);
+    return r.json();
+}
+
+function shortAddr(addr) {
+    if (!addr) return '--';
+    return addr.slice(0, 6) + '..' + addr.slice(-4);
+}
+
+function shortMint(mint) {
+    if (!mint) return '--';
+    return mint.slice(0, 10) + '..';
+}
+
+function pnlClass(val) {
+    if (val > 0) return 'green';
+    if (val < 0) return 'red';
+    return '';
+}
+
+function pnlPrefix(val) {
+    return val > 0 ? '+' : '';
+}
+
+function timeAgo(isoStr) {
+    if (!isoStr) return '--';
+    const d = new Date(isoStr);
+    const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (sec < 60) return sec + 's';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h';
+    return Math.floor(sec / 86400) + 'd';
+}
+
+async function renderStats() {
+    const s = await fetchJSON('/api/stats');
+    document.getElementById('stat-signals').textContent = s.total_signals;
+    document.getElementById('stat-trades').textContent = s.total_trades;
+    document.getElementById('stat-open').textContent = s.open_trades;
+    document.getElementById('stat-wins').textContent = s.wins;
+    document.getElementById('stat-losses').textContent = s.losses;
+    const pnlEl = document.getElementById('stat-pnl');
+    pnlEl.textContent = pnlPrefix(s.total_pnl_sol) + s.total_pnl_sol.toFixed(4);
+    pnlEl.className = 'text-lg font-bold ' + pnlClass(s.total_pnl_sol);
+}
+
+async function renderSignals() {
+    const signals = await fetchJSON('/api/signals?limit=30');
+    const tbody = document.getElementById('signals-table');
+    tbody.innerHTML = signals.map(s => `<tr>
+        <td>${shortMint(s.token_mint)}</td>
+        <td class="blue">${s.wallet_count}</td>
+        <td>${(s.total_amount_sol || 0).toFixed(2)}</td>
+        <td class="${s.safety_passed ? 'green' : 'red'}">${s.safety_passed === null ? '...' : s.safety_passed ? 'PASS' : 'FAIL'}</td>
+        <td>${s.action_taken || '...'}</td>
+        <td class="text-slate-400">${timeAgo(s.signal_at)}</td>
+    </tr>`).join('');
+}
+
+async function renderEvents() {
+    const events = await fetchJSON('/api/events?limit=30');
+    const tbody = document.getElementById('events-table');
+    tbody.innerHTML = events.map(e => `<tr>
+        <td>${shortAddr(e.wallet_address)}</td>
+        <td>${shortMint(e.token_mint)}</td>
+        <td>${(e.amount_sol || 0).toFixed(4)}</td>
+        <td class="text-slate-400">${e.dex || '?'}</td>
+        <td class="text-slate-400">${timeAgo(e.timestamp)}</td>
+    </tr>`).join('');
+}
+
+async function renderPositions() {
+    const positions = await fetchJSON('/api/positions');
+    const tbody = document.getElementById('positions-table');
+    tbody.innerHTML = positions.map(p => {
+        const pnl = p.pnl_pct || 0;
+        const pnlSol = p.pnl_sol || 0;
+        return `<tr>
+            <td>#${p.id}</td>
+            <td>${shortMint(p.token_mint)}</td>
+            <td>${p.mode}</td>
+            <td class="${p.status === 'open' ? 'blue' : 'text-slate-400'}">${p.status}</td>
+            <td>${p.entry_price ? p.entry_price.toExponential(3) : '--'}</td>
+            <td>${p.current_price ? p.current_price.toExponential(3) : '--'}</td>
+            <td class="${pnlClass(pnl)}">${pnlPrefix(pnl)}${pnl.toFixed(1)}%</td>
+            <td class="${pnlClass(pnlSol)}">${pnlPrefix(pnlSol)}${pnlSol.toFixed(4)}</td>
+            <td class="text-slate-400">${timeAgo(p.opened_at)}</td>
+            <td class="text-slate-400">${p.close_reason || '--'}</td>
+        </tr>`;
+    }).join('');
+}
+
+async function renderWallets() {
+    const wallets = await fetchJSON('/api/wallets');
+    const tbody = document.getElementById('wallets-table');
+    tbody.innerHTML = wallets.map(w => `<tr>
+        <td><code>${shortAddr(w.address)}</code></td>
+        <td>${w.label || '--'}</td>
+        <td class="blue">${(w.score || 0).toFixed(0)}</td>
+        <td>${((w.win_rate || 0) * 100).toFixed(0)}%</td>
+        <td class="${pnlClass(w.total_pnl_sol)}">${(w.total_pnl_sol || 0).toFixed(2)}</td>
+        <td class="text-slate-400">${w.source || '--'}</td>
+    </tr>`).join('');
+}
+
+function refreshAll() {
+    renderStats();
+    renderSignals();
+    renderEvents();
+    renderPositions();
+    renderWallets();
+}
+
+// Initial load + auto-refresh
+refreshAll();
+setInterval(refreshAll, 15000);
+</script>
+</body>
+</html>

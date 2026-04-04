@@ -10,8 +10,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import httpx
+import uvicorn
 
+from alerts.telegram import TelegramAlerter
 from config.settings import Settings
+from dashboard.app import create_app
+from dashboard.websocket_manager import WebSocketManager
 from db.database import init_db, get_db, close_db
 from engine.convergence import ConvergenceEngine
 from engine.safety import SafetyChecker, SafetyResult
@@ -36,7 +40,6 @@ async def signal_router(
     while True:
         signal: ConvergenceSignal = await signal_bus.get()
 
-        # Run safety checks
         logger.info(f"Running safety checks on {signal.token_mint[:12]}...")
         result: SafetyResult = await safety.check(signal.token_mint)
 
@@ -100,10 +103,30 @@ async def signal_router(
                     "position_id": position_id,
                     "token_mint": signal.token_mint,
                     "token_symbol": signal.token_symbol,
-                    "entry_price": 0,  # Will be set by executor
                     "amount_sol": settings.trade_amount_sol,
                     "mode": "paper",
                 })
+
+
+async def alert_fanout(alert_bus: asyncio.Queue, telegram_queue: asyncio.Queue, ws_manager: WebSocketManager):
+    """Fan out alerts to both Telegram and WebSocket dashboard."""
+    while True:
+        alert = await alert_bus.get()
+        await telegram_queue.put(alert)
+        await ws_manager.broadcast(alert)
+
+
+async def run_dashboard(settings: Settings, ws_manager: WebSocketManager, db):
+    """Run the FastAPI dashboard server."""
+    app = create_app(ws_manager, db)
+    config = uvicorn.Config(
+        app,
+        host=settings.dashboard_host,
+        port=settings.dashboard_port,
+        log_level="warning",
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 async def main():
@@ -121,6 +144,7 @@ async def main():
 
     # Initialize database
     await init_db()
+    db = await get_db()
     logger.info("Database initialized")
 
     # RPC info
@@ -129,21 +153,17 @@ async def main():
     logger.info(f"RPC: {'Helius' if helius else 'Public'} ({rpc_url[:50]}...)")
 
     # Message buses
-    event_bus = asyncio.Queue()   # BuyEvent: scanner -> convergence engine
-    signal_bus = asyncio.Queue()  # ConvergenceSignal: engine -> signal_router
-    alert_bus = asyncio.Queue()   # dict: signal_router + position_manager -> alerts
-
-    # Alert consumer (temporary — logs alerts until dashboard/telegram is built)
-    async def alert_logger():
-        while True:
-            alert = await alert_bus.get()
-            alert_type = alert.get("type", "unknown")
-            logger.info(f"ALERT [{alert_type}]: {json.dumps(alert, default=str)}")
+    event_bus = asyncio.Queue()     # BuyEvent: scanner -> convergence
+    signal_bus = asyncio.Queue()    # ConvergenceSignal: convergence -> router
+    alert_bus = asyncio.Queue()     # dict: router + positions -> fanout
+    telegram_queue = asyncio.Queue()  # dict: fanout -> telegram
 
     # Components
+    ws_manager = WebSocketManager()
     monitor = WalletMonitor(settings, event_bus)
     convergence = ConvergenceEngine(settings, event_bus, signal_bus)
     position_mgr = PositionManager(settings, alert_bus)
+    telegram = TelegramAlerter(settings)
 
     logger.info("Starting all services...")
 
@@ -153,7 +173,9 @@ async def main():
             convergence.run(),
             signal_router(signal_bus, alert_bus, settings, logger),
             position_mgr.run(),
-            alert_logger(),
+            alert_fanout(alert_bus, telegram_queue, ws_manager),
+            telegram.run(telegram_queue),
+            run_dashboard(settings, ws_manager, db),
         )
     except KeyboardInterrupt:
         logger.info("Shutting down...")
