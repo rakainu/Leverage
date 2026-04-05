@@ -91,5 +91,24 @@ meme-trading/
 - [x] Phase 3: Convergence Engine + Safety Checks
 - [x] Phase 4: Paper Trading + Position Management
 - [x] Phase 5: Dashboard + Telegram Alerts
-- [ ] Phase 6: Wallet Curation (auto-discovery)
-- [ ] Phase 7: Live Trading + VPS Deploy
+- [x] Phase 6: Wallet Curation (Birdeye + Helius + Nansen discovery, scoring, auto-refresh)
+- [x] Phase 7: Live Trading (Jupiter swap) + Docker + VPS Deploy
+
+## Going Live
+
+1. Export Phantom private key → set `SMC_SOLANA_PRIVATE_KEY` in `.env`
+2. Fund wallet `GGR8UN1skyNV3ZfSZ96jgSu7tQGYSCzi6vhm3i1ZHJop` with 0.5-1 SOL
+3. Set `SMC_MODE=live` in `.env`
+4. Restart: `python main.py` (local) or `docker compose up -d` (VPS)
+
+## VPS Deploy
+
+```bash
+ssh root@46.202.146.30
+cd /opt/smc-trading
+git clone https://github.com/rakainu/Leverage.git . || git pull
+cd meme-trading
+cp .env.example .env && nano .env  # Add real keys
+docker compose up -d --build
+# Dashboard: http://46.202.146.30:8420
+```
