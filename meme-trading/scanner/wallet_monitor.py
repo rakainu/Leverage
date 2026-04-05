@@ -154,8 +154,10 @@ class WalletMonitor:
         sub_id = msg["params"]["subscription"]
         wallet_addr = sub_ids.get(sub_id)
         if not wallet_addr:
+            logger.debug(f"Unknown sub_id {sub_id} for sig {signature[:12]}..")
             return
 
+        logger.info(f"Processing txn {signature[:12]}.. from wallet {wallet_addr[:8]}..")
         # Parse in background to not block WS message processing
         asyncio.create_task(self._parse_and_emit(signature, wallet_addr))
 

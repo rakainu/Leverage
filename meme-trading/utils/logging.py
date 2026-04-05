@@ -18,8 +18,10 @@ def setup_logging(level: str = "INFO") -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # Console handler
-    console = logging.StreamHandler(sys.stdout)
+    # Console handler (force UTF-8 on Windows to handle emoji in Solana logs)
+    console = logging.StreamHandler(
+        open(sys.stdout.fileno(), mode="w", encoding="utf-8", closefd=False)
+    )
     console.setFormatter(fmt)
     logger.addHandler(console)
 
@@ -29,5 +31,8 @@ def setup_logging(level: str = "INFO") -> logging.Logger:
         file_handler = logging.FileHandler(log_dir / "smc.log")
         file_handler.setFormatter(fmt)
         logger.addHandler(file_handler)
+
+    # Parser debug logging for diagnosing buy detection
+    logging.getLogger("smc.scanner.parser").setLevel(logging.DEBUG)
 
     return logger

@@ -23,6 +23,10 @@
         th { text-align: left; padding: 8px 12px; color: #94a3b8; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #334155; }
         td { padding: 8px 12px; border-bottom: 1px solid #1e293b; font-size: 13px; }
         tr:hover { background: #1e293b; }
+        .copyable { cursor: pointer; border-bottom: 1px dashed #475569; }
+        .copyable:hover { color: #3b82f6; }
+        .copy-flash { color: #22c55e !important; transition: color 0.2s; }
+        .ticker { color: #a78bfa; font-weight: 600; font-size: 12px; }
     </style>
 </head>
 <body class="min-h-screen p-4">
@@ -67,25 +71,7 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        <!-- Convergence Signals -->
-        <div class="card p-4">
-            <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Convergence Signals</h2>
-            <div class="overflow-x-auto max-h-80 overflow-y-auto">
-                <table>
-                    <thead><tr>
-                        <th>Token</th>
-                        <th>Wallets</th>
-                        <th>SOL</th>
-                        <th>Safety</th>
-                        <th>Action</th>
-                        <th>Time</th>
-                    </tr></thead>
-                    <tbody id="signals-table"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Live Buy Events -->
+        <!-- Live Buy Events (left) -->
         <div class="card p-4">
             <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Live Buy Events</h2>
             <div class="overflow-x-auto max-h-80 overflow-y-auto">
@@ -93,12 +79,51 @@
                     <thead><tr>
                         <th>Wallet</th>
                         <th>Token</th>
+                        <th>Ticker</th>
                         <th>SOL</th>
                         <th>DEX</th>
                         <th>Time</th>
                     </tr></thead>
                     <tbody id="events-table"></tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- Convergence Signals (right, stacked) -->
+        <div class="flex flex-col gap-4">
+            <div class="card p-4">
+                <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Convergence Signals — <span class="green">3 Buys</span></h2>
+                <div class="overflow-x-auto max-h-60 overflow-y-auto">
+                    <table>
+                        <thead><tr>
+                            <th>Token</th>
+                            <th>Ticker</th>
+                            <th>Wallets</th>
+                            <th>SOL</th>
+                            <th>Safety</th>
+                            <th>Action</th>
+                            <th>Time</th>
+                        </tr></thead>
+                        <tbody id="signals-3-table"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card p-4">
+                <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Convergence Signals — <span class="yellow">2 Buys</span></h2>
+                <div class="overflow-x-auto max-h-60 overflow-y-auto">
+                    <table>
+                        <thead><tr>
+                            <th>Token</th>
+                            <th>Ticker</th>
+                            <th>Wallets</th>
+                            <th>SOL</th>
+                            <th>Safety</th>
+                            <th>Action</th>
+                            <th>Time</th>
+                        </tr></thead>
+                        <tbody id="signals-2-table"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -111,6 +136,7 @@
                 <thead><tr>
                     <th>ID</th>
                     <th>Token</th>
+                    <th>Ticker</th>
                     <th>Mode</th>
                     <th>Status</th>
                     <th>Entry</th>
@@ -185,6 +211,73 @@ function shortMint(mint) {
     return mint.slice(0, 10) + '..';
 }
 
+// Click-to-copy: renders a clickable address/mint that copies full value to clipboard
+function copyableAddr(full, display) {
+    if (!full) return '--';
+    const d = display || shortAddr(full);
+    return `<code class="copyable" title="Click to copy: ${full}" onclick="copyToClipboard(this, '${full}')">${d}</code>`;
+}
+
+function copyableMint(full) {
+    if (!full) return '--';
+    return `<code class="copyable" title="Click to copy: ${full}" onclick="copyToClipboard(this, '${full}')">${shortMint(full)}</code>`;
+}
+
+function copyToClipboard(el, text) {
+    navigator.clipboard.writeText(text).then(() => {
+        const orig = el.textContent;
+        el.textContent = 'copied!';
+        el.classList.add('copy-flash');
+        setTimeout(() => { el.textContent = orig; el.classList.remove('copy-flash'); }, 800);
+    });
+}
+
+// Token ticker resolution via Jupiter strict token list
+const tickerCache = {};
+let tickerFetchQueue = new Set();
+let tickerFetchTimer = null;
+
+function getTickerHtml(mint) {
+    if (!mint) return '<span class="text-slate-500">--</span>';
+    if (tickerCache[mint]) return `<span class="ticker">${tickerCache[mint]}</span>`;
+    tickerFetchQueue.add(mint);
+    scheduleTickerFetch();
+    return '<span class="text-slate-500">...</span>';
+}
+
+function scheduleTickerFetch() {
+    if (tickerFetchTimer) return;
+    tickerFetchTimer = setTimeout(fetchTickers, 300);
+}
+
+async function fetchTickers() {
+    tickerFetchTimer = null;
+    const mints = [...tickerFetchQueue];
+    tickerFetchQueue.clear();
+    if (!mints.length) return;
+
+    // Batch lookup via Jupiter token API
+    try {
+        const resp = await fetch('https://api.jup.ag/tokens/v1/' + mints.join(','));
+        if (resp.ok) {
+            const tokens = await resp.json();
+            if (Array.isArray(tokens)) {
+                for (const t of tokens) {
+                    if (t.symbol && t.address) tickerCache[t.address] = t.symbol;
+                }
+            }
+            // Mark unknown mints so we don't re-fetch
+            for (const m of mints) {
+                if (!tickerCache[m]) tickerCache[m] = '???';
+            }
+            // Re-render to show resolved tickers
+            renderSignals(); renderEvents(); renderPositions();
+        }
+    } catch (e) {
+        console.warn('Ticker fetch failed:', e);
+    }
+}
+
 function pnlClass(val) {
     if (val > 0) return 'green';
     if (val < 0) return 'red';
@@ -229,7 +322,7 @@ function renderWalletsFromCache() {
     });
     const tbody = document.getElementById('wallets-table');
     tbody.innerHTML = sorted.map(w => `<tr>
-        <td><code>${shortAddr(w.address)}</code></td>
+        <td>${copyableAddr(w.address)}</td>
         <td>${w.label || '--'}</td>
         <td class="blue">${(w.score || 0).toFixed(0)}</td>
         <td>${((w.win_rate || 0) * 100).toFixed(0)}%</td>
@@ -261,24 +354,31 @@ async function renderStats() {
 }
 
 async function renderSignals() {
-    const signals = await fetchJSON('/api/signals?limit=30');
-    const tbody = document.getElementById('signals-table');
-    tbody.innerHTML = signals.map(s => `<tr>
-        <td>${shortMint(s.token_mint)}</td>
+    const signals = await fetchJSON('/api/signals?limit=50');
+    const signals3 = signals.filter(s => s.wallet_count >= 3);
+    const signals2 = signals.filter(s => s.wallet_count === 2);
+
+    const signalRow = (s) => `<tr>
+        <td>${copyableMint(s.token_mint)}</td>
+        <td>${getTickerHtml(s.token_mint)}</td>
         <td class="blue">${s.wallet_count}</td>
         <td>${(s.total_amount_sol || 0).toFixed(2)}</td>
         <td class="${s.safety_passed ? 'green' : 'red'}">${s.safety_passed === null ? '...' : s.safety_passed ? 'PASS' : 'FAIL'}</td>
         <td>${s.action_taken || '...'}</td>
         <td class="text-slate-400">${timeAgo(s.signal_at)}</td>
-    </tr>`).join('');
+    </tr>`;
+
+    document.getElementById('signals-3-table').innerHTML = signals3.map(signalRow).join('');
+    document.getElementById('signals-2-table').innerHTML = signals2.map(signalRow).join('');
 }
 
 async function renderEvents() {
     const events = await fetchJSON('/api/events?limit=30');
     const tbody = document.getElementById('events-table');
     tbody.innerHTML = events.map(e => `<tr>
-        <td>${shortAddr(e.wallet_address)}</td>
-        <td>${shortMint(e.token_mint)}</td>
+        <td>${copyableAddr(e.wallet_address)}</td>
+        <td>${copyableMint(e.token_mint)}</td>
+        <td>${getTickerHtml(e.token_mint)}</td>
         <td>${(e.amount_sol || 0).toFixed(4)}</td>
         <td class="text-slate-400">${e.dex || '?'}</td>
         <td class="text-slate-400">${timeAgo(e.timestamp)}</td>
@@ -293,7 +393,8 @@ async function renderPositions() {
         const pnlSol = p.pnl_sol || 0;
         return `<tr>
             <td>#${p.id}</td>
-            <td>${shortMint(p.token_mint)}</td>
+            <td>${copyableMint(p.token_mint)}</td>
+            <td>${getTickerHtml(p.token_mint)}</td>
             <td>${p.mode}</td>
             <td class="${p.status === 'open' ? 'blue' : 'text-slate-400'}">${p.status}</td>
             <td>${p.entry_price ? p.entry_price.toExponential(3) : '--'}</td>

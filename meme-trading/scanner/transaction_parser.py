@@ -7,7 +7,7 @@ import httpx
 
 from engine.signal import BuyEvent
 from scanner.rpc_pool import RpcPool
-from utils.constants import DEX_PROGRAMS, SOL_MINT
+from utils.constants import DEX_PROGRAMS, SOL_MINT, STABLECOIN_MINTS
 
 logger = logging.getLogger("smc.scanner.parser")
 
@@ -21,36 +21,46 @@ class TransactionParser:
 
     async def parse_transaction(self, signature: str, wallet_address: str) -> BuyEvent | None:
         """Fetch txn via RPC, return BuyEvent if it's a buy (SOL -> token)."""
-        rpc_url = self.rpc_pool.next()
-        try:
-            resp = await self.http.post(
-                rpc_url,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "getTransaction",
-                    "params": [
-                        signature,
-                        {
-                            "encoding": "jsonParsed",
-                            "maxSupportedTransactionVersion": 0,
-                        },
-                    ],
-                },
-                timeout=15,
-            )
-            data = resp.json()
-            result = data.get("result")
-            if not result:
+        for attempt in range(3):
+            rpc_url = self.rpc_pool.next()
+            try:
+                resp = await self.http.post(
+                    rpc_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "getTransaction",
+                        "params": [
+                            signature,
+                            {
+                                "encoding": "jsonParsed",
+                                "maxSupportedTransactionVersion": 0,
+                                "commitment": "confirmed",
+                            },
+                        ],
+                    },
+                    timeout=15,
+                )
+                data = resp.json()
+                result = data.get("result")
+                if result:
+                    self.rpc_pool.mark_healthy(rpc_url)
+                    return self._extract_buy_event(result, signature, wallet_address)
+
+                # Null result — tx may not be available yet, retry after delay
+                if attempt < 2:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+
                 return None
 
-            self.rpc_pool.mark_healthy(rpc_url)
-            return self._extract_buy_event(result, signature, wallet_address)
-
-        except Exception as e:
-            self.rpc_pool.mark_failed(rpc_url)
-            logger.error(f"Failed to parse txn {signature[:16]}...: {e}")
-            return None
+            except Exception as e:
+                self.rpc_pool.mark_failed(rpc_url)
+                logger.error(f"Failed to parse txn {signature[:16]}...: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                return None
 
     def _extract_buy_event(self, txn: dict, signature: str, wallet_address: str) -> BuyEvent | None:
         """Extract buy event from parsed transaction data."""
@@ -66,15 +76,26 @@ class TransactionParser:
         token_changes = self._get_token_balance_changes(meta, wallet_address)
         sol_change = self._get_sol_change(meta, wallet_address, account_keys)
 
-        if not token_changes or sol_change >= 0:
-            # No token gained or didn't spend SOL — not a buy
-            return None
+        # Debug: log all token changes for this txn
+        if token_changes:
+            changes_str = ", ".join(
+                f"{m[:8]}..={'+'if d>0 else ''}{d:.6f}" for m, d in token_changes.items()
+            )
+            logger.info(
+                f"TXN {signature[:12]}.. wallet={wallet_address[:8]}.. "
+                f"sol_change={sol_change:.6f} tokens=[{changes_str}] dex={dex}"
+            )
+        else:
+            logger.info(
+                f"TXN {signature[:12]}.. wallet={wallet_address[:8]}.. "
+                f"no token changes, sol_change={sol_change:.6f}"
+            )
 
-        # Find the token they gained (positive delta, not SOL)
+        # Find the memecoin they gained (positive delta, skip SOL/stablecoins/LSTs)
         gained_token = None
         gained_amount = 0.0
         for mint, delta in token_changes.items():
-            if mint != SOL_MINT and delta > 0:
+            if mint not in STABLECOIN_MINTS and delta > 0:
                 gained_token = mint
                 gained_amount = delta
                 break
@@ -82,7 +103,20 @@ class TransactionParser:
         if not gained_token:
             return None
 
-        sol_spent = abs(sol_change)
+        # Determine spend: SOL spent directly, or stablecoin spent (USDC/USDT → memecoin)
+        sol_spent = 0.0
+        if sol_change < 0:
+            sol_spent = abs(sol_change)
+        else:
+            # Check if they spent a stablecoin (negative delta on USDC/USDT)
+            for mint, delta in token_changes.items():
+                if mint in STABLECOIN_MINTS and delta < 0:
+                    # Approximate SOL value: treat stablecoin as ~SOL equivalent
+                    sol_spent = abs(delta) / 150.0  # rough USD→SOL conversion
+                    break
+
+        if sol_spent <= 0:
+            return None
 
         # Get timestamp
         block_time = txn.get("blockTime")
