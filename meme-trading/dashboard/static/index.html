@@ -27,6 +27,10 @@
         .copyable:hover { color: #3b82f6; }
         .copy-flash { color: #22c55e !important; transition: color 0.2s; }
         .ticker { color: #a78bfa; font-weight: 600; font-size: 12px; }
+        .wallet-toggle { cursor: pointer; color: #3b82f6; font-size: 11px; }
+        .wallet-toggle:hover { color: #60a5fa; }
+        .wallet-row td { padding: 2px 12px; border: none; }
+        .wallet-list { font-size: 11px; color: #94a3b8; }
     </style>
 </head>
 <body class="min-h-screen p-4">
@@ -70,18 +74,15 @@
         </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        <!-- Live Buy Events (left) -->
-        <div class="card p-4">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <!-- Live Buy Events (left, narrow) -->
+        <div class="card p-4 lg:col-span-1">
             <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Live Buy Events</h2>
             <div class="overflow-x-auto max-h-80 overflow-y-auto">
                 <table>
                     <thead><tr>
                         <th>Wallet</th>
                         <th>Token</th>
-                        <th>Ticker</th>
-                        <th>SOL</th>
-                        <th>DEX</th>
                         <th>Time</th>
                     </tr></thead>
                     <tbody id="events-table"></tbody>
@@ -89,20 +90,20 @@
             </div>
         </div>
 
-        <!-- Convergence Signals (right, stacked) -->
-        <div class="flex flex-col gap-4">
+        <!-- Convergence Signals (right, wider, stacked) -->
+        <div class="flex flex-col gap-4 lg:col-span-2">
             <div class="card p-4">
                 <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Convergence Signals — <span class="green">3 Buys</span></h2>
-                <div class="overflow-x-auto max-h-60 overflow-y-auto">
+                <div class="overflow-x-auto" style="max-height: 220px; overflow-y: auto;">
                     <table>
                         <thead><tr>
                             <th>Token</th>
                             <th>Ticker</th>
-                            <th>Wallets</th>
                             <th>SOL</th>
                             <th>Safety</th>
                             <th>Action</th>
                             <th>Time</th>
+                            <th></th>
                         </tr></thead>
                         <tbody id="signals-3-table"></tbody>
                     </table>
@@ -110,12 +111,11 @@
             </div>
             <div class="card p-4">
                 <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Convergence Signals — <span class="yellow">2 Buys</span></h2>
-                <div class="overflow-x-auto max-h-60 overflow-y-auto">
+                <div class="overflow-x-auto" style="max-height: 220px; overflow-y: auto;">
                     <table>
                         <thead><tr>
                             <th>Token</th>
                             <th>Ticker</th>
-                            <th>Wallets</th>
                             <th>SOL</th>
                             <th>Safety</th>
                             <th>Action</th>
@@ -358,18 +358,34 @@ async function renderSignals() {
     const signals3 = signals.filter(s => s.wallet_count >= 3);
     const signals2 = signals.filter(s => s.wallet_count === 2);
 
-    const signalRow = (s) => `<tr>
+    const signalRow2 = (s) => `<tr>
         <td>${copyableMint(s.token_mint)}</td>
         <td>${getTickerHtml(s.token_mint)}</td>
-        <td class="blue">${s.wallet_count}</td>
         <td>${(s.total_amount_sol || 0).toFixed(2)}</td>
         <td class="${s.safety_passed ? 'green' : 'red'}">${s.safety_passed === null ? '...' : s.safety_passed ? 'PASS' : 'FAIL'}</td>
         <td>${s.action_taken || '...'}</td>
         <td class="text-slate-400">${timeAgo(s.signal_at)}</td>
     </tr>`;
 
-    document.getElementById('signals-3-table').innerHTML = signals3.map(signalRow).join('');
-    document.getElementById('signals-2-table').innerHTML = signals2.map(signalRow).join('');
+    const signalRow3 = (s, i) => {
+        const wallets = JSON.parse(s.wallets_json || '[]');
+        const walletRows = wallets.map(w =>
+            `<tr class="wallet-row"><td colspan="7" class="wallet-list">&nbsp;&nbsp;${copyableAddr(w)}</td></tr>`
+        ).join('');
+        return `<tr>
+            <td>${copyableMint(s.token_mint)}</td>
+            <td>${getTickerHtml(s.token_mint)}</td>
+            <td>${(s.total_amount_sol || 0).toFixed(2)}</td>
+            <td class="${s.safety_passed ? 'green' : 'red'}">${s.safety_passed === null ? '...' : s.safety_passed ? 'PASS' : 'FAIL'}</td>
+            <td>${s.action_taken || '...'}</td>
+            <td class="text-slate-400">${timeAgo(s.signal_at)}</td>
+            <td><span class="wallet-toggle" onclick="this.parentElement.parentElement.nextElementSibling.style.display=this.parentElement.parentElement.nextElementSibling.style.display==='none'?'':'none'">wallets</span></td>
+        </tr>
+        <tr style="display:none"><td colspan="7" style="padding:0">${walletRows ? '<table style=\"width:100%\">' + walletRows + '</table>' : ''}</td></tr>`;
+    };
+
+    document.getElementById('signals-3-table').innerHTML = signals3.map(signalRow3).join('');
+    document.getElementById('signals-2-table').innerHTML = signals2.map(signalRow2).join('');
 }
 
 async function renderEvents() {
@@ -378,9 +394,6 @@ async function renderEvents() {
     tbody.innerHTML = events.map(e => `<tr>
         <td>${copyableAddr(e.wallet_address)}</td>
         <td>${copyableMint(e.token_mint)}</td>
-        <td>${getTickerHtml(e.token_mint)}</td>
-        <td>${(e.amount_sol || 0).toFixed(4)}</td>
-        <td class="text-slate-400">${e.dex || '?'}</td>
         <td class="text-slate-400">${timeAgo(e.timestamp)}</td>
     </tr>`).join('');
 }

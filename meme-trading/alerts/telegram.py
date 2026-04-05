@@ -56,9 +56,10 @@ class TelegramAlerter:
             safety = "PASS" if alert.get("safety_passed") else "FAIL"
             reasons = alert.get("safety_reasons", [])
             reason_text = f"\nReasons: {', '.join(reasons)}" if reasons else ""
+            mint = alert.get('token_mint', '?')
             return (
                 f"<b>CONVERGENCE SIGNAL</b>\n"
-                f"Token: <code>{alert.get('token_symbol') or alert.get('token_mint', '?')[:16]}</code>\n"
+                f"Token: <code>{mint}</code>\n"
                 f"Wallets: {alert.get('wallet_count', '?')}\n"
                 f"Total SOL: {alert.get('total_amount_sol', 0):.2f}\n"
                 f"Safety: {safety}{reason_text}"
@@ -66,9 +67,10 @@ class TelegramAlerter:
 
         elif t == "position_opened":
             mode = alert.get("mode", "?").upper()
+            mint = alert.get('token_mint', '?')
             return (
                 f"<b>{mode} POSITION OPENED</b>\n"
-                f"Token: <code>{alert.get('token_symbol') or alert.get('token_mint', '?')[:16]}</code>\n"
+                f"Token: <code>{mint}</code>\n"
                 f"Size: {alert.get('amount_sol', 0):.3f} SOL"
             )
 
@@ -76,18 +78,20 @@ class TelegramAlerter:
             pnl = alert.get("pnl_pct", 0)
             pnl_sol = alert.get("pnl_sol", 0)
             prefix = "+" if pnl > 0 else ""
+            mint = alert.get('token_mint', '?')
             return (
                 f"<b>POSITION CLOSED</b> ({alert.get('reason', '?')})\n"
-                f"Token: <code>{alert.get('token_symbol') or alert.get('token_mint', '?')[:16]}</code>\n"
+                f"Token: <code>{mint}</code>\n"
                 f"P&L: {prefix}{pnl:.1f}% ({prefix}{pnl_sol:.4f} SOL)\n"
                 f"Mode: {alert.get('mode', '?')}"
             )
 
         elif t == "safety_failed":
             reasons = alert.get("reasons", [])
+            mint = alert.get('token_mint', '?')
             return (
                 f"<b>SAFETY FAILED</b>\n"
-                f"Token: <code>{alert.get('token_mint', '?')[:16]}</code>\n"
+                f"Token: <code>{mint}</code>\n"
                 f"Reasons: {', '.join(reasons)}"
             )
 
