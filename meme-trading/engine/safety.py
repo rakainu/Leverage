@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 import httpx
 
 from config.settings import Settings
-from utils.constants import SOL_MINT
 
 logger = logging.getLogger("smc.engine.safety")
 
@@ -33,12 +32,11 @@ class SafetyChecker:
         self.rpc_url = settings.solana_rpc_urls[0]
 
     async def check(self, token_mint: str) -> SafetyResult:
-        """Run all checks in parallel, return aggregated result."""
+        """Run RPC checks + RugCheck in parallel, return aggregated result."""
         results = await asyncio.gather(
             self._check_mint_authority(token_mint),
             self._check_freeze_authority(token_mint),
-            self._check_honeypot(token_mint),
-            self._check_top_holders(token_mint),
+            self._check_rugcheck(token_mint),
             return_exceptions=True,
         )
 
@@ -60,24 +58,16 @@ class SafetyChecker:
             if not results[1]:
                 result.reasons.append("freeze authority still active")
 
-        # Honeypot
+        # RugCheck (covers honeypot, top holders, LP lock)
         if isinstance(results[2], Exception):
-            result.reasons.append(f"honeypot check failed: {results[2]}")
+            result.reasons.append(f"rugcheck failed: {results[2]}")
             result.honeypot_risk = "unknown"
         else:
-            result.honeypot_risk = results[2]
-            if results[2] == "high":
-                result.reasons.append("high honeypot risk (sell tax or unsellable)")
-
-        # Top holders
-        if isinstance(results[3], Exception):
-            result.reasons.append(f"holder check failed: {results[3]}")
-        else:
-            result.top_holder_pct = results[3]
-            if results[3] > self.settings.max_top_holder_pct:
-                result.reasons.append(
-                    f"top holder owns {results[3]:.1f}% (max {self.settings.max_top_holder_pct}%)"
-                )
+            rc = results[2]
+            result.honeypot_risk = rc["risk_level"]
+            result.top_holder_pct = rc.get("top_holder_pct", 0)
+            for reason in rc.get("reasons", []):
+                result.reasons.append(reason)
 
         result.passed = len(result.reasons) == 0
 
@@ -132,79 +122,59 @@ class SafetyChecker:
         freeze_authority = info.get("freezeAuthority")
         return freeze_authority is None
 
-    async def _check_honeypot(self, mint: str) -> str:
-        """Simulate buy+sell via Jupiter quote to detect sell tax.
-
-        Returns: "low", "medium", or "high" risk.
-        """
-        test_amount = 100_000_000  # 0.1 SOL in lamports
-
-        # Quote buy (SOL -> token)
-        buy_quote = await self._jupiter_quote(SOL_MINT, mint, test_amount)
-        if not buy_quote:
-            return "high"  # Can't even get a buy quote
-
-        out_amount = int(buy_quote.get("outAmount", 0))
-        if out_amount == 0:
-            return "high"
-
-        # Quote sell (token -> SOL)
-        sell_quote = await self._jupiter_quote(mint, SOL_MINT, out_amount)
-        if not sell_quote:
-            return "high"  # Can't sell = honeypot
-
-        sell_return = int(sell_quote.get("outAmount", 0))
-
-        # Calculate round-trip loss
-        loss_pct = (1 - sell_return / test_amount) * 100
-
-        if loss_pct > self.settings.honeypot_max_tax_pct:
-            return "high"
-        elif loss_pct > 5:
-            return "medium"
-        return "low"
-
-    async def _check_top_holders(self, mint: str) -> float:
-        """Get the largest holder's percentage of total supply."""
-        result = await self._rpc_call(
-            "getTokenLargestAccounts", [mint]
-        )
-        if not result or not result.get("value"):
-            raise ValueError("Could not fetch token holders")
-
-        accounts = result["value"]
-        if not accounts:
-            return 100.0
-
-        # Get total supply
-        supply_result = await self._rpc_call(
-            "getTokenSupply", [mint]
-        )
-        if not supply_result or not supply_result.get("value"):
-            raise ValueError("Could not fetch token supply")
-
-        total_supply = float(supply_result["value"]["uiAmount"])
-        if total_supply == 0:
-            return 100.0
-
-        largest_amount = float(accounts[0].get("uiAmount", 0))
-        return (largest_amount / total_supply) * 100
-
-    async def _jupiter_quote(self, input_mint: str, output_mint: str, amount: int) -> dict | None:
-        """Get a Jupiter quote for price simulation."""
+    async def _check_rugcheck(self, mint: str) -> dict:
+        """Check token via RugCheck API — covers honeypot, holders, LP lock."""
         try:
             resp = await self.http.get(
-                "https://quote-api.jup.ag/v6/quote",
-                params={
-                    "inputMint": input_mint,
-                    "outputMint": output_mint,
-                    "amount": str(amount),
-                    "slippageBps": "500",
-                },
+                f"https://api.rugcheck.xyz/v1/tokens/{mint}/report/summary",
                 timeout=10,
             )
-            if resp.status_code == 200:
-                return resp.json()
+            if resp.status_code != 200:
+                raise ValueError(f"RugCheck returned {resp.status_code}")
+
+            data = resp.json()
+            score = data.get("score_normalised", 100)
+            risks = data.get("risks") or []
+            lp_locked = data.get("lpLockedPct", 0)
+
+            reasons = []
+            danger_risks = [r for r in risks if r.get("level") == "danger"]
+
+            for r in danger_risks:
+                reasons.append(f"[rugcheck] {r['name']}: {r.get('description', '')}")
+
+            # Determine risk level from normalized score
+            if score > 50 or len(danger_risks) >= 2:
+                risk_level = "high"
+            elif score > 30 or len(danger_risks) == 1:
+                risk_level = "medium"
+            else:
+                risk_level = "low"
+
+            # Only fail on high risk
+            if risk_level != "high":
+                reasons = []
+
+            logger.info(
+                f"RugCheck {mint[:12]}.. score={score}/100 "
+                f"dangers={len(danger_risks)} lp_locked={lp_locked:.0%} → {risk_level}"
+            )
+
+            return {
+                "risk_level": risk_level,
+                "score": score,
+                "reasons": reasons,
+                "top_holder_pct": 0,  # RugCheck doesn't return this in summary
+                "lp_locked_pct": lp_locked,
+            }
+
         except Exception as e:
-            logger.debug(f"Jupiter quote failed: {e}")
-        return None
+            logger.warning(f"RugCheck failed for {mint[:12]}..: {e}")
+            # Don't block trades when RugCheck is unreachable
+            return {
+                "risk_level": "unknown",
+                "score": -1,
+                "reasons": [],
+                "top_holder_pct": 0,
+                "lp_locked_pct": 0,
+            }
