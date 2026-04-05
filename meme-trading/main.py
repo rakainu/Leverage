@@ -22,6 +22,7 @@ from engine.convergence import ConvergenceEngine
 from engine.safety import SafetyChecker, SafetyResult
 from engine.signal import ConvergenceSignal
 from executor.paper import PaperExecutor
+from executor.live import LiveExecutor
 from executor.position_manager import PositionManager
 from scanner.wallet_monitor import WalletMonitor
 from utils.logging import setup_logging
@@ -37,6 +38,14 @@ async def signal_router(
     http = httpx.AsyncClient(timeout=30)
     safety = SafetyChecker(settings, http)
     paper = PaperExecutor(settings)
+    live = None
+    if settings.mode == "live":
+        try:
+            live = LiveExecutor(settings)
+        except ValueError as e:
+            logger.error(f"Live mode requested but failed to init: {e}")
+            logger.warning("Falling back to paper mode")
+
 
     while True:
         signal: ConvergenceSignal = await signal_bus.get()
@@ -95,17 +104,22 @@ async def signal_router(
             logger.warning("Max concurrent positions reached — skipping")
             continue
 
-        # Execute paper trade
-        if settings.mode == "paper":
+        # Execute trade (paper or live)
+        if settings.mode == "live" and live:
+            position_id = await live.execute(signal, result)
+            trade_mode = "live"
+        else:
             position_id = await paper.execute(signal, result)
-            if position_id:
-                await alert_bus.put({
-                    "type": "position_opened",
-                    "position_id": position_id,
-                    "token_mint": signal.token_mint,
-                    "token_symbol": signal.token_symbol,
-                    "amount_sol": settings.trade_amount_sol,
-                    "mode": "paper",
+            trade_mode = "paper"
+
+        if position_id:
+            await alert_bus.put({
+                "type": "position_opened",
+                "position_id": position_id,
+                "token_mint": signal.token_mint,
+                "token_symbol": signal.token_symbol,
+                "amount_sol": settings.trade_amount_sol,
+                "mode": trade_mode,
                 })
 
 

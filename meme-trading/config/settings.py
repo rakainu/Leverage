@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     solana_ws_urls: list[str] = ["wss://api.mainnet-beta.solana.com"]
     solana_private_key: str = ""
 
+    # Wallet
+    solana_wallet_pubkey: str = ""
+
     # Helius
     helius_api_key: str = ""
 

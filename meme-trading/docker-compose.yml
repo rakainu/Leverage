@@ -1,0 +1,23 @@
+version: "3.8"
+services:
+  smc-trading:
+    build: .
+    container_name: smc-trading
+    restart: unless-stopped
+    ports:
+      - "8420:8420"
+    volumes:
+      - smc-data:/app/data
+      - ./config/wallets.json:/app/config/wallets.json
+    env_file:
+      - .env
+    environment:
+      - TZ=UTC
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+volumes:
+  smc-data:
