@@ -1,7 +1,106 @@
 {
-  "version": 5,
-  "updated_at": "2026-04-05T21:00:00Z",
+  "version": 6,
+  "updated_at": "2026-04-05T22:00:00Z",
   "wallets": [
+    {
+      "address": "2X4H5Y9C4Fy6Pf3wpq8Q4gMvLcWvfrrwDv2bdR8AAwQv",
+      "label": "nansen-sm-active-102buys-23K-usd",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 95.0,
+      "stats": {"total_trades": 135, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "DDyxkyBpH2EB9CC5CbbVtJjwb57HCzeXu8DHp2sVphsn",
+      "label": "nansen-sm-11buys-2.5K-usd",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 90.0,
+      "stats": {"total_trades": 11, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "J9TYAsWWidbrcZybmLSfrLzryANf4CgJBLdvwdGuC8MB",
+      "label": "nansen-sm-10buys-7.6K-usd-diverse",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 92.0,
+      "stats": {"total_trades": 28, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "DpYuj2At1Z1tH4baoz5A1XV4AanjJa8bgbB51BWSZUyn",
+      "label": "nansen-sm-9K-usd-volume",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 91.0,
+      "stats": {"total_trades": 11, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "8q4HU6uHV9ViAkpjbdavnkM2njAPPq6h88P4rBHchb2F",
+      "label": "nansen-sm-10.7K-usd-LOL-buyer",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 90.0,
+      "stats": {"total_trades": 7, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "5aj3Hnjx2G5NCwP7hgybHqNJmQLcRNNYVTKg9Hv9ez7F",
+      "label": "nansen-sm-20buys-wizard-pluto",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 89.0,
+      "stats": {"total_trades": 24, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "HZrd9c6ag9hBtJhHQZvHeJHeZG8jYQQPVqq21U39GvyP",
+      "label": "nansen-sm-FREG-buyer",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 85.0,
+      "stats": {"total_trades": 17, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "CxgPWvH2GoEDENELne2XKAR2z2Fr4shG2uaeyqZceGve",
+      "label": "nansen-sm-FREG-LDOGE-buyer",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 85.0,
+      "stats": {"total_trades": 13, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "D3MuDmrs2dm6U9CiZur651CnPjLwUWjs9p1a3PoDs76H",
+      "label": "nansen-sm-SCUBACAT-buyer",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 84.0,
+      "stats": {"total_trades": 6, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "FvXiTcPAQCyUdZBFLhJBiYEAfyi79raezsure4qHMkgv",
+      "label": "nansen-sm-ZECK-BUNNY-buyer",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 84.0,
+      "stats": {"total_trades": 8, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
+    {
+      "address": "EVCwZrtPFudcjw69RZ9Qogt8dW2HjBp6EiMgv1ujdYuJ",
+      "label": "nansen-sm-3.8K-usd",
+      "source": "nansen-live",
+      "added_at": "2026-04-05T22:00:00Z",
+      "score": 83.0,
+      "stats": {"total_trades": 14, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+      "active": true
+    },
     {
       "address": "4EtAJ1p8RjqccEVhEhaYnEgQ6kA4JHR8oYqyLFwARUj6",
       "label": "nansen-top10-2345trades-97pct-roi",
