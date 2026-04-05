@@ -29,15 +29,16 @@ def create_app(ws_manager: WebSocketManager, db) -> FastAPI:
         return [dict(r) for r in rows]
 
     @app.get("/api/positions")
-    async def get_positions(status: str = "all"):
+    async def get_positions(status: str = "all", limit: int = 100):
         if status == "all":
             rows = await db.execute_fetchall(
-                "SELECT * FROM positions ORDER BY opened_at DESC LIMIT 100"
+                "SELECT * FROM positions ORDER BY opened_at DESC LIMIT ?",
+                (limit,),
             )
         else:
             rows = await db.execute_fetchall(
-                "SELECT * FROM positions WHERE status=? ORDER BY opened_at DESC LIMIT 100",
-                (status,),
+                "SELECT * FROM positions WHERE status=? ORDER BY opened_at DESC LIMIT ?",
+                (status, limit),
             )
         return [dict(r) for r in rows]
 

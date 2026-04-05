@@ -6,7 +6,7 @@
     <title>SMC Trading Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #0f172a; color: #e2e8f0; font-family: 'Courier New', monospace; }
+        body { background: #0f172a; color: #e2e8f0; font-family: 'Courier New', monospace; font-size: 15px; }
         .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; }
         .green { color: #22c55e; }
         .red { color: #ef4444; }
@@ -18,19 +18,18 @@
         .ws-connected { background: #22c55e; }
         .ws-disconnected { background: #ef4444; }
         .sortable:hover { color: #3b82f6; }
-        .sort-arrow { font-size: 10px; }
+        .sort-arrow { font-size: 12px; }
         table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; padding: 8px 12px; color: #94a3b8; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #334155; }
-        td { padding: 8px 12px; border-bottom: 1px solid #1e293b; font-size: 13px; }
+        th { text-align: left; padding: 8px 12px; color: #94a3b8; font-size: 14px; text-transform: uppercase; border-bottom: 1px solid #334155; }
+        td { padding: 8px 12px; border-bottom: 1px solid #1e293b; font-size: 15px; }
         tr:hover { background: #1e293b; }
         .copyable { cursor: pointer; border-bottom: 1px dashed #475569; }
         .copyable:hover { color: #3b82f6; }
         .copy-flash { color: #22c55e !important; transition: color 0.2s; }
-        .ticker { color: #a78bfa; font-weight: 600; font-size: 12px; }
-        .wallet-toggle { cursor: pointer; color: #3b82f6; font-size: 11px; }
+        .wallet-toggle { cursor: pointer; color: #3b82f6; font-size: 13px; }
         .wallet-toggle:hover { color: #60a5fa; }
         .wallet-row td { padding: 2px 12px; border: none; }
-        .wallet-list { font-size: 11px; color: #94a3b8; }
+        .wallet-list { font-size: 13px; color: #94a3b8; }
     </style>
 </head>
 <body class="min-h-screen p-4">
@@ -74,11 +73,33 @@
         </div>
     </div>
 
+    <!-- Positions (top) -->
+    <div class="card p-4 mb-6">
+        <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Positions</h2>
+        <div class="overflow-x-auto" style="max-height: 220px; overflow-y: auto;">
+            <table>
+                <thead><tr>
+                    <th>ID</th>
+                    <th>Token</th>
+                    <th>Mode</th>
+                    <th>Status</th>
+                    <th>Entry</th>
+                    <th>Current</th>
+                    <th>P&L %</th>
+                    <th>P&L SOL</th>
+                    <th>Age</th>
+                    <th>Reason</th>
+                </tr></thead>
+                <tbody id="positions-table"></tbody>
+            </table>
+        </div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <!-- Live Buy Events (left, narrow) -->
         <div class="card p-4 lg:col-span-1">
             <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Live Buy Events</h2>
-            <div class="overflow-x-auto max-h-80 overflow-y-auto">
+            <div class="overflow-x-auto" style="max-height: 200px; overflow-y: auto;">
                 <table>
                     <thead><tr>
                         <th>Wallet</th>
@@ -98,7 +119,6 @@
                     <table>
                         <thead><tr>
                             <th>Token</th>
-                            <th>Ticker</th>
                             <th>SOL</th>
                             <th>Safety</th>
                             <th>Action</th>
@@ -115,7 +135,6 @@
                     <table>
                         <thead><tr>
                             <th>Token</th>
-                            <th>Ticker</th>
                             <th>SOL</th>
                             <th>Safety</th>
                             <th>Action</th>
@@ -125,29 +144,6 @@
                     </table>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- Positions -->
-    <div class="card p-4 mb-6">
-        <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Positions</h2>
-        <div class="overflow-x-auto">
-            <table>
-                <thead><tr>
-                    <th>ID</th>
-                    <th>Token</th>
-                    <th>Ticker</th>
-                    <th>Mode</th>
-                    <th>Status</th>
-                    <th>Entry</th>
-                    <th>Current</th>
-                    <th>P&L %</th>
-                    <th>P&L SOL</th>
-                    <th>Age</th>
-                    <th>Reason</th>
-                </tr></thead>
-                <tbody id="positions-table"></tbody>
-            </table>
         </div>
     </div>
 
@@ -360,7 +356,6 @@ async function renderSignals() {
 
     const signalRow2 = (s) => `<tr>
         <td>${copyableMint(s.token_mint)}</td>
-        <td>${getTickerHtml(s.token_mint)}</td>
         <td>${(s.total_amount_sol || 0).toFixed(2)}</td>
         <td class="${s.safety_passed ? 'green' : 'red'}">${s.safety_passed === null ? '...' : s.safety_passed ? 'PASS' : 'FAIL'}</td>
         <td>${s.action_taken || '...'}</td>
@@ -370,18 +365,17 @@ async function renderSignals() {
     const signalRow3 = (s, i) => {
         const wallets = JSON.parse(s.wallets_json || '[]');
         const walletRows = wallets.map(w =>
-            `<tr class="wallet-row"><td colspan="7" class="wallet-list">&nbsp;&nbsp;${copyableAddr(w)}</td></tr>`
+            `<tr class="wallet-row"><td colspan="6" class="wallet-list">&nbsp;&nbsp;${copyableAddr(w)}</td></tr>`
         ).join('');
         return `<tr>
             <td>${copyableMint(s.token_mint)}</td>
-            <td>${getTickerHtml(s.token_mint)}</td>
             <td>${(s.total_amount_sol || 0).toFixed(2)}</td>
             <td class="${s.safety_passed ? 'green' : 'red'}">${s.safety_passed === null ? '...' : s.safety_passed ? 'PASS' : 'FAIL'}</td>
             <td>${s.action_taken || '...'}</td>
             <td class="text-slate-400">${timeAgo(s.signal_at)}</td>
             <td><span class="wallet-toggle" onclick="this.parentElement.parentElement.nextElementSibling.style.display=this.parentElement.parentElement.nextElementSibling.style.display==='none'?'':'none'">wallets</span></td>
         </tr>
-        <tr style="display:none"><td colspan="7" style="padding:0">${walletRows ? '<table style=\"width:100%\">' + walletRows + '</table>' : ''}</td></tr>`;
+        <tr style="display:none"><td colspan="6" style="padding:0">${walletRows ? '<table style=\"width:100%\">' + walletRows + '</table>' : ''}</td></tr>`;
     };
 
     document.getElementById('signals-3-table').innerHTML = signals3.map(signalRow3).join('');
@@ -389,7 +383,7 @@ async function renderSignals() {
 }
 
 async function renderEvents() {
-    const events = await fetchJSON('/api/events?limit=30');
+    const events = await fetchJSON('/api/events?limit=5');
     const tbody = document.getElementById('events-table');
     tbody.innerHTML = events.map(e => `<tr>
         <td>${copyableAddr(e.wallet_address)}</td>
@@ -407,7 +401,6 @@ async function renderPositions() {
         return `<tr>
             <td>#${p.id}</td>
             <td>${copyableMint(p.token_mint)}</td>
-            <td>${getTickerHtml(p.token_mint)}</td>
             <td>${p.mode}</td>
             <td class="${p.status === 'open' ? 'blue' : 'text-slate-400'}">${p.status}</td>
             <td>${p.entry_price ? p.entry_price.toExponential(3) : '--'}</td>
