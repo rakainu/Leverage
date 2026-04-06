@@ -1,6 +1,6 @@
 {
-  "version": 6,
-  "updated_at": "2026-04-05T22:00:00Z",
+  "version": 7,
+  "updated_at": "2026-04-05T23:00:00Z",
   "wallets": [
     {
       "address": "2X4H5Y9C4Fy6Pf3wpq8Q4gMvLcWvfrrwDv2bdR8AAwQv",
@@ -99,96 +99,6 @@
       "added_at": "2026-04-05T22:00:00Z",
       "score": 83.0,
       "stats": {"total_trades": 14, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "4EtAJ1p8RjqccEVhEhaYnEgQ6kA4JHR8oYqyLFwARUj6",
-      "label": "nansen-top10-2345trades-97pct-roi",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 99.0,
-      "stats": {"total_trades": 2345, "win_rate": 0.97, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "EdCNh8EzETJLFphW8yvdY7rDd8zBiyweiz8DU5gUUUka",
-      "label": "nansen-cifwifhatday-6M-to-23M-579pct",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 98.0,
-      "stats": {"total_trades": 0, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "8zFZHuSRuDpuAR7J6FzwyF3vKNx4CVW3DFHJerQhc7Zd",
-      "label": "nansen-traderpow-14.8M-profit-75pct-roi",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 98.0,
-      "stats": {"total_trades": 0, "win_rate": 0.75, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "8mZYBV8aPvPCo34CyCmt6fWkZRFviAUoBZr1Bn993gro",
-      "label": "nansen-popchad-7.2M-realized",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 97.0,
-      "stats": {"total_trades": 0, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "5CP6zv8a17mz91v6rMruVH6ziC5qAL8GFaJzwrX9Fvup",
-      "label": "nansen-naseem-8M-SHROOM-3.9M-ENRON",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 97.0,
-      "stats": {"total_trades": 0, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "H2ikJvq8or5MyjvFowD7CDY6fG3Sc2yi4mxTnfovXy3K",
-      "label": "nansen-shatter-3M-to-35M-TRUMP-1053pct",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 99.0,
-      "stats": {"total_trades": 0, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "2h7s3FpSvc6v2oHke6Uqg191B5fPCeFTmMGnh5oPWhX7",
-      "label": "nansen-tonka-7.3M-to-21.8M-196pct",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 96.0,
-      "stats": {"total_trades": 0, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "HWdeCUjBvPP1HJ5oCJt7aNsvMWpWoDgiejUWvfFX6T7R",
-      "label": "nansen-9.65M-realized-287pct-FARTCOIN",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 96.0,
-      "stats": {"total_trades": 0, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "4DPxYoJ5DgjvXPUtZdT3CYUZ3EEbSPj4zMNEVFJTd1Ts",
-      "label": "nansen-sigil-fund-6.1M-profits-820trades",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 95.0,
-      "stats": {"total_trades": 820, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
-      "active": true
-    },
-    {
-      "address": "Hwz4BDgtDRDBTScpEKDawshdKatZJh6z1SJYmRUxTxKE",
-      "label": "nansen-127trades-362K-cashed",
-      "source": "nansen",
-      "added_at": "2026-04-05T21:00:00Z",
-      "score": 90.0,
-      "stats": {"total_trades": 127, "win_rate": 0, "total_pnl_sol": 0, "avg_hold_minutes": 0},
       "active": true
     }
   ]
