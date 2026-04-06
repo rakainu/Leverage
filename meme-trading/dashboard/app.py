@@ -56,6 +56,13 @@ def create_app(ws_manager: WebSocketManager, db) -> FastAPI:
         )
         return [dict(r) for r in rows]
 
+    @app.get("/api/wallets/recent-count")
+    async def get_recent_wallet_count():
+        rows = await db.execute_fetchall(
+            "SELECT COUNT(*) as cnt FROM tracked_wallets WHERE active=1 AND added_at >= datetime('now', '-6 hours')"
+        )
+        return {"added_last_6h": rows[0]["cnt"] if rows else 0}
+
     @app.get("/api/events")
     async def get_events(limit: int = 100):
         rows = await db.execute_fetchall(

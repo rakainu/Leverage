@@ -47,52 +47,93 @@ class CurationPipeline:
             await asyncio.sleep(self.settings.curation_interval_hours * 3600)
 
     async def run_once(self):
-        """Single curation cycle."""
+        """Single curation cycle — Nansen Smart Money discovery."""
         logger.info("Starting curation cycle...")
 
-        # 1. Discover traders from trending tokens
-        candidates = await self.discovery.discover_from_recent_winners(top_n_tokens=10)
-        logger.info(f"Found {len(candidates)} candidate wallets")
+        # Discover active SM wallets from Nansen
+        nansen_wallets = await self._discover_nansen()
 
-        if not candidates:
-            logger.warning("No candidates found — GMGN may be rate-limiting")
+        if not nansen_wallets:
+            logger.warning("No new wallets from Nansen this cycle")
             return
 
-        # 2. Get full stats and score each
-        scored = []
-        checked = 0
-        for candidate in candidates[:50]:  # Cap to avoid excessive API calls
-            addr = candidate["address"]
-            stats = await self.discovery.wallet_stats(addr)
-            if not stats:
-                continue
-
-            if not self.scorer.meets_minimum(stats, self.settings):
-                continue
-
-            score = self.scorer.score(stats)
-            scored.append({
-                "address": addr,
-                "stats": stats,
-                "score": score,
-            })
-            checked += 1
-            if checked % 10 == 0:
-                logger.info(f"  Scored {checked} wallets...")
-            await asyncio.sleep(1)  # Rate limit
-
-        # 3. Filter by minimum score
-        qualified = [s for s in scored if s["score"] >= self.settings.min_wallet_score]
-        logger.info(f"Qualified wallets: {len(qualified)} / {len(scored)} scored")
-
-        # 4. Merge into wallets.json
-        added, updated, deactivated = await self._merge_wallets(qualified)
+        # Merge into wallets.json
+        added, updated, deactivated = await self._merge_wallets(nansen_wallets)
         logger.info(
             f"Curation complete: +{added} added, ~{updated} updated, -{deactivated} deactivated"
         )
 
-        # 5. Sync to DB
+        # Sync to DB
         await self._sync_to_db()
+
+    async def _discover_nansen(self) -> list[dict]:
+        """Pull active Smart Money wallets from Nansen DEX Trades API."""
+        if not self.settings.nansen_api_key:
+            logger.warning("No Nansen API key — skipping SM discovery")
+            return []
+
+        try:
+            resp = await self.http.post(
+                "https://api.nansen.ai/api/v1/smart-money/dex-trades",
+                headers={
+                    "apikey": self.settings.nansen_api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "chains": ["solana"],
+                    "pagination": {"page": 1, "per_page": 1000},
+                },
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                logger.error(f"Nansen API returned {resp.status_code}")
+                return []
+
+            data = resp.json()
+            trades = data.get("data", [])
+            logger.info(f"Nansen returned {len(trades)} SM trades")
+
+            # Aggregate per wallet — only count memecoin buys
+            stats = {}
+            for t in trades:
+                addr = t["trader_address"]
+                bought_sym = t.get("token_bought_symbol", "")
+                bought_age = t.get("token_bought_age_days", 999)
+                trade_val = t.get("trade_value_usd", 0)
+
+                if addr not in stats:
+                    stats[addr] = {"buys": 0, "trades": 0, "usd": 0, "tokens": set()}
+                stats[addr]["trades"] += 1
+                stats[addr]["usd"] += trade_val
+                if bought_sym not in ["USDC", "USDT", "SOL", "WSOL", ""] and bought_age <= 30:
+                    stats[addr]["buys"] += 1
+                    stats[addr]["tokens"].add(bought_sym[:20])
+
+            # Only keep wallets actively buying memecoins
+            qualified = []
+            for addr, s in stats.items():
+                if s["buys"] < 1:
+                    continue
+                tokens_str = ", ".join(list(s["tokens"])[:3])
+                qualified.append({
+                    "address": addr,
+                    "score": min(95, 70 + s["buys"]),
+                    "stats": {
+                        "total_trades": s["trades"],
+                        "win_rate": 0,
+                        "total_pnl_sol": 0,
+                        "avg_hold_minutes": 0,
+                    },
+                    "label_hint": f"nansen-sm-{s['buys']}buys-{s['usd']:.0f}usd",
+                    "tokens": tokens_str,
+                })
+
+            logger.info(f"Nansen: {len(qualified)} wallets buying memecoins out of {len(stats)} total SM")
+            return qualified
+
+        except Exception as e:
+            logger.error(f"Nansen discovery failed: {e}")
+            return []
 
     async def _merge_wallets(self, new_wallets: list[dict]) -> tuple[int, int, int]:
         """Update wallets.json: add new auto wallets, deactivate stale ones.
@@ -117,11 +158,11 @@ class CurationPipeline:
                     existing[addr]["active"] = True
                     updated += 1
             else:
-                # Add new auto-discovered wallet
+                # Add new discovered wallet
                 existing[addr] = {
                     "address": addr,
-                    "label": f"auto-{addr[:8]}",
-                    "source": "auto",
+                    "label": nw.get("label_hint", f"auto-{addr[:8]}"),
+                    "source": "nansen-live",
                     "added_at": datetime.now(timezone.utc).isoformat(),
                     "score": nw["score"],
                     "stats": nw["stats"],
@@ -155,8 +196,8 @@ class CurationPipeline:
             await db.execute(
                 """INSERT OR REPLACE INTO tracked_wallets
                    (address, label, source, score, total_trades, win_rate,
-                    total_pnl_sol, avg_hold_minutes, active, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    total_pnl_sol, avg_hold_minutes, active, added_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     w["address"],
                     w.get("label"),
@@ -167,6 +208,7 @@ class CurationPipeline:
                     stats.get("total_pnl_sol", 0),
                     stats.get("avg_hold_minutes", 0),
                     1 if w.get("active", True) else 0,
+                    w.get("added_at", datetime.now(timezone.utc).isoformat()),
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )

@@ -20,7 +20,7 @@
         .sortable:hover { color: #3b82f6; }
         .sort-arrow { font-size: 12px; }
         table { width: 100%; border-collapse: collapse; }
-        th { text-align: left; padding: 8px 12px; color: #94a3b8; font-size: 14px; text-transform: uppercase; border-bottom: 1px solid #334155; }
+        th { text-align: left; padding: 8px 12px; color: #94a3b8; font-size: 14px; text-transform: uppercase; border-bottom: 1px solid #334155; position: sticky; top: 0; background: #1e293b; z-index: 1; }
         td { padding: 8px 12px; border-bottom: 1px solid #1e293b; font-size: 15px; }
         tr:hover { background: #1e293b; }
         .copyable { cursor: pointer; border-bottom: 1px dashed #475569; }
@@ -149,7 +149,7 @@
 
     <!-- Tracked Wallets -->
     <div class="card p-4">
-        <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Tracked Wallets</h2>
+        <h2 class="text-sm font-bold text-slate-300 mb-3 uppercase">Tracked Wallets <span id="wallets-added" class="green text-xs font-normal"></span></h2>
         <div class="overflow-x-auto max-h-60 overflow-y-auto">
             <table>
                 <thead><tr>
@@ -416,6 +416,13 @@ async function renderPositions() {
 async function renderWallets() {
     cachedWallets = await fetchJSON('/api/wallets');
     renderWalletsFromCache();
+    const rc = await fetchJSON('/api/wallets/recent-count');
+    const el = document.getElementById('wallets-added');
+    if (rc.added_last_6h > 0) {
+        el.textContent = `+${rc.added_last_6h} added last 6h`;
+    } else {
+        el.textContent = '';
+    }
 }
 
 function refreshAll() {
