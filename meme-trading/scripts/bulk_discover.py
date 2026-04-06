@@ -36,6 +36,8 @@ MIN_WIN_RATE = 0.45        # 45%+ win rate
 MIN_TRADES = 10            # at least 10 trades (not a one-hit wonder)
 MIN_PNL_USD = 0.0          # must be net positive (any amount)
 MIN_SCORE = 60.0           # composite score threshold
+MAX_TRADES = 10000         # bot filter: humans don't make 100K+ trades
+MAX_UNIQUE_TOKENS = 500    # bot filter: humans don't trade thousands of tokens
 
 
 async def discover_wallets(settings: Settings, apply: bool = False):
@@ -100,12 +102,18 @@ async def discover_wallets(settings: Settings, apply: bool = False):
     # ── Step 4: Score and filter ──
     logger.info("\nStep 4: Scoring and filtering...")
     qualified = []
-    rejected = {"low_winrate": 0, "few_trades": 0, "negative_pnl": 0, "low_score": 0}
+    rejected = {"low_winrate": 0, "few_trades": 0, "negative_pnl": 0, "low_score": 0, "bot": 0}
 
     for addr, stats in wallet_stats.items():
         win_rate = stats.get("win_rate", 0)
         total_trades = stats.get("total_trades", 0)
         total_pnl_usd = stats.get("total_pnl_usd", 0)
+        unique_tokens = stats.get("unique_tokens", 0)
+
+        # Bot filter — reject MEV/sniper bots that trade everything
+        if total_trades > MAX_TRADES or unique_tokens > MAX_UNIQUE_TOKENS:
+            rejected["bot"] += 1
+            continue
 
         # Hard filters
         if win_rate < MIN_WIN_RATE:
@@ -161,6 +169,7 @@ async def discover_wallets(settings: Settings, apply: bool = False):
     logger.info(f"QUALIFIED:                   {len(qualified)}")
     logger.info(f"")
     logger.info(f"Rejected breakdown:")
+    logger.info(f"  Bot (>{MAX_TRADES} trades or >{MAX_UNIQUE_TOKENS} tokens): {rejected['bot']}")
     logger.info(f"  Win rate < {MIN_WIN_RATE*100:.0f}%:           {rejected['low_winrate']}")
     logger.info(f"  Trades < {MIN_TRADES}:              {rejected['few_trades']}")
     logger.info(f"  Negative PnL:              {rejected['negative_pnl']}")
