@@ -56,6 +56,10 @@ class ConvergenceEngine:
         events = self._window[token_mint]
         distinct_wallets = set(e.wallet_address for e in events)
 
+        # Persist 2-buy signals for dashboard tracking (not traded)
+        if len(distinct_wallets) == 2 and self.threshold > 2:
+            await self._persist_2buy_signal(token_mint, events, distinct_wallets)
+
         if len(distinct_wallets) < self.threshold:
             return
 
@@ -110,3 +114,28 @@ class ConvergenceEngine:
             await db.commit()
         except Exception as e:
             logger.error(f"Failed to persist signal: {e}")
+
+    async def _persist_2buy_signal(self, token_mint: str, events: list, distinct_wallets: set):
+        """Save 2-buy convergence to DB for dashboard display (not traded)."""
+        wallet_key = frozenset(distinct_wallets)
+        if wallet_key in self._signaled.get(token_mint, set()):
+            return
+        self._signaled[token_mint].add(wallet_key)
+
+        signal = ConvergenceSignal(
+            token_mint=token_mint,
+            token_symbol=events[0].token_symbol,
+            wallets=sorted(distinct_wallets),
+            buy_events=list(events),
+            first_buy_at=min(e.timestamp for e in events),
+            signal_at=datetime.now(timezone.utc),
+            avg_amount_sol=mean(e.amount_sol for e in events),
+            total_amount_sol=sum(e.amount_sol for e in events),
+        )
+
+        logger.info(
+            f"2-BUY SIGNAL: {token_mint[:12]}.. — "
+            f"2 wallets, {signal.total_amount_sol:.2f} SOL total"
+        )
+
+        await self._persist_signal(signal)
