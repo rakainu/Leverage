@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Nansen
     nansen_api_key: str = ""
 
+    # Apify (GMGN scrapers)
+    apify_api_token: str = ""
+
     # Trading mode
     mode: str = "paper"  # "paper" | "live"
 

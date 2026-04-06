@@ -11,6 +11,7 @@ import httpx
 from config.settings import Settings
 from curation.discovery import WalletDiscovery
 from curation.scorer import WalletScorer
+from curation.dedupe import dedupe_wallets
 from db.database import get_db
 
 logger = logging.getLogger("smc.curation.pipeline")
@@ -178,7 +179,13 @@ class CurationPipeline:
                     w["active"] = False
                     deactivated += 1
 
-        data["wallets"] = list(existing.values())
+        # Dedupe before write — defensive guard against race conditions
+        merged_list = list(existing.values())
+        deduped, removed = dedupe_wallets(merged_list)
+        if removed:
+            logger.warning(f"Dedupe removed {removed} duplicate entries during merge")
+
+        data["wallets"] = deduped
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
         data["version"] = data.get("version", 0) + 1
         path.write_text(json.dumps(data, indent=2))
