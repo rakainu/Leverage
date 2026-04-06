@@ -1,10 +1,12 @@
 """FastAPI application for the SMC trading dashboard."""
 
+import csv
+import io
 import logging
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from dashboard.websocket_manager import WebSocketManager
 
@@ -55,6 +57,33 @@ def create_app(ws_manager: WebSocketManager, db) -> FastAPI:
             "SELECT * FROM tracked_wallets WHERE active=1 ORDER BY score DESC"
         )
         return [dict(r) for r in rows]
+
+    @app.get("/api/wallets/csv")
+    async def get_wallets_csv():
+        rows = await db.execute_fetchall(
+            "SELECT address, label, source, score, total_trades, win_rate, "
+            "total_pnl_sol, avg_hold_minutes, active, added_at, updated_at "
+            "FROM tracked_wallets WHERE active=1 ORDER BY score DESC"
+        )
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "address", "label", "source", "score", "total_trades",
+            "win_rate", "total_pnl_sol", "avg_hold_minutes", "active",
+            "added_at", "updated_at",
+        ])
+        for r in rows:
+            writer.writerow([dict(r)[c] for c in [
+                "address", "label", "source", "score", "total_trades",
+                "win_rate", "total_pnl_sol", "avg_hold_minutes", "active",
+                "added_at", "updated_at",
+            ]])
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=tracked_wallets.csv"},
+        )
 
     @app.get("/api/wallets/recent-count")
     async def get_recent_wallet_count():
