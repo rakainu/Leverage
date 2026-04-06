@@ -12,12 +12,15 @@ logger = logging.getLogger("smc.executor.jupiter")
 class JupiterClient:
     """Client for Jupiter Swap API — quotes, prices, and swap execution."""
 
-    QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
-    SWAP_URL = "https://quote-api.jup.ag/v6/swap"
+    QUOTE_URL = "https://api.jup.ag/swap/v1/quote"
+    SWAP_URL = "https://api.jup.ag/swap/v1/swap"
 
     def __init__(self, api_key: str = "", http: httpx.AsyncClient | None = None):
         self.api_key = api_key
-        self.http = http or httpx.AsyncClient(timeout=30)
+        headers = {}
+        if api_key:
+            headers["x-api-key"] = api_key
+        self.http = http or httpx.AsyncClient(timeout=30, headers=headers)
 
     async def get_quote(
         self,
