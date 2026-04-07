@@ -102,7 +102,7 @@ The bridge handles exactly eight incoming alert actions. Each one is a short, de
    `contracts = round_to_lot( (margin_usdt * leverage) / (price * contract_value) )`
    where `price` = last mark price, `contract_value` and `lot_size` come from the cached instrument info.
 3. `POST /api/v1/trade/order` with:
-   - `side=buy`, `orderType=market`, `positionSide=net`, `marginMode=cross`
+   - `side=buy`, `orderType=market`, `positionSide=net`, `marginMode=isolated`
    - Attached SL: `slTriggerPrice = entry_est * (1 - safety_pct)`, `slOrderPrice = -1` (market execution)
 4. On fill, write position row to SQLite: `{symbol, side=long, entry_price, size, safety_sl_order_id, tp_policy=P2, tp_stage=0, opened_at}`.
 5. Telegram: `FROM: BLOFIN_BRIDGE\nOPEN LONG SOL @ $X — size Y contracts, SL $Z (safety)`.
@@ -202,6 +202,7 @@ bridge:
 defaults:
   margin_usdt: 100
   leverage: 10
+  margin_mode: isolated    # isolated | cross
   safety_sl_pct: 0.05      # 5% hard SL at entry
   tp_split: [0.40, 0.30, 0.30]
   sl_policy: p2_step_stop  # p2_step_stop | p1_breakeven | p3_trail | p4_hybrid
@@ -211,6 +212,7 @@ symbols:
     enabled: true
     margin_usdt: 100       # per-symbol overrides
     leverage: 10
+    margin_mode: isolated
     sl_policy: p2_step_stop
 ```
 
@@ -359,6 +361,7 @@ Nothing blocking. A few for after v1:
 | Stack | Python + FastAPI + ccxt + SQLite | Fits existing VPS tooling; ccxt handles BloFin signing quirk. |
 | Symbol (v1) | SOL-USDT | User's current focus; chart already on it. |
 | Margin | $100 USDT fixed (configurable) | Stable USD risk per trade. |
+| Margin mode | Isolated (configurable) | Caps loss per trade at allocated margin; positions don't share balance. |
 | Leverage | 10x (configurable) | User preference. |
 | TP split | 40/30/30 (configurable) | Banks faster, leaves runner. |
 | SL policy | P2 step-stop (pluggable) | Deterministic profit lock; no trail math required. |
