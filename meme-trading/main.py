@@ -181,7 +181,7 @@ async def main():
     # Components
     ws_manager = WebSocketManager()
     monitor = WalletMonitor(settings, event_bus)
-    convergence = ConvergenceEngine(settings, event_bus, signal_bus)
+    convergence = ConvergenceEngine(settings, event_bus, signal_bus, alert_bus)
     position_mgr = PositionManager(settings, alert_bus)
     telegram = TelegramAlerter(settings)
     curation = CurationPipeline(settings)

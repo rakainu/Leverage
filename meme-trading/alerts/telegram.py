@@ -65,6 +65,17 @@ class TelegramAlerter:
                 f"Safety: {safety}{reason_text}"
             )
 
+        elif t == "2buy_watch":
+            mint = alert.get('token_mint', '?')
+            wallets = alert.get("wallets", [])
+            wallet_lines = "\n".join(f"  • <code>{w}</code>" for w in wallets[:2])
+            return (
+                f"<b>👀 2-BUY WATCH</b> (no trade)\n"
+                f"Token: <code>{mint}</code>\n"
+                f"Total SOL: {alert.get('total_amount_sol', 0):.2f}\n"
+                f"Wallets:\n{wallet_lines}"
+            )
+
         elif t == "position_opened":
             mode = alert.get("mode", "?").upper()
             mint = alert.get('token_mint', '?')

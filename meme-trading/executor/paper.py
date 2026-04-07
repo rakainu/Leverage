@@ -24,6 +24,19 @@ class PaperExecutor:
 
     async def execute(self, signal: ConvergenceSignal, safety: SafetyResult) -> int | None:
         """Record a paper trade. Returns position_id."""
+        # Guard: don't open a duplicate position on a token we already hold
+        db = await get_db()
+        existing = await db.execute_fetchall(
+            "SELECT id FROM positions WHERE token_mint=? AND status='open' LIMIT 1",
+            (signal.token_mint,),
+        )
+        if existing:
+            logger.info(
+                f"Skipping duplicate paper trade — already have open position "
+                f"#{existing[0]['id']} on {signal.token_mint[:12]}.."
+            )
+            return None
+
         entry_price = await self.jupiter.get_price_sol(signal.token_mint)
         if not entry_price:
             logger.warning(f"Could not get price for {signal.token_mint[:12]}.. — skipping paper trade")
@@ -31,7 +44,6 @@ class PaperExecutor:
 
         amount_tokens = self.settings.trade_amount_sol / entry_price
 
-        db = await get_db()
         cursor = await db.execute(
             """INSERT INTO positions
                (token_mint, token_symbol, mode, status, entry_price,

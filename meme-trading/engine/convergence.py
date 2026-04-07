@@ -20,13 +20,22 @@ class ConvergenceEngine:
     Deduplicates so the same wallet combination doesn't trigger twice.
     """
 
-    def __init__(self, settings, event_bus: asyncio.Queue, signal_bus: asyncio.Queue):
+    def __init__(
+        self,
+        settings,
+        event_bus: asyncio.Queue,
+        signal_bus: asyncio.Queue,
+        alert_bus: asyncio.Queue | None = None,
+    ):
         self.window_minutes = settings.convergence_window_minutes
         self.threshold = settings.convergence_threshold
         self.event_bus = event_bus
         self.signal_bus = signal_bus
+        self.alert_bus = alert_bus
         self._window: dict[str, list[BuyEvent]] = defaultdict(list)
+        # Track which tokens we've already fired on (one signal per token per window)
         self._signaled: dict[str, set[frozenset[str]]] = defaultdict(set)
+        self._signaled_2buy: dict[str, set[frozenset[str]]] = defaultdict(set)
 
     async def run(self):
         """Consume BuyEvents, check for convergence."""
@@ -50,6 +59,7 @@ class ConvergenceEngine:
             if not self._window[mint]:
                 del self._window[mint]
                 self._signaled.pop(mint, None)
+                self._signaled_2buy.pop(mint, None)
 
     async def _check_convergence(self, token_mint: str):
         """Check if enough distinct wallets have bought this token."""
@@ -63,11 +73,12 @@ class ConvergenceEngine:
         if len(distinct_wallets) < self.threshold:
             return
 
-        # Dedup: don't re-signal the same wallet combination
-        wallet_key = frozenset(distinct_wallets)
-        if wallet_key in self._signaled[token_mint]:
+        # Dedup: once we've fired a 3+ signal on this token, don't fire again
+        # within the window — even if a different wallet combo qualifies. Avoids
+        # opening duplicate positions on the same token.
+        if self._signaled[token_mint]:
             return
-        self._signaled[token_mint].add(wallet_key)
+        self._signaled[token_mint].add(frozenset(distinct_wallets))
 
         signal = ConvergenceSignal(
             token_mint=token_mint,
@@ -116,11 +127,14 @@ class ConvergenceEngine:
             logger.error(f"Failed to persist signal: {e}")
 
     async def _persist_2buy_signal(self, token_mint: str, events: list, distinct_wallets: set):
-        """Save 2-buy convergence to DB for dashboard display (not traded)."""
-        wallet_key = frozenset(distinct_wallets)
-        if wallet_key in self._signaled.get(token_mint, set()):
+        """Save 2-buy convergence to DB for dashboard display (not traded).
+
+        Dedup by token: only one 2-buy alert per token per window, even if
+        the wallet combo changes.
+        """
+        if self._signaled_2buy[token_mint]:
             return
-        self._signaled[token_mint].add(wallet_key)
+        self._signaled_2buy[token_mint].add(frozenset(distinct_wallets))
 
         signal = ConvergenceSignal(
             token_mint=token_mint,
@@ -139,3 +153,15 @@ class ConvergenceEngine:
         )
 
         await self._persist_signal(signal)
+
+        # Push to Telegram via alert_bus (no trade — watch only)
+        if self.alert_bus is not None:
+            await self.alert_bus.put({
+                "type": "2buy_watch",
+                "token_mint": token_mint,
+                "token_symbol": signal.token_symbol,
+                "wallet_count": 2,
+                "wallets": signal.wallets,
+                "total_amount_sol": signal.total_amount_sol,
+                "avg_amount_sol": signal.avg_amount_sol,
+            })
