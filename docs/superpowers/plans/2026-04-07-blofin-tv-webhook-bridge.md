@@ -774,16 +774,19 @@ def test_load_config_from_yaml(tmp_path, monkeypatch):
                          "margin_mode": "isolated", "sl_policy": "p2_step_stop"},
         },
     }))
-    monkeypatch.setenv("BLOFIN_API_KEY", "k")
-    monkeypatch.setenv("BLOFIN_API_SECRET", "s")
-    monkeypatch.setenv("BLOFIN_PASSPHRASE", "p")
+    monkeypatch.setenv("BLOFIN_DEMO_API_KEY", "demo-k")
+    monkeypatch.setenv("BLOFIN_DEMO_API_SECRET", "demo-s")
+    monkeypatch.setenv("BLOFIN_DEMO_PASSPHRASE", "demo-p")
+    monkeypatch.setenv("BLOFIN_LIVE_API_KEY", "live-k")
+    monkeypatch.setenv("BLOFIN_LIVE_API_SECRET", "live-s")
+    monkeypatch.setenv("BLOFIN_LIVE_PASSPHRASE", "live-p")
     monkeypatch.setenv("BRIDGE_SECRET", "x" * 20)
     monkeypatch.setenv("BLOFIN_ENV", "demo")
 
     cfg = load_config(yaml_path)
 
     assert cfg.blofin.env == "demo"
-    assert cfg.blofin.api_key == "k"
+    assert cfg.blofin.api_key == "demo-k"        # demo keys selected
     assert cfg.defaults.margin_usdt == 50
     assert cfg.defaults.tp_split == [0.5, 0.3, 0.2]
     assert "SOL-USDT" in cfg.symbols
@@ -793,10 +796,36 @@ def test_load_config_from_yaml(tmp_path, monkeypatch):
 def test_missing_required_env_raises(tmp_path):
     yaml_path = tmp_path / "cfg.yaml"
     yaml_path.write_text("defaults: {}\nsymbols: {}\n")
-    # No env vars set
-    for k in ("BLOFIN_API_KEY", "BLOFIN_API_SECRET", "BLOFIN_PASSPHRASE", "BRIDGE_SECRET"):
+    # No env vars set — clear all bridge-relevant ones
+    for k in (
+        "BLOFIN_DEMO_API_KEY", "BLOFIN_DEMO_API_SECRET", "BLOFIN_DEMO_PASSPHRASE",
+        "BLOFIN_LIVE_API_KEY", "BLOFIN_LIVE_API_SECRET", "BLOFIN_LIVE_PASSPHRASE",
+        "BRIDGE_SECRET",
+    ):
         os.environ.pop(k, None)
     with pytest.raises(Exception):
+        load_config(yaml_path)
+
+
+def test_live_env_with_missing_live_keys_raises(tmp_path, monkeypatch):
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(yaml.safe_dump({
+        "defaults": {
+            "margin_usdt": 100, "leverage": 10, "margin_mode": "isolated",
+            "position_mode": "net", "safety_sl_pct": 0.05,
+            "tp_split": [0.4, 0.3, 0.3], "sl_policy": "p2_step_stop",
+        },
+        "symbols": {},
+    }))
+    monkeypatch.setenv("BLOFIN_ENV", "live")
+    # Only demo keys present; live are empty
+    monkeypatch.setenv("BLOFIN_DEMO_API_KEY", "d")
+    monkeypatch.setenv("BLOFIN_DEMO_API_SECRET", "d")
+    monkeypatch.setenv("BLOFIN_DEMO_PASSPHRASE", "d")
+    for k in ("BLOFIN_LIVE_API_KEY", "BLOFIN_LIVE_API_SECRET", "BLOFIN_LIVE_PASSPHRASE"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("BRIDGE_SECRET", "x" * 20)
+    with pytest.raises(ValueError, match="BLOFIN_ENV=live requires"):
         load_config(yaml_path)
 
 
@@ -811,8 +840,11 @@ def test_tp_split_must_sum_to_one(tmp_path, monkeypatch):
         },
         "symbols": {},
     }))
-    for k, v in [("BLOFIN_API_KEY", "k"), ("BLOFIN_API_SECRET", "s"),
-                 ("BLOFIN_PASSPHRASE", "p"), ("BRIDGE_SECRET", "x" * 20)]:
+    for k, v in [
+        ("BLOFIN_DEMO_API_KEY", "k"), ("BLOFIN_DEMO_API_SECRET", "s"),
+        ("BLOFIN_DEMO_PASSPHRASE", "p"), ("BRIDGE_SECRET", "x" * 20),
+        ("BLOFIN_ENV", "demo"),
+    ]:
         monkeypatch.setenv(k, v)
 
     with pytest.raises(ValueError, match="tp_split must sum to 1.0"):
@@ -845,15 +877,49 @@ MarginMode = Literal["isolated", "cross"]
 PositionMode = Literal["net", "long_short"]
 
 
-class BloFinCreds(BaseSettings):
-    """Loaded from environment / .env."""
+class _RawBloFinEnv(BaseSettings):
+    """Raw env vars for both demo and live BloFin credentials."""
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore",
     )
-    api_key: str = Field(alias="BLOFIN_API_KEY")
-    api_secret: str = Field(alias="BLOFIN_API_SECRET")
-    passphrase: str = Field(alias="BLOFIN_PASSPHRASE")
+    live_api_key: str = Field(alias="BLOFIN_LIVE_API_KEY", default="")
+    live_api_secret: str = Field(alias="BLOFIN_LIVE_API_SECRET", default="")
+    live_passphrase: str = Field(alias="BLOFIN_LIVE_PASSPHRASE", default="")
+    demo_api_key: str = Field(alias="BLOFIN_DEMO_API_KEY", default="")
+    demo_api_secret: str = Field(alias="BLOFIN_DEMO_API_SECRET", default="")
+    demo_passphrase: str = Field(alias="BLOFIN_DEMO_PASSPHRASE", default="")
     env: Literal["demo", "live"] = Field(alias="BLOFIN_ENV", default="demo")
+
+
+class BloFinCreds(BaseModel):
+    """Resolved credentials — picks demo vs live based on env."""
+    api_key: str
+    api_secret: str
+    passphrase: str
+    env: Literal["demo", "live"]
+
+    @classmethod
+    def from_environment(cls) -> "BloFinCreds":
+        raw = _RawBloFinEnv()
+        if raw.env == "demo":
+            if not (raw.demo_api_key and raw.demo_api_secret and raw.demo_passphrase):
+                raise ValueError(
+                    "BLOFIN_ENV=demo requires BLOFIN_DEMO_API_KEY / "
+                    "BLOFIN_DEMO_API_SECRET / BLOFIN_DEMO_PASSPHRASE to be set"
+                )
+            return cls(
+                api_key=raw.demo_api_key, api_secret=raw.demo_api_secret,
+                passphrase=raw.demo_passphrase, env="demo",
+            )
+        if not (raw.live_api_key and raw.live_api_secret and raw.live_passphrase):
+            raise ValueError(
+                "BLOFIN_ENV=live requires BLOFIN_LIVE_API_KEY / "
+                "BLOFIN_LIVE_API_SECRET / BLOFIN_LIVE_PASSPHRASE to be set"
+            )
+        return cls(
+            api_key=raw.live_api_key, api_secret=raw.live_api_secret,
+            passphrase=raw.live_passphrase, env="live",
+        )
 
 
 class BridgeCreds(BaseSettings):
@@ -902,7 +968,7 @@ class Settings(BaseModel):
 def load_config(yaml_path: Path) -> Settings:
     raw = yaml.safe_load(yaml_path.read_text())
     return Settings(
-        blofin=BloFinCreds(),          # reads env / .env
+        blofin=BloFinCreds.from_environment(),
         bridge=BridgeCreds(),
         defaults=Defaults(**raw["defaults"]),
         symbols={
@@ -2611,9 +2677,9 @@ def app(tmp_path, monkeypatch):
         "    enabled: true\n    margin_usdt: 100\n    leverage: 10\n"
         "    margin_mode: isolated\n    sl_policy: p2_step_stop\n"
     )
-    monkeypatch.setenv("BLOFIN_API_KEY", "k")
-    monkeypatch.setenv("BLOFIN_API_SECRET", "s")
-    monkeypatch.setenv("BLOFIN_PASSPHRASE", "p")
+    monkeypatch.setenv("BLOFIN_DEMO_API_KEY", "k")
+    monkeypatch.setenv("BLOFIN_DEMO_API_SECRET", "s")
+    monkeypatch.setenv("BLOFIN_DEMO_PASSPHRASE", "p")
     monkeypatch.setenv("BRIDGE_SECRET", "topsecret" * 3)
     monkeypatch.setenv("BLOFIN_ENV", "demo")
     monkeypatch.setenv("BLOFIN_BRIDGE_CONFIG", str(yaml_path))
