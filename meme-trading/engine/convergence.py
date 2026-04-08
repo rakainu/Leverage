@@ -29,6 +29,7 @@ class ConvergenceEngine:
     ):
         self.window_minutes = settings.convergence_window_minutes
         self.threshold = settings.convergence_threshold
+        self.notify_2buy = settings.notify_2buy
         self.event_bus = event_bus
         self.signal_bus = signal_bus
         self.alert_bus = alert_bus
@@ -154,8 +155,10 @@ class ConvergenceEngine:
 
         await self._persist_signal(signal)
 
-        # Push to Telegram via alert_bus (no trade — watch only)
-        if self.alert_bus is not None:
+        # Push to Telegram via alert_bus (no trade — watch only).
+        # Gated by SMC_NOTIFY_2BUY to reduce notification noise; DB persist
+        # above still runs so the dashboard continues to track 2-buys.
+        if self.alert_bus is not None and self.notify_2buy:
             await self.alert_bus.put({
                 "type": "2buy_watch",
                 "token_mint": token_mint,

@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str = ""
     telegram_chat_id: str = "6421609315"
+    notify_2buy: bool = True     # watch-only 2-wallet convergence alerts (noisy)
 
     # Curation
     curation_interval_hours: float = 6.0
