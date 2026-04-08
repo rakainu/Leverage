@@ -76,3 +76,18 @@ def test_health_endpoint(app):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+def test_status_rejects_no_secret(app):
+    client = TestClient(app)
+    r = client.get("/status")
+    assert r.status_code == 401
+
+
+def test_status_returns_state(app):
+    client = TestClient(app)
+    r = client.get("/status", params={"secret": "topsecret" * 3})
+    assert r.status_code == 200
+    body = r.json()
+    assert "open_positions" in body
+    assert "recent_events" in body

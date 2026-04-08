@@ -80,6 +80,24 @@ def create_app() -> FastAPI:
             "open_positions": len(store.list_open_positions()),
         }
 
+    @app.get("/status")
+    def status(secret: str = "") -> dict[str, Any]:
+        if secret != settings.bridge.shared_secret:
+            raise HTTPException(status_code=401, detail="invalid secret")
+        return {
+            "open_positions": [
+                {
+                    "id": p.id, "symbol": p.symbol, "side": p.side,
+                    "entry_price": p.entry_price,
+                    "current_size": p.current_size,
+                    "tp_stage": p.tp_stage,
+                    "sl_order_id": p.sl_order_id,
+                }
+                for p in store.list_open_positions()
+            ],
+            "recent_events": store.recent_events(limit=20),
+        }
+
     @app.post("/webhook/pro-v3")
     async def pro_v3(request: Request) -> dict[str, Any]:
         raw = await request.body()
