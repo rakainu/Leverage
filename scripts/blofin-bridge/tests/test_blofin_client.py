@@ -99,3 +99,21 @@ def test_close_position_market_uses_reduce_only(mock_ccxt):
     )
     _, kwargs = mock_ccxt.create_order.call_args
     assert kwargs["params"]["reduceOnly"] == "true"
+
+
+def test_fetch_recent_ohlcv_returns_bars(mock_ccxt):
+    mock_ccxt.fetch_ohlcv.return_value = [
+        [1700000000000, 80.0, 80.5, 79.8, 80.2, 1000.0],
+        [1700000300000, 80.2, 80.6, 80.1, 80.4, 1200.0],
+        [1700000600000, 80.4, 80.9, 80.3, 80.7, 1500.0],
+    ]
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    bars = client.fetch_recent_ohlcv("SOL-USDT", timeframe="5m", limit=20)
+    assert len(bars) == 3
+    assert bars[0][4] == 80.2  # close of first bar
+    mock_ccxt.fetch_ohlcv.assert_called_once()
+    args, kwargs = mock_ccxt.fetch_ohlcv.call_args
+    assert args[0] == "SOL/USDT:USDT"    # ccxt symbol form
+    assert kwargs.get("timeframe") == "5m" or (len(args) >= 2 and args[1] == "5m")
+    assert kwargs.get("limit") == 20 or (len(args) >= 3 and args[2] == 20)

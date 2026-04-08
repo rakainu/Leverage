@@ -225,3 +225,13 @@ class BloFinClient:
 
     def fetch_positions(self) -> list[dict[str, Any]]:
         return self._ccxt.fetch_positions()
+
+    def fetch_recent_ohlcv(
+        self, inst_id: str, *, timeframe: str = "5m", limit: int = 20,
+    ) -> list[list[float]]:
+        """Return the last `limit` OHLCV bars for the instrument.
+
+        Each bar is [timestamp, open, high, low, close, volume].
+        """
+        ccxt_sym = _instid_to_ccxt(inst_id)
+        return self._ccxt.fetch_ohlcv(ccxt_sym, timeframe=timeframe, limit=limit)
