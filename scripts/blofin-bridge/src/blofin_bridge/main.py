@@ -58,6 +58,16 @@ def create_app() -> FastAPI:
         chat_id=settings.bridge.telegram_chat_id,
     )
 
+    from .reconcile import reconcile
+    rec_report = reconcile(store=store, blofin=blofin)
+    frozen: set[str] = set(rec_report.frozen_symbols)
+    if rec_report.drift_count > 0:
+        notifier.send(
+            "RECONCILE DRIFT on startup: "
+            + "; ".join(rec_report.details)
+            + " — frozen: " + ", ".join(rec_report.frozen_symbols)
+        )
+
     app = FastAPI(title="BloFin × TradingView Bridge", version="0.1.0")
 
     symbol_configs = {
@@ -108,6 +118,16 @@ def create_app() -> FastAPI:
 
         if payload.secret != settings.bridge.shared_secret:
             raise HTTPException(status_code=401, detail="invalid secret")
+
+        if payload.symbol in frozen:
+            # Log the event with skipped outcome
+            skipped_id = store.append_event(
+                position_id=None, event_type=payload.action,
+                payload=raw.decode("utf-8"),
+            )
+            store.mark_event_handled(skipped_id, outcome="skipped",
+                                     error_msg="symbol frozen after reconcile drift")
+            raise HTTPException(status_code=423, detail="symbol frozen")
 
         event_id = store.append_event(
             position_id=None, event_type=payload.action,

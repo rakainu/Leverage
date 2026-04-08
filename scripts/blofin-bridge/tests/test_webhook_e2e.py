@@ -40,6 +40,7 @@ def app(tmp_path, monkeypatch):
     mock_blofin.place_market_entry.return_value = {
         "orderId": "ord-1", "fill_price": 80.12, "filled": 12,
     }
+    mock_blofin.fetch_positions.return_value = []
     monkeypatch.setattr(main_mod, "_build_blofin_client", lambda _: mock_blofin)
     return main_mod.create_app()
 
