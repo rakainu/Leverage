@@ -1,0 +1,16 @@
+defaults:
+  margin_usdt: 100
+  leverage: 10
+  margin_mode: isolated
+  position_mode: net
+  safety_sl_pct: 0.05
+  tp_split: [0.40, 0.30, 0.30]
+  sl_policy: p2_step_stop
+
+symbols:
+  SOL-USDT:
+    enabled: true
+    margin_usdt: 100
+    leverage: 10
+    margin_mode: isolated
+    sl_policy: p2_step_stop
