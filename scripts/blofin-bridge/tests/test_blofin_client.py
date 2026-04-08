@@ -161,6 +161,15 @@ def test_place_limit_reduce_only_raises_on_missing_id(mock_ccxt):
         )
 
 
+def test_fetch_order_delegates_to_ccxt(mock_ccxt):
+    mock_ccxt.fetch_order.return_value = {"id": "ord-1", "status": "closed", "filled": 5.0}
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    result = client.fetch_order("ord-1", "SOL-USDT")
+    assert result["status"] == "closed"
+    mock_ccxt.fetch_order.assert_called_once_with("ord-1", "SOL/USDT:USDT")
+
+
 def test_place_limit_reduce_only_rejects_non_positive_price(mock_ccxt):
     client = BloFinClient(ccxt_client=mock_ccxt)
     client.load_instruments()

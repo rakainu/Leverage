@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 from .blofin_client import BloFinClient, build_ccxt_client
 from .config import Settings, load_config
 from .notify import Notifier
+from .poller import PositionPoller
 from .router import dispatch, UnknownAction
 from .state import Store
 
@@ -68,7 +70,25 @@ def create_app() -> FastAPI:
             + " — frozen: " + ", ".join(rec_report.frozen_symbols)
         )
 
-    app = FastAPI(title="BloFin × TradingView Bridge", version="0.1.0")
+    poller = PositionPoller(
+        store=store,
+        blofin=blofin,
+        interval_seconds=settings.defaults.poll_interval_seconds,
+    )
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        poller.start()
+        try:
+            yield
+        finally:
+            await poller.stop()
+
+    app = FastAPI(
+        title="BloFin × TradingView Bridge",
+        version="0.1.1",
+        lifespan=lifespan,
+    )
 
     symbol_configs = {
         name: {

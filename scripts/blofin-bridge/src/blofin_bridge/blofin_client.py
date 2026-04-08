@@ -260,6 +260,11 @@ class BloFinClient:
     def fetch_positions(self) -> list[dict[str, Any]]:
         return self._ccxt.fetch_positions()
 
+    def fetch_order(self, order_id: str, inst_id: str) -> dict[str, Any]:
+        """Fetch order status from BloFin. Returns ccxt order dict."""
+        ccxt_sym = _instid_to_ccxt(inst_id)
+        return self._ccxt.fetch_order(order_id, ccxt_sym)
+
     def fetch_recent_ohlcv(
         self, inst_id: str, *, timeframe: str = "5m", limit: int = 20,
     ) -> list[list[float]]:
