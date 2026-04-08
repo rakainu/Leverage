@@ -152,6 +152,40 @@ class BloFinClient:
             data = data[0] if data else {}
         return (data or {}).get("tpslId", "")
 
+    def place_limit_reduce_only(
+        self, *, inst_id: str, side: str, contracts: float, price: float,
+    ) -> str:
+        """Place a reduce-only limit order at a specific price. Returns order id.
+
+        Used for TP1/TP2/TP3 placement by the entry handler.
+        `side` is the closing direction: "sell" closes a long, "buy" closes a short.
+        """
+        if price <= 0:
+            raise ValueError(f"price must be positive, got {price}")
+        # Round price to instrument tick precision
+        try:
+            tick = self._instruments[inst_id]["tickSize"]
+        except KeyError:
+            tick = 0.0
+        if tick > 0:
+            steps = round(price / tick)
+            price = round(steps * tick, 10)
+
+        ccxt_sym = _instid_to_ccxt(inst_id)
+        params = {
+            "marginMode": "isolated",
+            "positionSide": "net",
+            "reduceOnly": "true",
+        }
+        order = self._ccxt.create_order(
+            symbol=ccxt_sym, type="limit", side=side,
+            amount=contracts, price=price, params=params,
+        )
+        order_id = order.get("id")
+        if not order_id:
+            raise RuntimeError(f"place_limit_reduce_only returned no order id: {order}")
+        return order_id
+
     def cancel_tpsl(self, inst_id: str, tpsl_id: str) -> None:
         # BloFin expects a JSON array body for cancel-tpsl, even for one id.
         resp = self._ccxt.private_post_trade_cancel_tpsl(

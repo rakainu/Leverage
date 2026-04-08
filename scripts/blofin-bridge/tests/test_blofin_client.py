@@ -117,3 +117,54 @@ def test_fetch_recent_ohlcv_returns_bars(mock_ccxt):
     assert args[0] == "SOL/USDT:USDT"    # ccxt symbol form
     assert kwargs.get("timeframe") == "5m" or (len(args) >= 2 and args[1] == "5m")
     assert kwargs.get("limit") == 20 or (len(args) >= 3 and args[2] == 20)
+
+
+def test_place_limit_reduce_only_rounds_to_tick(mock_ccxt):
+    mock_ccxt.create_order.return_value = {"id": "lim-1"}
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    # SOL tickSize is 0.001 per the mock fixture; price 80.1234 -> 80.123
+    order_id = client.place_limit_reduce_only(
+        inst_id="SOL-USDT", side="sell", contracts=5.0, price=80.1234,
+    )
+    assert order_id == "lim-1"
+    mock_ccxt.create_order.assert_called_once()
+    _, kwargs = mock_ccxt.create_order.call_args
+    # price was rounded to tick 0.001
+    assert kwargs.get("price") == pytest.approx(80.123)
+    params = kwargs.get("params") or {}
+    assert params.get("reduceOnly") == "true"
+    assert params.get("marginMode") == "isolated"
+    assert params.get("positionSide") == "net"
+
+
+def test_place_limit_reduce_only_passes_contracts_amount(mock_ccxt):
+    mock_ccxt.create_order.return_value = {"id": "lim-2"}
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    client.place_limit_reduce_only(
+        inst_id="SOL-USDT", side="buy", contracts=3.75, price=83.5,
+    )
+    _, kwargs = mock_ccxt.create_order.call_args
+    assert kwargs.get("amount") == 3.75
+    assert kwargs.get("side") == "buy"
+    assert kwargs.get("type") == "limit"
+
+
+def test_place_limit_reduce_only_raises_on_missing_id(mock_ccxt):
+    mock_ccxt.create_order.return_value = {}    # no id
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    with pytest.raises(RuntimeError, match="no order id"):
+        client.place_limit_reduce_only(
+            inst_id="SOL-USDT", side="sell", contracts=5.0, price=80.0,
+        )
+
+
+def test_place_limit_reduce_only_rejects_non_positive_price(mock_ccxt):
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    with pytest.raises(ValueError, match="price"):
+        client.place_limit_reduce_only(
+            inst_id="SOL-USDT", side="sell", contracts=5.0, price=0.0,
+        )
