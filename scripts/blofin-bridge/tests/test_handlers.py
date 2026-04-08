@@ -217,3 +217,55 @@ def test_sl_noop_when_flat(store, blofin):
     result = handle_sl(symbol="SOL-USDT", store=store, blofin=blofin)
     assert result["closed"] is False
     blofin.close_position_market.assert_not_called()
+
+
+from blofin_bridge.handlers.reversal import handle_reversal
+
+
+def test_reversal_buy_closes_short_and_opens_long(store, blofin):
+    # Start with an open short
+    pid = store.create_position(
+        symbol="SOL-USDT", side="short", entry_price=85.0,
+        initial_size=12, sl_policy="p2_step_stop", source="pro_v3",
+    )
+    store.record_sl_order_id(pid, "tpsl-short")
+
+    blofin.close_position_market.return_value = {
+        "orderId": "close-1", "fill_price": 80.0,
+    }
+    blofin.place_market_entry.return_value = {
+        "orderId": "open-1", "fill_price": 80.12, "filled": 12,
+    }
+
+    policy = P2StepStop(safety_sl_pct=0.05)
+    result = handle_reversal(
+        new_action="buy", symbol="SOL-USDT",
+        store=store, blofin=blofin, policy=policy,
+        margin_usdt=100, leverage=10, margin_mode="isolated",
+        sl_policy_name="p2_step_stop",
+    )
+    assert result["closed_previous"] is True
+    assert result["opened_new"] is True
+
+    row = store.get_open_position("SOL-USDT")
+    assert row.side == "long"
+    # previous close happened AND a new entry happened
+    assert blofin.cancel_tpsl.call_count == 1
+    assert blofin.close_position_market.call_count == 1
+    assert blofin.place_market_entry.call_count == 1
+
+
+def test_reversal_with_no_prior_position_just_opens(store, blofin):
+    blofin.place_market_entry.return_value = {
+        "orderId": "open-1", "fill_price": 80.12, "filled": 12,
+    }
+    policy = P2StepStop(safety_sl_pct=0.05)
+    result = handle_reversal(
+        new_action="sell", symbol="SOL-USDT",
+        store=store, blofin=blofin, policy=policy,
+        margin_usdt=100, leverage=10, margin_mode="isolated",
+        sl_policy_name="p2_step_stop",
+    )
+    assert result["closed_previous"] is False
+    assert result["opened_new"] is True
+    blofin.close_position_market.assert_not_called()
