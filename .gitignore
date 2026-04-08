@@ -31,3 +31,4 @@ scripts/blofin-bridge/*.db
 scripts/blofin-bridge/*.db-journal
 scripts/blofin-bridge/__pycache__/
 scripts/blofin-bridge/src/**/__pycache__/
+scripts/blofin-bridge/src/*.egg-info/
