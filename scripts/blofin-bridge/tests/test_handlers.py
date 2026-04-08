@@ -121,8 +121,8 @@ def test_tp1_closes_40pct_and_sets_new_sl_at_entry(
     assert result["closed_contracts"] == 4
     assert result["new_sl_trigger"] == 80.0
 
-    # Old SL cancelled
-    blofin.cancel_tpsl.assert_called_once_with("SOL-USDT", "tpsl-initial")
+    # Old SL cancelled (sweep mode)
+    blofin.cancel_all_tpsl.assert_called_once_with("SOL-USDT")
     # New SL placed at entry (breakeven)
     _, kwargs = blofin.place_sl_order.call_args
     assert kwargs["trigger_price"] == 80.0
@@ -178,8 +178,8 @@ def test_tp3_closes_remainder_and_archives(store, blofin, long_position_row):
     )
     # Position should be closed
     assert store.get_open_position("SOL-USDT") is None
-    # SL cancelled
-    blofin.cancel_tpsl.assert_called_once_with("SOL-USDT", "tpsl-tp1")
+    # SL cancelled (sweep mode)
+    blofin.cancel_all_tpsl.assert_called_once_with("SOL-USDT")
     # No new SL placed
     blofin.place_sl_order.assert_not_called()
 
@@ -207,7 +207,7 @@ def test_sl_force_closes_and_cancels_tpsl(store, blofin, long_position_row):
     )
     assert result["closed"] is True
     assert store.get_open_position("SOL-USDT") is None
-    blofin.cancel_tpsl.assert_called_once_with("SOL-USDT", "tpsl-initial")
+    blofin.cancel_all_tpsl.assert_called_once_with("SOL-USDT")
     _, kwargs = blofin.close_position_market.call_args
     assert kwargs["side"] == "sell"
     assert kwargs["contracts"] == 12
@@ -250,7 +250,7 @@ def test_reversal_buy_closes_short_and_opens_long(store, blofin):
     row = store.get_open_position("SOL-USDT")
     assert row.side == "long"
     # previous close happened AND a new entry happened
-    assert blofin.cancel_tpsl.call_count == 1
+    assert blofin.cancel_all_tpsl.call_count == 1
     assert blofin.close_position_market.call_count == 1
     assert blofin.place_market_entry.call_count == 1
 
@@ -269,3 +269,45 @@ def test_reversal_with_no_prior_position_just_opens(store, blofin):
     assert result["closed_previous"] is False
     assert result["opened_new"] is True
     blofin.close_position_market.assert_not_called()
+
+
+def test_tp_handles_102022_race_with_sl_fire(store, blofin, long_position_row):
+    """When BloFin has already closed the position (race with SL fire), tp handler archives cleanly."""
+    policy = P2StepStop(safety_sl_pct=0.05)
+    blofin.close_position_market.side_effect = Exception(
+        "blofin {\"code\":\"1\",\"msg\":\"All operations failed\","
+        "\"data\":[{\"code\":\"102022\",\"msg\":\"No positions on this contract.\"}]}"
+    )
+    result = handle_tp(
+        tp_stage=3, symbol="SOL-USDT",
+        store=store, blofin=blofin, policy=policy,
+        margin_mode="isolated", tp_split=[0.40, 0.30, 0.30],
+    )
+    assert result["handled"] is True
+    assert result["archived"] is True
+    assert "already closed" in result["reason"].lower()
+    assert store.get_open_position("SOL-USDT") is None
+
+
+def test_tp_handles_102038_sl_rejected(store, blofin, long_position_row):
+    """When BloFin rejects the new SL placement (102038), partial close still counts as success with sl_placement_failed=True."""
+    policy = P2StepStop(safety_sl_pct=0.05)
+    blofin.close_position_market.return_value = {
+        "orderId": "close-1", "fill_price": 84.0,
+    }
+    blofin.place_sl_order.side_effect = Exception(
+        "blofin {\"code\":\"102038\",\"msg\":\"SL trigger price should be lower than the latest trading price\"}"
+    )
+    result = handle_tp(
+        tp_stage=1, symbol="SOL-USDT",
+        store=store, blofin=blofin, policy=policy,
+        margin_mode="isolated", tp_split=[0.40, 0.30, 0.30],
+    )
+    assert result["handled"] is True
+    assert result["sl_placement_failed"] is True
+    assert "102038" in result["sl_placement_error"]
+    # Position still open (partial close succeeded)
+    row = store.get_open_position("SOL-USDT")
+    assert row is not None
+    assert row.tp_stage == 1
+    assert row.sl_order_id is None  # No SL on record

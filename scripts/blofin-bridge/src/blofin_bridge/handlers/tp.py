@@ -1,11 +1,14 @@
 """TP handler: tp1, tp2, tp3."""
 from __future__ import annotations
+import logging
 from typing import Any
 
 from ..blofin_client import BloFinClient
 from ..policies.base import Position, SLPolicy
 from ..sizing import close_fraction_to_contracts
 from ..state import Store
+
+log = logging.getLogger(__name__)
 
 
 def handle_tp(
@@ -43,13 +46,31 @@ def handle_tp(
         return {"handled": False, "reason": "nothing to close (below lot size)"}
 
     close_side = "sell" if row.side == "long" else "buy"
-    fill = blofin.close_position_market(
-        inst_id=symbol, side=close_side, contracts=to_close,
-    )
+    try:
+        fill = blofin.close_position_market(
+            inst_id=symbol, side=close_side, contracts=to_close,
+        )
+    except Exception as exc:
+        if "102022" in str(exc):
+            # Position was already closed on BloFin (e.g. SL triggered before this webhook)
+            # Cancel any outstanding SL, archive the row, return success.
+            if row.sl_order_id:
+                try:
+                    blofin.cancel_tpsl(symbol, row.sl_order_id)
+                except Exception:
+                    pass
+                store.record_sl_order_id(row.id, None)
+            store.close_position(row.id, realized_pnl=None)
+            return {
+                "handled": True, "tp_stage": tp_stage,
+                "archived": True,
+                "reason": "position already closed on BloFin (race with SL fire)",
+            }
+        raise
 
-    # Cancel the current SL regardless of stage
+    # Cancel the current SL (and any orphan attached SL from entry OCO)
+    blofin.cancel_all_tpsl(symbol)
     if row.sl_order_id:
-        blofin.cancel_tpsl(symbol, row.sl_order_id)
         store.record_sl_order_id(row.id, None)
 
     store.record_tp_fill(
@@ -83,15 +104,31 @@ def handle_tp(
             "closed_contracts": to_close, "new_sl_trigger": None,
         }
 
-    new_sl_id = blofin.place_sl_order(
-        inst_id=symbol, side=new_sl.side,
-        trigger_price=new_sl.trigger_price, margin_mode=margin_mode,
-    )
-    store.record_sl_order_id(row.id, new_sl_id)
-
-    return {
-        "handled": True, "tp_stage": tp_stage,
-        "closed_contracts": to_close,
-        "new_sl_trigger": new_sl.trigger_price,
-        "new_sl_id": new_sl_id,
-    }
+    try:
+        new_sl_id = blofin.place_sl_order(
+            inst_id=symbol, side=new_sl.side,
+            trigger_price=new_sl.trigger_price, margin_mode=margin_mode,
+        )
+        store.record_sl_order_id(row.id, new_sl_id)
+        return {
+            "handled": True, "tp_stage": tp_stage,
+            "closed_contracts": to_close,
+            "new_sl_trigger": new_sl.trigger_price,
+            "new_sl_id": new_sl_id,
+        }
+    except Exception as exc:
+        if "102038" in str(exc):
+            log.warning(
+                "SL placement rejected by BloFin (trigger on wrong side of price): %s",
+                exc,
+            )
+            # Leave sl_order_id null; partial close has already succeeded.
+            return {
+                "handled": True, "tp_stage": tp_stage,
+                "closed_contracts": to_close,
+                "new_sl_trigger": new_sl.trigger_price,
+                "new_sl_id": None,
+                "sl_placement_failed": True,
+                "sl_placement_error": str(exc),
+            }
+        raise
