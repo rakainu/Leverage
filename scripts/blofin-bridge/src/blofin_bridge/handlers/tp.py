@@ -28,6 +28,27 @@ def handle_tp(
     if row is None:
         return {"handled": False, "reason": "no open position; stale tp alert"}
 
+    # v1.1: idempotency — poller may have already advanced past this stage.
+    if row.tp_stage >= tp_stage:
+        return {
+            "handled": True,
+            "reason": f"tp{tp_stage} already processed (current tp_stage={row.tp_stage})",
+            "idempotent": True,
+        }
+
+    # v1.1: cancel the still-pending BloFin limit order for this TP before
+    # doing our own market close, otherwise BloFin's limit might still fill
+    # and we'd double-close.
+    tp_order_id = {
+        1: row.tp1_order_id, 2: row.tp2_order_id, 3: row.tp3_order_id,
+    }.get(tp_stage)
+    if tp_order_id:
+        try:
+            blofin.cancel_order(tp_order_id, symbol)
+        except Exception:
+            pass  # may have already filled; safe to continue
+        store.clear_tp_order_id(row.id, stage=tp_stage)
+
     instrument = blofin.get_instrument(symbol)
 
     # Fraction of ORIGINAL initial_size to close at this stage

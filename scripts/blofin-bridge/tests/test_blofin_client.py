@@ -170,6 +170,14 @@ def test_fetch_order_delegates_to_ccxt(mock_ccxt):
     mock_ccxt.fetch_order.assert_called_once_with("ord-1", "SOL/USDT:USDT")
 
 
+def test_cancel_order_delegates_to_ccxt(mock_ccxt):
+    mock_ccxt.cancel_order.return_value = None
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    client.cancel_order("ord-1", "SOL-USDT")
+    mock_ccxt.cancel_order.assert_called_once_with("ord-1", "SOL/USDT:USDT")
+
+
 def test_place_limit_reduce_only_rejects_non_positive_price(mock_ccxt):
     client = BloFinClient(ccxt_client=mock_ccxt)
     client.load_instruments()

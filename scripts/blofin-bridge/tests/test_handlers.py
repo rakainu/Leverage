@@ -439,6 +439,68 @@ def test_tp_handles_102022_race_with_sl_fire(store, blofin, long_position_row):
     assert store.get_open_position("SOL-USDT") is None
 
 
+def test_tp_idempotent_when_poller_already_advanced(store, blofin, sol_instrument):
+    """If poller already advanced tp_stage, the alert handler is a noop."""
+    from blofin_bridge.handlers.tp import handle_tp
+    from blofin_bridge.policies.p2_step_stop import P2StepStop
+
+    pid = store.create_position(
+        symbol="SOL-USDT", side="long", entry_price=100.0,
+        initial_size=12.5, sl_policy="p2_step_stop", source="pro_v3",
+    )
+    # Poller already advanced to TP1
+    store.record_tp_fill(pid, stage=1, fill_price=101.0, closed_contracts=5.0)
+    store.clear_tp_order_id(pid, stage=1)
+
+    policy = P2StepStop(safety_sl_pct=0.05)
+    result = handle_tp(
+        tp_stage=1, symbol="SOL-USDT",
+        store=store, blofin=blofin, policy=policy,
+        margin_mode="isolated", tp_split=[0.40, 0.30, 0.30],
+    )
+    assert result["handled"] is True
+    assert result["idempotent"] is True
+    # Nothing should have been placed or cancelled
+    blofin.close_position_market.assert_not_called()
+    blofin.place_sl_order.assert_not_called()
+
+
+def test_tp_cancels_pending_limit_order_before_market_close(store, blofin, sol_instrument):
+    """When the TP alert arrives before the poller notices the limit fill, the
+    handler must cancel the pending limit first so BloFin doesn't double-close."""
+    from blofin_bridge.handlers.tp import handle_tp
+    from blofin_bridge.policies.p2_step_stop import P2StepStop
+
+    pid = store.create_position(
+        symbol="SOL-USDT", side="long", entry_price=100.0,
+        initial_size=12.5, sl_policy="p2_step_stop", source="pro_v3",
+    )
+    store.record_sl_order_id(pid, "sl-init")
+    store.record_tp_order_ids(
+        pid, tp1_order_id="tp1-limit", tp2_order_id="tp2-limit", tp3_order_id="tp3-limit",
+    )
+
+    blofin.close_position_market.return_value = {
+        "orderId": "close-1", "fill_price": 101.0,
+    }
+    blofin.place_sl_order.return_value = "sl-breakeven"
+
+    policy = P2StepStop(safety_sl_pct=0.05)
+    result = handle_tp(
+        tp_stage=1, symbol="SOL-USDT",
+        store=store, blofin=blofin, policy=policy,
+        margin_mode="isolated", tp_split=[0.40, 0.30, 0.30],
+    )
+    assert result["handled"] is True
+    # Limit order was cancelled first
+    blofin.cancel_order.assert_called_once_with("tp1-limit", "SOL-USDT")
+    # Then market close happened
+    blofin.close_position_market.assert_called_once()
+    # Stored id is cleared
+    row = store.get_open_position("SOL-USDT")
+    assert row.tp1_order_id is None
+
+
 def test_tp_handles_102038_sl_rejected(store, blofin, long_position_row):
     """When BloFin rejects the new SL placement (102038), partial close still counts as success with sl_placement_failed=True."""
     policy = P2StepStop(safety_sl_pct=0.05)

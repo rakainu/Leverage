@@ -186,6 +186,14 @@ class BloFinClient:
             raise RuntimeError(f"place_limit_reduce_only returned no order id: {order}")
         return order_id
 
+    def cancel_order(self, order_id: str, inst_id: str) -> None:
+        """Cancel a regular limit/market order (not a tpsl algo)."""
+        ccxt_sym = _instid_to_ccxt(inst_id)
+        try:
+            self._ccxt.cancel_order(order_id, ccxt_sym)
+        except Exception as exc:
+            raise RuntimeError(f"cancel_order failed for {order_id}: {exc}")
+
     def cancel_tpsl(self, inst_id: str, tpsl_id: str) -> None:
         # BloFin expects a JSON array body for cancel-tpsl, even for one id.
         resp = self._ccxt.private_post_trade_cancel_tpsl(
