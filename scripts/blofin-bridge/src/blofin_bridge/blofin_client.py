@@ -80,7 +80,12 @@ class BloFinClient:
         self, *, inst_id: str, side: str, contracts: int,
         safety_sl_trigger: float,
     ) -> dict[str, Any]:
-        """Market entry with an attached safety SL (OCO-style)."""
+        """Market entry with an attached safety SL (OCO-style).
+
+        BloFin's create_order response does not populate ``average``/``filled``
+        for market orders, so we resolve the actual fill price by reading the
+        resulting position via ``fetch_positions``.
+        """
         ccxt_sym = _instid_to_ccxt(inst_id)
         params = {
             "marginMode": "isolated",
@@ -92,17 +97,44 @@ class BloFinClient:
             symbol=ccxt_sym, type="market", side=side,
             amount=contracts, price=None, params=params,
         )
+        fill_price = float(order.get("average") or order.get("price") or 0)
+        if fill_price == 0:
+            # Resolve by reading the live position the order just created.
+            fill_price = self._fetch_position_entry(ccxt_sym) or 0.0
         return {
             "orderId": order.get("id"),
-            "fill_price": float(order.get("average") or order.get("price") or 0),
-            "filled": float(order.get("filled") or 0),
+            "fill_price": fill_price,
+            "filled": float(order.get("filled") or contracts),
         }
+
+    def _fetch_position_entry(self, ccxt_sym: str) -> float | None:
+        try:
+            for p in self._ccxt.fetch_positions([ccxt_sym]):
+                if (p.get("contracts") or 0) != 0:
+                    ep = p.get("entryPrice")
+                    if ep:
+                        return float(ep)
+        except Exception:
+            return None
+        return None
 
     def place_sl_order(
         self, *, inst_id: str, side: str, trigger_price: float,
         margin_mode: str,
     ) -> str:
         """Standalone SL on the entire position. Returns tpslId."""
+        if trigger_price <= 0:
+            raise ValueError(
+                f"refusing to place SL with non-positive trigger {trigger_price}"
+            )
+        # Round to instrument tick precision so BloFin accepts the request.
+        try:
+            tick = self._instruments[inst_id]["tickSize"]
+        except KeyError:
+            tick = 0.0
+        if tick > 0:
+            steps = round(trigger_price / tick)
+            trigger_price = round(steps * tick, 10)
         resp = self._ccxt.private_post_trade_order_tpsl({
             "instId": inst_id,
             "marginMode": margin_mode,
@@ -115,19 +147,55 @@ class BloFinClient:
         })
         if resp.get("code") not in ("0", 0):
             raise RuntimeError(f"place_sl_order failed: {resp}")
-        return resp["data"][0]["tpslId"]
+        data = resp.get("data")
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        return (data or {}).get("tpslId", "")
 
     def cancel_tpsl(self, inst_id: str, tpsl_id: str) -> None:
-        resp = self._ccxt.private_post_trade_cancel_tpsl({
-            "tpslId": tpsl_id, "instId": inst_id,
-        })
+        # BloFin expects a JSON array body for cancel-tpsl, even for one id.
+        resp = self._ccxt.private_post_trade_cancel_tpsl(
+            [{"tpslId": tpsl_id, "instId": inst_id}]
+        )
         if resp.get("code") not in ("0", 0):
             raise RuntimeError(f"cancel_tpsl failed: {resp}")
+
+    def cancel_all_tpsl(self, inst_id: str) -> int:
+        """Cancel every pending TP/SL order on the given instrument.
+
+        Returns the number of orders cancelled. BloFin attaches an OCO SL to
+        market entries which is not directly tracked by the bridge state, so
+        we sweep on every SL replacement to avoid the 102114 'already set'
+        error.
+        """
+        try:
+            listing = self._ccxt.private_get_trade_orders_tpsl_pending(
+                {"instId": inst_id}
+            )
+        except Exception:
+            return 0
+        items = listing.get("data") or []
+        cancelled = 0
+        for o in items:
+            tpsl_id = o.get("tpslId")
+            if not tpsl_id:
+                continue
+            try:
+                self.cancel_tpsl(inst_id, tpsl_id)
+                cancelled += 1
+            except Exception:
+                pass
+        return cancelled
 
     def close_position_market(
         self, *, inst_id: str, side: str, contracts: int,
     ) -> dict[str, Any]:
-        """Reduce-only market order to close N contracts."""
+        """Reduce-only market order to close N contracts.
+
+        BloFin omits ``average`` for market fills; fall back to the current
+        last price as a close-fill proxy so downstream policies see a usable
+        price.
+        """
         ccxt_sym = _instid_to_ccxt(inst_id)
         params = {
             "marginMode": "isolated",
@@ -138,9 +206,16 @@ class BloFinClient:
             symbol=ccxt_sym, type="market", side=side,
             amount=contracts, price=None, params=params,
         )
+        fill_price = float(order.get("average") or order.get("price") or 0)
+        if fill_price == 0:
+            try:
+                t = self._ccxt.fetch_ticker(ccxt_sym)
+                fill_price = float(t.get("last") or t.get("close") or 0)
+            except Exception:
+                fill_price = 0.0
         return {
             "orderId": order.get("id"),
-            "fill_price": float(order.get("average") or order.get("price") or 0),
+            "fill_price": fill_price,
         }
 
     def fetch_last_price(self, inst_id: str) -> float:

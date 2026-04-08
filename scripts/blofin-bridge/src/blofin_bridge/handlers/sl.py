@@ -13,17 +13,18 @@ def handle_sl(
     if row is None:
         return {"closed": False, "reason": "no open position"}
 
+    # Cancel any pending SL/TP first so the reduce-only close isn't blocked.
+    try:
+        blofin.cancel_all_tpsl(symbol)
+    except Exception:
+        pass
+    if row.sl_order_id:
+        store.record_sl_order_id(row.id, None)
+
     close_side = "sell" if row.side == "long" else "buy"
     fill = blofin.close_position_market(
         inst_id=symbol, side=close_side, contracts=row.current_size,
     )
-
-    if row.sl_order_id:
-        try:
-            blofin.cancel_tpsl(symbol, row.sl_order_id)
-        except Exception:
-            pass  # If the SL order already triggered, cancel will fail; safe to ignore
-        store.record_sl_order_id(row.id, None)
 
     store.close_position(row.id, realized_pnl=None)
     return {
