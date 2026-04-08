@@ -4,10 +4,9 @@ RUN useradd --create-home --shell /bin/bash bridge
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e .
-
 COPY src ./src
 COPY config ./config
+RUN pip install --no-cache-dir -e .
 
 RUN mkdir -p /app/data && chown -R bridge:bridge /app
 USER bridge
