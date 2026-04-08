@@ -19,3 +19,9 @@ symbols:
     leverage: 10
     margin_mode: isolated
     sl_policy: p2_step_stop
+  ZEC-USDT:
+    enabled: true
+    margin_usdt: 100
+    leverage: 10
+    margin_mode: isolated
+    sl_policy: p2_step_stop
