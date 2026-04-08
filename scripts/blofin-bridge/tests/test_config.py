@@ -99,3 +99,104 @@ def test_tp_split_must_sum_to_one(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="tp_split must sum to 1.0"):
         load_config(yaml_path)
+
+
+def test_atr_config_defaults_load(tmp_path, monkeypatch):
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(yaml.safe_dump({
+        "defaults": {
+            "margin_usdt": 100, "leverage": 10, "margin_mode": "isolated",
+            "position_mode": "net", "safety_sl_pct": 0.05,
+            "tp_split": [0.40, 0.30, 0.30], "sl_policy": "p2_step_stop",
+            "atr_length": 14,
+            "atr_timeframe": "5m",
+            "sl_atr_multiplier": 3.0,
+            "tp_atr_multipliers": [1.0, 2.0, 3.0],
+            "poll_interval_seconds": 10,
+        },
+        "symbols": {},
+    }))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BLOFIN_DEMO_API_KEY", "k")
+    monkeypatch.setenv("BLOFIN_DEMO_API_SECRET", "s")
+    monkeypatch.setenv("BLOFIN_DEMO_PASSPHRASE", "p")
+    monkeypatch.setenv("BRIDGE_SECRET", "x" * 20)
+    monkeypatch.setenv("BLOFIN_ENV", "demo")
+
+    cfg = load_config(yaml_path)
+    assert cfg.defaults.atr_length == 14
+    assert cfg.defaults.atr_timeframe == "5m"
+    assert cfg.defaults.sl_atr_multiplier == 3.0
+    assert cfg.defaults.tp_atr_multipliers == [1.0, 2.0, 3.0]
+    assert cfg.defaults.poll_interval_seconds == 10
+
+
+def test_atr_length_must_be_positive(tmp_path, monkeypatch):
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(yaml.safe_dump({
+        "defaults": {
+            "margin_usdt": 100, "leverage": 10, "margin_mode": "isolated",
+            "position_mode": "net", "safety_sl_pct": 0.05,
+            "tp_split": [0.40, 0.30, 0.30], "sl_policy": "p2_step_stop",
+            "atr_length": 0,                # invalid
+            "atr_timeframe": "5m",
+            "sl_atr_multiplier": 3.0,
+            "tp_atr_multipliers": [1.0, 2.0, 3.0],
+            "poll_interval_seconds": 10,
+        },
+        "symbols": {},
+    }))
+    monkeypatch.chdir(tmp_path)
+    for k, v in [("BLOFIN_DEMO_API_KEY", "k"), ("BLOFIN_DEMO_API_SECRET", "s"),
+                 ("BLOFIN_DEMO_PASSPHRASE", "p"), ("BRIDGE_SECRET", "x" * 20),
+                 ("BLOFIN_ENV", "demo")]:
+        monkeypatch.setenv(k, v)
+    with pytest.raises(Exception):
+        load_config(yaml_path)
+
+
+def test_tp_atr_multipliers_must_be_three_strictly_increasing(tmp_path, monkeypatch):
+    for bad in ([1.0, 2.0], [1.0, 2.0, 3.0, 4.0], [1.0, 1.0, 2.0], [3.0, 2.0, 1.0]):
+        yaml_path = tmp_path / f"cfg_{hash(tuple(bad))}.yaml"
+        yaml_path.write_text(yaml.safe_dump({
+            "defaults": {
+                "margin_usdt": 100, "leverage": 10, "margin_mode": "isolated",
+                "position_mode": "net", "safety_sl_pct": 0.05,
+                "tp_split": [0.40, 0.30, 0.30], "sl_policy": "p2_step_stop",
+                "atr_length": 14, "atr_timeframe": "5m",
+                "sl_atr_multiplier": 3.0,
+                "tp_atr_multipliers": bad,
+                "poll_interval_seconds": 10,
+            },
+            "symbols": {},
+        }))
+        monkeypatch.chdir(tmp_path)
+        for k, v in [("BLOFIN_DEMO_API_KEY", "k"), ("BLOFIN_DEMO_API_SECRET", "s"),
+                     ("BLOFIN_DEMO_PASSPHRASE", "p"), ("BRIDGE_SECRET", "x" * 20),
+                     ("BLOFIN_ENV", "demo")]:
+            monkeypatch.setenv(k, v)
+        with pytest.raises(Exception):
+            load_config(yaml_path)
+
+
+def test_poll_interval_must_be_at_least_one(tmp_path, monkeypatch):
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(yaml.safe_dump({
+        "defaults": {
+            "margin_usdt": 100, "leverage": 10, "margin_mode": "isolated",
+            "position_mode": "net", "safety_sl_pct": 0.05,
+            "tp_split": [0.40, 0.30, 0.30], "sl_policy": "p2_step_stop",
+            "atr_length": 14, "atr_timeframe": "5m",
+            "sl_atr_multiplier": 3.0,
+            "tp_atr_multipliers": [1.0, 2.0, 3.0],
+            "poll_interval_seconds": 0,
+        },
+        "symbols": {},
+    }))
+    monkeypatch.chdir(tmp_path)
+    for k, v in [("BLOFIN_DEMO_API_KEY", "k"), ("BLOFIN_DEMO_API_SECRET", "s"),
+                 ("BLOFIN_DEMO_PASSPHRASE", "p"), ("BRIDGE_SECRET", "x" * 20),
+                 ("BLOFIN_ENV", "demo")]:
+        monkeypatch.setenv(k, v)
+    with pytest.raises(Exception):
+        load_config(yaml_path)

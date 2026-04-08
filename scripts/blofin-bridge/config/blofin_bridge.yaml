@@ -6,6 +6,11 @@ defaults:
   safety_sl_pct: 0.05
   tp_split: [0.40, 0.30, 0.30]
   sl_policy: p2_step_stop
+  atr_length: 14
+  atr_timeframe: "5m"
+  sl_atr_multiplier: 3.0
+  tp_atr_multipliers: [1.0, 2.0, 3.0]
+  poll_interval_seconds: 10
 
 symbols:
   SOL-USDT:

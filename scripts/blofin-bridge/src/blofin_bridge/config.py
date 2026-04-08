@@ -75,6 +75,11 @@ class Defaults(BaseModel):
     safety_sl_pct: float
     tp_split: list[float]
     sl_policy: SLPolicyName
+    atr_length: int = 14
+    atr_timeframe: str = "5m"
+    sl_atr_multiplier: float = 3.0
+    tp_atr_multipliers: list[float] = Field(default_factory=lambda: [1.0, 2.0, 3.0])
+    poll_interval_seconds: int = 10
 
     @field_validator("tp_split")
     @classmethod
@@ -83,6 +88,45 @@ class Defaults(BaseModel):
             raise ValueError("tp_split must have exactly 3 values")
         if abs(sum(v) - 1.0) > 1e-6:
             raise ValueError(f"tp_split must sum to 1.0, got {sum(v)}")
+        return v
+
+    @field_validator("atr_length")
+    @classmethod
+    def _atr_length_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(f"atr_length must be positive, got {v}")
+        return v
+
+    @field_validator("atr_timeframe")
+    @classmethod
+    def _atr_timeframe_nonempty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("atr_timeframe must be a non-empty string")
+        return v
+
+    @field_validator("sl_atr_multiplier")
+    @classmethod
+    def _sl_mult_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError(f"sl_atr_multiplier must be positive, got {v}")
+        return v
+
+    @field_validator("tp_atr_multipliers")
+    @classmethod
+    def _tp_mults_valid(cls, v: list[float]) -> list[float]:
+        if len(v) != 3:
+            raise ValueError(f"tp_atr_multipliers must have exactly 3 values, got {len(v)}")
+        if any(x <= 0 for x in v):
+            raise ValueError(f"tp_atr_multipliers must all be positive, got {v}")
+        if not (v[0] < v[1] < v[2]):
+            raise ValueError(f"tp_atr_multipliers must be strictly increasing, got {v}")
+        return v
+
+    @field_validator("poll_interval_seconds")
+    @classmethod
+    def _poll_at_least_one(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"poll_interval_seconds must be >= 1, got {v}")
         return v
 
 
