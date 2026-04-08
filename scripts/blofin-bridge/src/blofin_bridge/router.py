@@ -67,6 +67,12 @@ def dispatch(
             policy=policy, margin_usdt=sym_cfg["margin_usdt"],
             leverage=sym_cfg["leverage"], margin_mode=sym_cfg["margin_mode"],
             sl_policy_name=sym_cfg["sl_policy"],
+            atr_length=sym_cfg["atr_length"],
+            atr_timeframe=sym_cfg["atr_timeframe"],
+            sl_atr_multiplier=sym_cfg["sl_atr_multiplier"],
+            tp_atr_multipliers=sym_cfg["tp_atr_multipliers"],
+            tp_split=sym_cfg["tp_split"],
+            safety_sl_pct=sym_cfg["safety_sl_pct"],
         )
 
     if action in ("tp1", "tp2", "tp3"):
@@ -87,6 +93,12 @@ def dispatch(
             policy=policy, margin_usdt=sym_cfg["margin_usdt"],
             leverage=sym_cfg["leverage"], margin_mode=sym_cfg["margin_mode"],
             sl_policy_name=sym_cfg["sl_policy"],
+            atr_length=sym_cfg["atr_length"],
+            atr_timeframe=sym_cfg["atr_timeframe"],
+            sl_atr_multiplier=sym_cfg["sl_atr_multiplier"],
+            tp_atr_multipliers=sym_cfg["tp_atr_multipliers"],
+            tp_split=sym_cfg["tp_split"],
+            safety_sl_pct=sym_cfg["safety_sl_pct"],
         )
 
     raise UnknownAction(action)  # unreachable

@@ -33,6 +33,9 @@ def cfg():
             "enabled": True, "margin_usdt": 100, "leverage": 10,
             "margin_mode": "isolated", "sl_policy": "p2_step_stop",
             "safety_sl_pct": 0.05, "tp_split": [0.4, 0.3, 0.3],
+            "atr_length": 3, "atr_timeframe": "5m",
+            "sl_atr_multiplier": 3.0,
+            "tp_atr_multipliers": [1.0, 2.0, 3.0],
         },
     }
 

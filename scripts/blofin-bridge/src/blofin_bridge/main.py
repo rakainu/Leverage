@@ -75,6 +75,10 @@ def create_app() -> FastAPI:
             **sc.model_dump(),
             "safety_sl_pct": settings.defaults.safety_sl_pct,
             "tp_split": settings.defaults.tp_split,
+            "atr_length": settings.defaults.atr_length,
+            "atr_timeframe": settings.defaults.atr_timeframe,
+            "sl_atr_multiplier": settings.defaults.sl_atr_multiplier,
+            "tp_atr_multipliers": settings.defaults.tp_atr_multipliers,
         }
         for name, sc in settings.symbols.items()
     }
