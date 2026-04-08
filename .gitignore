@@ -24,3 +24,10 @@ node_modules/
 
 # Logs
 *.log
+
+# blofin-bridge runtime
+scripts/blofin-bridge/data/
+scripts/blofin-bridge/*.db
+scripts/blofin-bridge/*.db-journal
+scripts/blofin-bridge/__pycache__/
+scripts/blofin-bridge/src/**/__pycache__/
