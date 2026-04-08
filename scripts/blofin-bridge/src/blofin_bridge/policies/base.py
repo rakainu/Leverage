@@ -10,8 +10,8 @@ class Position(NamedTuple):
     symbol: str
     side: Side
     entry_price: float
-    initial_size: int
-    current_size: int
+    initial_size: float
+    current_size: float
     tp_stage: int                         # 0, 1, 2, 3
     tp1_fill_price: Optional[float]
     tp2_fill_price: Optional[float]
@@ -21,7 +21,7 @@ class SLOrder(NamedTuple):
     symbol: str
     side: OrderSide                       # opposite of position side
     trigger_price: float
-    size: int                             # -1 means "entire remaining position"
+    size: float                           # -1 means "entire remaining position"
 
 
 class SLPolicy(Protocol):

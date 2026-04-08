@@ -19,8 +19,8 @@ class PositionRow:
     symbol: str
     side: str
     entry_price: float
-    initial_size: int
-    current_size: int
+    initial_size: float
+    current_size: float
     tp_stage: int
     tp1_fill_price: Optional[float]
     tp2_fill_price: Optional[float]
@@ -49,7 +49,7 @@ class Store:
 
     def create_position(
         self, *, symbol: str, side: str, entry_price: float,
-        initial_size: int, sl_policy: str, source: str,
+        initial_size: float, sl_policy: str, source: str,
     ) -> int:
         with self._conn() as c:
             cur = c.execute(
@@ -81,7 +81,7 @@ class Store:
         return self._row_to_position(row) if row else None
 
     def record_tp_fill(
-        self, pid: int, *, stage: int, fill_price: float, closed_contracts: int,
+        self, pid: int, *, stage: int, fill_price: float, closed_contracts: float,
     ) -> None:
         col = "tp1_fill_price" if stage == 1 else "tp2_fill_price" if stage == 2 else None
         with self._conn() as c:

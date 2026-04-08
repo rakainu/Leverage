@@ -77,7 +77,7 @@ class BloFinClient:
         )
 
     def place_market_entry(
-        self, *, inst_id: str, side: str, contracts: int,
+        self, *, inst_id: str, side: str, contracts: float,
         safety_sl_trigger: float,
     ) -> dict[str, Any]:
         """Market entry with an attached safety SL (OCO-style).
@@ -188,7 +188,7 @@ class BloFinClient:
         return cancelled
 
     def close_position_market(
-        self, *, inst_id: str, side: str, contracts: int,
+        self, *, inst_id: str, side: str, contracts: float,
     ) -> dict[str, Any]:
         """Reduce-only market order to close N contracts.
 
