@@ -25,6 +25,11 @@ class PositionRow:
     tp1_fill_price: Optional[float]
     tp2_fill_price: Optional[float]
     sl_order_id: Optional[str]
+    tp1_order_id: Optional[str]
+    tp2_order_id: Optional[str]
+    tp3_order_id: Optional[str]
+    sl_distance: Optional[float]
+    atr_value: Optional[float]
     sl_policy: str
     opened_at: str
     closed_at: Optional[str]
@@ -105,6 +110,34 @@ class Store:
                 (order_id, pid),
             )
 
+    def record_tp_order_ids(
+        self, pid: int, *,
+        tp1_order_id: Optional[str], tp2_order_id: Optional[str],
+        tp3_order_id: Optional[str],
+    ) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE positions SET tp1_order_id = ?, tp2_order_id = ?, "
+                "tp3_order_id = ? WHERE id = ?",
+                (tp1_order_id, tp2_order_id, tp3_order_id, pid),
+            )
+
+    def record_atr_context(
+        self, pid: int, *, atr_value: float, sl_distance: float,
+    ) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE positions SET atr_value = ?, sl_distance = ? WHERE id = ?",
+                (atr_value, sl_distance, pid),
+            )
+
+    def clear_tp_order_id(self, pid: int, stage: int) -> None:
+        col = {1: "tp1_order_id", 2: "tp2_order_id", 3: "tp3_order_id"}.get(stage)
+        if col is None:
+            raise ValueError(f"invalid tp stage {stage}")
+        with self._conn() as c:
+            c.execute(f"UPDATE positions SET {col} = NULL WHERE id = ?", (pid,))
+
     def close_position(self, pid: int, *, realized_pnl: Optional[float]) -> None:
         with self._conn() as c:
             c.execute(
@@ -157,7 +190,13 @@ class Store:
             current_size=row["current_size"], tp_stage=row["tp_stage"],
             tp1_fill_price=row["tp1_fill_price"],
             tp2_fill_price=row["tp2_fill_price"],
-            sl_order_id=row["sl_order_id"], sl_policy=row["sl_policy"],
+            sl_order_id=row["sl_order_id"],
+            tp1_order_id=row["tp1_order_id"],
+            tp2_order_id=row["tp2_order_id"],
+            tp3_order_id=row["tp3_order_id"],
+            sl_distance=row["sl_distance"],
+            atr_value=row["atr_value"],
+            sl_policy=row["sl_policy"],
             opened_at=row["opened_at"], closed_at=row["closed_at"],
             realized_pnl=row["realized_pnl"], source=row["source"],
         )

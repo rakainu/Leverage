@@ -67,6 +67,54 @@ def test_record_sl_order_id(store):
     assert row.sl_order_id == "algo-123"
 
 
+def test_record_tp_order_ids_and_read_back(store):
+    pid = store.create_position(
+        symbol="SOL-USDT", side="long", entry_price=80.0,
+        initial_size=12.5, sl_policy="p2_step_stop", source="pro_v3",
+    )
+    store.record_tp_order_ids(
+        pid, tp1_order_id="tp1-a", tp2_order_id="tp2-b", tp3_order_id="tp3-c",
+    )
+    row = store.get_position(pid)
+    assert row.tp1_order_id == "tp1-a"
+    assert row.tp2_order_id == "tp2-b"
+    assert row.tp3_order_id == "tp3-c"
+
+
+def test_record_atr_context(store):
+    pid = store.create_position(
+        symbol="SOL-USDT", side="long", entry_price=80.0,
+        initial_size=12.5, sl_policy="p2_step_stop", source="pro_v3",
+    )
+    store.record_atr_context(pid, atr_value=0.17, sl_distance=0.51)
+    row = store.get_position(pid)
+    assert row.atr_value == pytest.approx(0.17)
+    assert row.sl_distance == pytest.approx(0.51)
+
+
+def test_clear_tp_order_id(store):
+    pid = store.create_position(
+        symbol="SOL-USDT", side="long", entry_price=80.0,
+        initial_size=12.5, sl_policy="p2_step_stop", source="pro_v3",
+    )
+    store.record_tp_order_ids(
+        pid, tp1_order_id="tp1-a", tp2_order_id="tp2-b", tp3_order_id="tp3-c",
+    )
+    store.clear_tp_order_id(pid, stage=1)
+    row = store.get_position(pid)
+    assert row.tp1_order_id is None
+    assert row.tp2_order_id == "tp2-b"
+
+
+def test_clear_tp_order_id_invalid_stage_raises(store):
+    pid = store.create_position(
+        symbol="SOL-USDT", side="long", entry_price=80.0,
+        initial_size=12.5, sl_policy="p2_step_stop", source="pro_v3",
+    )
+    with pytest.raises(ValueError, match="invalid tp stage"):
+        store.clear_tp_order_id(pid, stage=5)
+
+
 def test_append_event_and_update_outcome(store):
     eid = store.append_event(
         position_id=None, event_type="buy",
