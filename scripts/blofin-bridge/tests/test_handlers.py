@@ -193,3 +193,27 @@ def test_tp_discarded_when_no_open_position(store, blofin):
     )
     assert result["handled"] is False
     assert "no open position" in result["reason"].lower()
+
+
+from blofin_bridge.handlers.sl import handle_sl
+
+
+def test_sl_force_closes_and_cancels_tpsl(store, blofin, long_position_row):
+    blofin.close_position_market.return_value = {
+        "orderId": "force-1", "fill_price": 78.0,
+    }
+    result = handle_sl(
+        symbol="SOL-USDT", store=store, blofin=blofin,
+    )
+    assert result["closed"] is True
+    assert store.get_open_position("SOL-USDT") is None
+    blofin.cancel_tpsl.assert_called_once_with("SOL-USDT", "tpsl-initial")
+    _, kwargs = blofin.close_position_market.call_args
+    assert kwargs["side"] == "sell"
+    assert kwargs["contracts"] == 12
+
+
+def test_sl_noop_when_flat(store, blofin):
+    result = handle_sl(symbol="SOL-USDT", store=store, blofin=blofin)
+    assert result["closed"] is False
+    blofin.close_position_market.assert_not_called()
