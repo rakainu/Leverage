@@ -66,20 +66,76 @@ class PositionPoller:
         self._stop_event: Optional[asyncio.Event] = None
 
     async def poll_once(self) -> None:
-        """Single poll cycle: inspect every open position, advance on TP fills."""
+        """Single poll cycle: inspect every open position, advance on TP fills.
+
+        Drift detection: at the start of each cycle, fetch BloFin positions
+        once. If a SQLite-tracked position is no longer present on BloFin
+        (closed by BloFin's safety SL, manual intervention, etc.), archive
+        the row and cancel any leftover orders.
+        """
         try:
             positions = self.store.list_open_positions()
         except Exception:
             log.exception("failed to list open positions")
             return
 
+        if not positions:
+            return
+
+        # Fetch BloFin positions ONCE per cycle for drift detection.
+        blofin_open_symbols: Optional[set[str]] = None
+        try:
+            blofin_positions = self.blofin.fetch_positions()
+            blofin_open_symbols = set()
+            for p in blofin_positions:
+                info = p.get("info") or {}
+                inst_id = info.get("instId") or p.get("symbol", "").replace("/", "-").split(":")[0]
+                if float(p.get("contracts") or 0) != 0:
+                    blofin_open_symbols.add(inst_id)
+        except Exception as exc:
+            log.warning(
+                "fetch_positions failed in poller, skipping drift check: %s", exc,
+            )
+            blofin_open_symbols = None  # default to safe: no archival
+
         for pos in positions:
             try:
-                self._process_position(pos)
+                self._process_position(pos, blofin_open_symbols=blofin_open_symbols)
             except Exception:
                 log.exception("poller failed for position id=%s", pos.id)
 
-    def _process_position(self, pos) -> None:
+    def _archive_stale_position(self, pos) -> None:
+        """Position is gone from BloFin. Cancel leftover orders, archive row."""
+        log.warning(
+            "Position id=%d (%s %s) gone from BloFin — archiving stale row",
+            pos.id, pos.symbol, pos.side,
+        )
+        # Cancel any leftover TP limit orders
+        for stage, oid in (
+            (1, pos.tp1_order_id), (2, pos.tp2_order_id), (3, pos.tp3_order_id),
+        ):
+            if not oid:
+                continue
+            try:
+                self.blofin.cancel_order(oid, pos.symbol)
+            except Exception:
+                pass  # may already be cancelled
+        # Cancel any leftover SL algo
+        if pos.sl_order_id:
+            try:
+                self.blofin.cancel_tpsl(pos.symbol, pos.sl_order_id)
+            except Exception:
+                pass
+        self.store.close_position(pos.id, realized_pnl=None)
+
+    def _process_position(
+        self, pos, *, blofin_open_symbols: Optional[set[str]] = None,
+    ) -> None:
+        # Drift check first: if BloFin no longer holds this position, archive.
+        if blofin_open_symbols is not None and pos.symbol not in blofin_open_symbols:
+            self._archive_stale_position(pos)
+            return
+
         filled = _detect_tp_fill(
             tp1_order_id=pos.tp1_order_id,
             tp2_order_id=pos.tp2_order_id,

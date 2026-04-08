@@ -15,6 +15,14 @@ def store(tmp_path):
 @pytest.fixture
 def blofin():
     m = MagicMock()
+    # Default: BloFin says SOL position is still open with the original size.
+    # Drift tests override this.
+    m.fetch_positions.return_value = [{
+        "info": {"instId": "SOL-USDT"},
+        "symbol": "SOL/USDT:USDT",
+        "contracts": 12.5,
+        "side": "long",
+    }]
     return m
 
 
@@ -187,3 +195,64 @@ async def test_poller_swallows_exceptions(store, blofin):
     await poller.poll_once()
     row = store.get_open_position("SOL-USDT")
     assert row.tp_stage == 0
+
+
+# === Drift detection (v1.1.1 fix) ===
+
+@pytest.mark.asyncio
+async def test_poller_archives_stale_position_when_blofin_flat(store, blofin):
+    """If BloFin shows no position for a SQLite-tracked symbol, archive it."""
+    pid = _long_position_with_tps(store)
+    blofin.fetch_positions.return_value = []   # BloFin is flat, drift!
+
+    poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
+    await poller.poll_once()
+
+    assert store.get_open_position("SOL-USDT") is None
+    # Drift detected -> TP order status was never queried
+    blofin.fetch_order.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_poller_drift_cancels_leftover_tps_and_sl(store, blofin):
+    """Stale archival should attempt to cancel any leftover orders."""
+    pid = _long_position_with_tps(store)
+    blofin.fetch_positions.return_value = []
+
+    poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
+    await poller.poll_once()
+
+    assert blofin.cancel_order.call_count == 3   # 3 TP limits
+    blofin.cancel_tpsl.assert_called_once_with("SOL-USDT", "sl-init")
+
+
+@pytest.mark.asyncio
+async def test_poller_proceeds_normally_when_position_still_open(store, blofin):
+    """If BloFin still has the position, normal TP-fill detection runs."""
+    pid = _long_position_with_tps(store)
+    # Default fixture has the position present; just stub fetch_order to "open"
+    blofin.fetch_order.side_effect = lambda oid, inst: {"status": "open"}
+
+    poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
+    await poller.poll_once()
+
+    row = store.get_open_position("SOL-USDT")
+    assert row is not None
+    assert row.tp_stage == 0
+
+
+@pytest.mark.asyncio
+async def test_poller_skips_drift_check_if_fetch_positions_fails(store, blofin):
+    """If fetch_positions raises, fall back to TP-fill detection only.
+
+    Default to safe: do NOT archive a position when we couldn't verify drift.
+    """
+    pid = _long_position_with_tps(store)
+    blofin.fetch_positions.side_effect = Exception("ccxt boom")
+    blofin.fetch_order.side_effect = lambda oid, inst: {"status": "open"}
+
+    poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
+    await poller.poll_once()
+
+    # Position should NOT be archived (drift unverifiable)
+    assert store.get_open_position("SOL-USDT") is not None
