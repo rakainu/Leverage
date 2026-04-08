@@ -75,3 +75,78 @@ class BloFinClient:
             leverage, ccxt_sym,
             params={"marginMode": margin_mode, "positionSide": "net"},
         )
+
+    def place_market_entry(
+        self, *, inst_id: str, side: str, contracts: int,
+        safety_sl_trigger: float,
+    ) -> dict[str, Any]:
+        """Market entry with an attached safety SL (OCO-style)."""
+        ccxt_sym = _instid_to_ccxt(inst_id)
+        params = {
+            "marginMode": "isolated",
+            "positionSide": "net",
+            "slTriggerPrice": safety_sl_trigger,
+            "slOrderPrice": "-1",         # -1 => market execution of SL
+        }
+        order = self._ccxt.create_order(
+            symbol=ccxt_sym, type="market", side=side,
+            amount=contracts, price=None, params=params,
+        )
+        return {
+            "orderId": order.get("id"),
+            "fill_price": float(order.get("average") or order.get("price") or 0),
+            "filled": float(order.get("filled") or 0),
+        }
+
+    def place_sl_order(
+        self, *, inst_id: str, side: str, trigger_price: float,
+        margin_mode: str,
+    ) -> str:
+        """Standalone SL on the entire position. Returns tpslId."""
+        resp = self._ccxt.private_post_trade_order_tpsl({
+            "instId": inst_id,
+            "marginMode": margin_mode,
+            "positionSide": "net",
+            "side": side,
+            "slTriggerPrice": str(trigger_price),
+            "slOrderPrice": "-1",
+            "size": "-1",                  # -1 = full position
+            "reduceOnly": "true",
+        })
+        if resp.get("code") not in ("0", 0):
+            raise RuntimeError(f"place_sl_order failed: {resp}")
+        return resp["data"][0]["tpslId"]
+
+    def cancel_tpsl(self, inst_id: str, tpsl_id: str) -> None:
+        resp = self._ccxt.private_post_trade_cancel_tpsl({
+            "tpslId": tpsl_id, "instId": inst_id,
+        })
+        if resp.get("code") not in ("0", 0):
+            raise RuntimeError(f"cancel_tpsl failed: {resp}")
+
+    def close_position_market(
+        self, *, inst_id: str, side: str, contracts: int,
+    ) -> dict[str, Any]:
+        """Reduce-only market order to close N contracts."""
+        ccxt_sym = _instid_to_ccxt(inst_id)
+        params = {
+            "marginMode": "isolated",
+            "positionSide": "net",
+            "reduceOnly": "true",
+        }
+        order = self._ccxt.create_order(
+            symbol=ccxt_sym, type="market", side=side,
+            amount=contracts, price=None, params=params,
+        )
+        return {
+            "orderId": order.get("id"),
+            "fill_price": float(order.get("average") or order.get("price") or 0),
+        }
+
+    def fetch_last_price(self, inst_id: str) -> float:
+        ccxt_sym = _instid_to_ccxt(inst_id)
+        ticker = self._ccxt.fetch_ticker(ccxt_sym)
+        return float(ticker.get("last") or ticker.get("close"))
+
+    def fetch_positions(self) -> list[dict[str, Any]]:
+        return self._ccxt.fetch_positions()
