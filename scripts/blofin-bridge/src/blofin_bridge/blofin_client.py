@@ -269,9 +269,26 @@ class BloFinClient:
         return self._ccxt.fetch_positions()
 
     def fetch_order(self, order_id: str, inst_id: str) -> dict[str, Any]:
-        """Fetch order status from BloFin. Returns ccxt order dict."""
+        """Fetch a single order by id.
+
+        NOTE: ccxt's BloFin adapter does not implement fetchOrder (raises
+        'not supported yet'). Prefer fetch_closed_orders / fetch_open_orders
+        which ARE supported. This method is kept only for backward-compat
+        with any remaining callers and will raise.
+        """
         ccxt_sym = _instid_to_ccxt(inst_id)
         return self._ccxt.fetch_order(order_id, ccxt_sym)
+
+    def fetch_closed_orders(
+        self, inst_id: str, *, limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return recent closed/filled orders for the instrument.
+
+        Used by the poller to detect TP fills since BloFin's ccxt adapter
+        does not support per-id fetchOrder.
+        """
+        ccxt_sym = _instid_to_ccxt(inst_id)
+        return self._ccxt.fetch_closed_orders(ccxt_sym, limit=limit)
 
     def fetch_recent_ohlcv(
         self, inst_id: str, *, timeframe: str = "5m", limit: int = 20,

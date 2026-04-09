@@ -12,17 +12,21 @@ def store(tmp_path):
     return Store(tmp_path / "poller.db")
 
 
+def _closed_order(oid, filled, avg, status="closed"):
+    return {"id": oid, "status": status, "filled": filled, "average": avg}
+
+
 @pytest.fixture
 def blofin():
     m = MagicMock()
-    # Default: BloFin says SOL position is still open with the original size.
-    # Drift tests override this.
+    # Default: BloFin still has the SOL position open, no TP fills in closed.
     m.fetch_positions.return_value = [{
         "info": {"instId": "SOL-USDT"},
         "symbol": "SOL/USDT:USDT",
         "contracts": 12.5,
         "side": "long",
     }]
+    m.fetch_closed_orders.return_value = []   # nothing filled by default
     return m
 
 
@@ -39,53 +43,60 @@ def _long_position_with_tps(store, sl_id="sl-init", tp1="tp1-id", tp2="tp2-id", 
     return pid
 
 
-def test_detect_tp_fill_returns_filled_stages():
-    """If fetch_order says closed for TP1, _detect_tp_fill returns [1]."""
-    order_statuses = {
-        "tp1-id": {"status": "closed", "filled": 5.0, "average": 101.0},
-        "tp2-id": {"status": "open", "filled": 0.0},
-        "tp3-id": {"status": "open", "filled": 0.0},
+# === _detect_tp_fill unit tests ===
+
+def test_detect_tp_fill_returns_filled_stage():
+    filled_orders = {
+        "tp1-id": _closed_order("tp1-id", 5.0, 101.0),
     }
     filled = _detect_tp_fill(
         tp1_order_id="tp1-id", tp2_order_id="tp2-id", tp3_order_id="tp3-id",
-        fetch_fn=lambda oid: order_statuses[oid],
+        filled_orders=filled_orders,
     )
-    assert filled == [1]
+    assert len(filled) == 1
+    assert filled[0][0] == 1
+    assert filled[0][1]["average"] == 101.0
 
 
-def test_detect_tp_fill_multiple():
-    order_statuses = {
-        "tp1-id": {"status": "closed", "filled": 5.0, "average": 101.0},
-        "tp2-id": {"status": "closed", "filled": 3.75, "average": 102.0},
-        "tp3-id": {"status": "open"},
+def test_detect_tp_fill_multiple_stages():
+    filled_orders = {
+        "tp1-id": _closed_order("tp1-id", 5.0, 101.0),
+        "tp2-id": _closed_order("tp2-id", 3.75, 102.0),
     }
     filled = _detect_tp_fill(
         tp1_order_id="tp1-id", tp2_order_id="tp2-id", tp3_order_id="tp3-id",
-        fetch_fn=lambda oid: order_statuses[oid],
+        filled_orders=filled_orders,
     )
-    assert filled == [1, 2]
+    assert [stage for stage, _ in filled] == [1, 2]
 
 
 def test_detect_tp_fill_skips_already_cleared():
-    """If tp1_order_id is None (already processed), skip it."""
-    order_statuses = {
-        "tp2-id": {"status": "closed", "filled": 3.75, "average": 102.0},
+    filled_orders = {
+        "tp2-id": _closed_order("tp2-id", 3.75, 102.0),
     }
     filled = _detect_tp_fill(
         tp1_order_id=None, tp2_order_id="tp2-id", tp3_order_id="tp3-id",
-        fetch_fn=lambda oid: order_statuses.get(oid, {"status": "open"}),
+        filled_orders=filled_orders,
     )
-    assert filled == [2]
+    assert [stage for stage, _ in filled] == [2]
 
 
+def test_detect_tp_fill_none_when_nothing_filled():
+    filled = _detect_tp_fill(
+        tp1_order_id="tp1-id", tp2_order_id="tp2-id", tp3_order_id="tp3-id",
+        filled_orders={},
+    )
+    assert filled == []
+
+
+# === PositionPoller integration tests ===
+
+@pytest.mark.asyncio
 async def test_poller_tp1_fill_moves_sl_to_entry(store, blofin):
     pid = _long_position_with_tps(store)
-    blofin.fetch_order.side_effect = lambda oid, inst: {
-        "tp1-id": {"status": "closed", "filled": 5.0, "average": 101.0},
-        "tp2-id": {"status": "open"},
-        "tp3-id": {"status": "open"},
-    }[oid]
-    blofin.cancel_tpsl.return_value = None
+    blofin.fetch_closed_orders.return_value = [
+        _closed_order("tp1-id", 5.0, 101.0),
+    ]
     blofin.place_sl_order.return_value = "sl-breakeven"
 
     poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
@@ -98,22 +109,23 @@ async def test_poller_tp1_fill_moves_sl_to_entry(store, blofin):
     assert row.current_size == pytest.approx(7.5)
     assert row.sl_order_id == "sl-breakeven"
 
-    blofin.cancel_tpsl.assert_called_once_with("SOL-USDT", "sl-init")
+    # Attached entry SL + any tracked SL -> swept via cancel_all_tpsl
+    blofin.cancel_all_tpsl.assert_called_once_with("SOL-USDT")
     _, kwargs = blofin.place_sl_order.call_args
     assert kwargs["trigger_price"] == pytest.approx(100.0)
     assert kwargs["side"] == "sell"
 
 
+@pytest.mark.asyncio
 async def test_poller_tp2_fill_moves_sl_to_tp1_price(store, blofin):
     pid = _long_position_with_tps(store)
     store.record_tp_fill(pid, stage=1, fill_price=101.0, closed_contracts=5.0)
     store.clear_tp_order_id(pid, stage=1)
     store.record_sl_order_id(pid, "sl-breakeven")
 
-    blofin.fetch_order.side_effect = lambda oid, inst: {
-        "tp2-id": {"status": "closed", "filled": 3.75, "average": 102.0},
-        "tp3-id": {"status": "open"},
-    }[oid]
+    blofin.fetch_closed_orders.return_value = [
+        _closed_order("tp2-id", 3.75, 102.0),
+    ]
     blofin.place_sl_order.return_value = "sl-tp1-lock"
 
     poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
@@ -127,6 +139,7 @@ async def test_poller_tp2_fill_moves_sl_to_tp1_price(store, blofin):
     assert kwargs["trigger_price"] == pytest.approx(101.0)
 
 
+@pytest.mark.asyncio
 async def test_poller_tp3_fill_archives_position(store, blofin):
     pid = _long_position_with_tps(store)
     store.record_tp_fill(pid, stage=1, fill_price=101.0, closed_contracts=5.0)
@@ -135,20 +148,21 @@ async def test_poller_tp3_fill_archives_position(store, blofin):
     store.clear_tp_order_id(pid, stage=2)
     store.record_sl_order_id(pid, "sl-tp1-lock")
 
-    blofin.fetch_order.side_effect = lambda oid, inst: {
-        "tp3-id": {"status": "closed", "filled": 3.75, "average": 103.0},
-    }[oid]
+    blofin.fetch_closed_orders.return_value = [
+        _closed_order("tp3-id", 3.75, 103.0),
+    ]
 
     poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
     await poller.poll_once()
 
     assert store.get_open_position("SOL-USDT") is None
-    blofin.cancel_tpsl.assert_called_once_with("SOL-USDT", "sl-tp1-lock")
+    blofin.cancel_all_tpsl.assert_called_once_with("SOL-USDT")
 
 
+@pytest.mark.asyncio
 async def test_poller_no_fills_is_noop(store, blofin):
     pid = _long_position_with_tps(store)
-    blofin.fetch_order.side_effect = lambda oid, inst: {"status": "open"}
+    # fetch_closed_orders default is [] in the fixture
 
     poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
     await poller.poll_once()
@@ -156,10 +170,11 @@ async def test_poller_no_fills_is_noop(store, blofin):
     row = store.get_open_position("SOL-USDT")
     assert row.tp_stage == 0
     assert row.tp1_order_id == "tp1-id"
-    blofin.cancel_tpsl.assert_not_called()
+    blofin.cancel_all_tpsl.assert_not_called()
     blofin.place_sl_order.assert_not_called()
 
 
+@pytest.mark.asyncio
 async def test_poller_short_tp1_fill_moves_sl_to_entry(store, blofin):
     pid = store.create_position(
         symbol="SOL-USDT", side="short", entry_price=100.0,
@@ -169,11 +184,9 @@ async def test_poller_short_tp1_fill_moves_sl_to_entry(store, blofin):
     store.record_tp_order_ids(
         pid, tp1_order_id="stp1", tp2_order_id="stp2", tp3_order_id="stp3",
     )
-    blofin.fetch_order.side_effect = lambda oid, inst: {
-        "stp1": {"status": "closed", "filled": 5.0, "average": 99.0},
-        "stp2": {"status": "open"},
-        "stp3": {"status": "open"},
-    }[oid]
+    blofin.fetch_closed_orders.return_value = [
+        _closed_order("stp1", 5.0, 99.0),
+    ]
     blofin.place_sl_order.return_value = "sl-breakeven"
 
     poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
@@ -186,10 +199,11 @@ async def test_poller_short_tp1_fill_moves_sl_to_entry(store, blofin):
     assert kwargs["trigger_price"] == pytest.approx(100.0)
 
 
+@pytest.mark.asyncio
 async def test_poller_swallows_exceptions(store, blofin):
     """A single position failure should not crash the poll loop."""
     pid = _long_position_with_tps(store)
-    blofin.fetch_order.side_effect = Exception("ccxt boom")
+    blofin.fetch_closed_orders.side_effect = Exception("ccxt boom")
 
     poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
     await poller.poll_once()
@@ -197,42 +211,37 @@ async def test_poller_swallows_exceptions(store, blofin):
     assert row.tp_stage == 0
 
 
-# === Drift detection (v1.1.1 fix) ===
+# === Drift detection (v1.1.1) ===
 
 @pytest.mark.asyncio
 async def test_poller_archives_stale_position_when_blofin_flat(store, blofin):
     """If BloFin shows no position for a SQLite-tracked symbol, archive it."""
-    pid = _long_position_with_tps(store)
-    blofin.fetch_positions.return_value = []   # BloFin is flat, drift!
-
-    poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
-    await poller.poll_once()
-
-    assert store.get_open_position("SOL-USDT") is None
-    # Drift detected -> TP order status was never queried
-    blofin.fetch_order.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_poller_drift_cancels_leftover_tps_and_sl(store, blofin):
-    """Stale archival should attempt to cancel any leftover orders."""
     pid = _long_position_with_tps(store)
     blofin.fetch_positions.return_value = []
 
     poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
     await poller.poll_once()
 
-    assert blofin.cancel_order.call_count == 3   # 3 TP limits
+    assert store.get_open_position("SOL-USDT") is None
+    blofin.fetch_closed_orders.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_poller_drift_cancels_leftover_tps_and_sl(store, blofin):
+    pid = _long_position_with_tps(store)
+    blofin.fetch_positions.return_value = []
+
+    poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
+    await poller.poll_once()
+
+    assert blofin.cancel_order.call_count == 3
     blofin.cancel_tpsl.assert_called_once_with("SOL-USDT", "sl-init")
 
 
 @pytest.mark.asyncio
 async def test_poller_proceeds_normally_when_position_still_open(store, blofin):
-    """If BloFin still has the position, normal TP-fill detection runs."""
     pid = _long_position_with_tps(store)
-    # Default fixture has the position present; just stub fetch_order to "open"
-    blofin.fetch_order.side_effect = lambda oid, inst: {"status": "open"}
-
+    # Default fixture: position present, no fills
     poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
     await poller.poll_once()
 
@@ -243,16 +252,78 @@ async def test_poller_proceeds_normally_when_position_still_open(store, blofin):
 
 @pytest.mark.asyncio
 async def test_poller_skips_drift_check_if_fetch_positions_fails(store, blofin):
-    """If fetch_positions raises, fall back to TP-fill detection only.
-
-    Default to safe: do NOT archive a position when we couldn't verify drift.
-    """
     pid = _long_position_with_tps(store)
     blofin.fetch_positions.side_effect = Exception("ccxt boom")
-    blofin.fetch_order.side_effect = lambda oid, inst: {"status": "open"}
 
     poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
     await poller.poll_once()
 
     # Position should NOT be archived (drift unverifiable)
     assert store.get_open_position("SOL-USDT") is not None
+
+
+# === Deferred SL retry (v1.1.3) ===
+
+@pytest.mark.asyncio
+async def test_poller_retries_sl_after_initial_rejection_next_cycle(store, blofin):
+    """If SL placement fails BOTH inside _process_position AND the in-cycle
+    retry, the position stays naked. On the NEXT cycle, _ensure_sl_in_place
+    retries again and succeeds once price cooperates."""
+    pid = _long_position_with_tps(store)
+    blofin.fetch_closed_orders.return_value = [
+        _closed_order("tp1-id", 5.0, 101.0),
+    ]
+    # Cycle 1: both attempts (fill-path and ensure-path) fail
+    # Cycle 2: fetch returns no fills, ensure-path succeeds
+    err = Exception(
+        "blofin {\"code\":\"102038\",\"msg\":\"SL trigger price should be lower\"}"
+    )
+    blofin.place_sl_order.side_effect = [err, err, "sl-breakeven-retry"]
+
+    poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
+    await poller.poll_once()
+
+    row = store.get_open_position("SOL-USDT")
+    assert row.tp_stage == 1
+    assert row.sl_order_id is None   # naked after cycle 1
+
+    # Cycle 2: no new fills, just the ensure-sl retry
+    blofin.fetch_closed_orders.return_value = []
+    await poller.poll_once()
+
+    row = store.get_open_position("SOL-USDT")
+    assert row.sl_order_id == "sl-breakeven-retry"
+
+
+@pytest.mark.asyncio
+async def test_poller_in_cycle_retry_succeeds_without_waiting(store, blofin):
+    """Common path: _process_position's SL placement fails, but
+    _ensure_sl_in_place at the end of the same cycle succeeds immediately."""
+    pid = _long_position_with_tps(store)
+    blofin.fetch_closed_orders.return_value = [
+        _closed_order("tp1-id", 5.0, 101.0),
+    ]
+    err = Exception(
+        "blofin {\"code\":\"102038\",\"msg\":\"SL trigger price should be lower\"}"
+    )
+    blofin.place_sl_order.side_effect = [err, "sl-breakeven-same-cycle"]
+
+    poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
+    await poller.poll_once()
+
+    row = store.get_open_position("SOL-USDT")
+    assert row.tp_stage == 1
+    assert row.sl_order_id == "sl-breakeven-same-cycle"
+
+
+@pytest.mark.asyncio
+async def test_poller_ensure_sl_is_noop_when_stage_zero(store, blofin):
+    """A position in tp_stage=0 uses the attached entry SL and should NOT
+    trigger standalone SL placement."""
+    pid = _long_position_with_tps(store)
+    # No fills, tp_stage stays 0
+
+    poller = PositionPoller(store=store, blofin=blofin, interval_seconds=0)
+    await poller.poll_once()
+
+    blofin.place_sl_order.assert_not_called()

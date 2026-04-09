@@ -26,26 +26,22 @@ def _detect_tp_fill(
     tp1_order_id: Optional[str],
     tp2_order_id: Optional[str],
     tp3_order_id: Optional[str],
-    fetch_fn: Callable[[str], dict],
-) -> list[int]:
-    """Return list of TP stages [1,2,3] that have filled, in order.
+    filled_orders: dict[str, dict],
+) -> list[tuple[int, dict]]:
+    """Return list of (stage, order_dict) for filled TPs, in stage order.
 
-    An order that was never tracked (id is None) is skipped. An order whose
-    status is 'closed' or 'filled' counts as filled.
+    `filled_orders` is a dict mapping order id -> ccxt order dict, containing
+    only orders with status closed/filled and filled > 0. Orders with id=None
+    (already processed) are skipped.
     """
-    filled: list[int] = []
+    filled: list[tuple[int, dict]] = []
     pairs = [(1, tp1_order_id), (2, tp2_order_id), (3, tp3_order_id)]
     for stage, oid in pairs:
         if not oid:
             continue
-        try:
-            order = fetch_fn(oid)
-        except Exception as exc:
-            log.warning("fetch_order failed for tp%d %s: %s", stage, oid, exc)
-            continue
-        status = (order.get("status") or "").lower()
-        if status in ("closed", "filled"):
-            filled.append(stage)
+        order = filled_orders.get(str(oid))
+        if order is not None:
+            filled.append((stage, order))
     return filled
 
 
@@ -103,6 +99,12 @@ class PositionPoller:
                 self._process_position(pos, blofin_open_symbols=blofin_open_symbols)
             except Exception:
                 log.exception("poller failed for position id=%s", pos.id)
+            # Retry any missing protective SL (covers the "BE SL rejected
+            # because price drifted" case and any other transient failure).
+            try:
+                self._ensure_sl_in_place(pos.id)
+            except Exception:
+                log.exception("poller SL retry failed for position id=%s", pos.id)
 
     def _archive_stale_position(self, pos) -> None:
         """Position is gone from BloFin. Cancel leftover orders, archive row."""
@@ -128,6 +130,53 @@ class PositionPoller:
                 pass
         self.store.close_position(pos.id, realized_pnl=None)
 
+    def _ensure_sl_in_place(self, position_id: int) -> None:
+        """If the position is in tp_stage>=1 but has no SL tracked, try to place
+        the appropriate SL. Retries across poll cycles after transient failures.
+
+        Runs AFTER any TP-fill processing so we catch both (a) a fresh fill
+        whose SL placement just failed and (b) a deferred retry from an
+        earlier cycle where price was on the wrong side.
+        """
+        row = self.store.get_position(position_id)
+        if row is None or row.closed_at is not None:
+            return
+        if row.sl_order_id is not None:
+            return
+        if row.tp_stage == 0:
+            return   # attached-entry SL regime, not our job
+
+        close_side = "sell" if row.side == "long" else "buy"
+        if row.tp_stage == 1:
+            target = row.entry_price                       # breakeven
+        elif row.tp_stage == 2:
+            if row.tp1_fill_price is None:
+                return
+            target = row.tp1_fill_price                    # lock tp1
+        else:
+            return
+
+        try:
+            new_sl_id = self.blofin.place_sl_order(
+                inst_id=row.symbol, side=close_side,
+                trigger_price=target, margin_mode="isolated",
+            )
+            self.store.record_sl_order_id(row.id, new_sl_id)
+            log.info(
+                "Placed deferred SL for %s at %s (stage=%d, id=%s)",
+                row.symbol, target, row.tp_stage, new_sl_id,
+            )
+        except Exception as exc:
+            msg = str(exc)
+            if "102038" in msg or "102040" in msg:
+                # Price on the wrong side of breakeven; wait for retrace.
+                log.debug(
+                    "SL at %s rejected for %s (price on wrong side), will retry next cycle",
+                    target, row.symbol,
+                )
+            else:
+                log.warning("SL placement failed for %s: %s", row.symbol, exc)
+
     def _process_position(
         self, pos, *, blofin_open_symbols: Optional[set[str]] = None,
     ) -> None:
@@ -136,44 +185,58 @@ class PositionPoller:
             self._archive_stale_position(pos)
             return
 
+        # Pull recent closed orders for this symbol and build a map of filled
+        # order ids -> ccxt order dicts. BloFin's ccxt adapter does NOT
+        # implement fetchOrder, so per-id lookup is not an option.
+        try:
+            closed_orders = self.blofin.fetch_closed_orders(pos.symbol, limit=50)
+        except Exception as exc:
+            log.warning(
+                "fetch_closed_orders failed in poller for %s: %s", pos.symbol, exc,
+            )
+            return
+
+        filled_orders: dict[str, dict] = {}
+        for o in closed_orders:
+            status = (o.get("status") or "").lower()
+            filled_qty = float(o.get("filled") or 0)
+            if status in ("closed", "filled") and filled_qty > 0:
+                filled_orders[str(o.get("id"))] = o
+
         filled = _detect_tp_fill(
             tp1_order_id=pos.tp1_order_id,
             tp2_order_id=pos.tp2_order_id,
             tp3_order_id=pos.tp3_order_id,
-            fetch_fn=lambda oid: self.blofin.fetch_order(oid, pos.symbol),
+            filled_orders=filled_orders,
         )
         if not filled:
             return
 
         # Process one stage per cycle to keep state transitions atomic.
-        stage = filled[0]
-        oid = {
-            1: pos.tp1_order_id,
-            2: pos.tp2_order_id,
-            3: pos.tp3_order_id,
-        }[stage]
-        order = self.blofin.fetch_order(oid, pos.symbol)
+        stage, order = filled[0]
         fill_price = float(order.get("average") or order.get("price") or 0.0)
-        filled_contracts = float(order.get("filled") or 0.0)
+        filled_qty = float(order.get("filled") or 0.0)
 
         log.info(
-            "TP%d filled for %s (pos %d): %s contracts @ %s",
-            stage, pos.symbol, pos.id, filled_contracts, fill_price,
+            "TP%d filled for %s (pos %d): %s @ %s",
+            stage, pos.symbol, pos.id, filled_qty, fill_price,
         )
 
-        # Record the fill + clear the order id in SQLite first.
+        # Record the fill + clear the tracked order id in SQLite first.
         self.store.record_tp_fill(
             pos.id, stage=stage, fill_price=fill_price,
-            closed_contracts=filled_contracts,
+            closed_contracts=filled_qty,
         )
         self.store.clear_tp_order_id(pos.id, stage=stage)
 
-        # Cancel the current SL (if any).
+        # Cancel any outstanding SL algo on this symbol.
+        # Covers BOTH the attached entry SL (which we don't track by id) and
+        # any previously placed standalone SL. Sweep mode clears everything.
+        try:
+            self.blofin.cancel_all_tpsl(pos.symbol)
+        except Exception as exc:
+            log.warning("cancel_all_tpsl failed during tp%d poll: %s", stage, exc)
         if pos.sl_order_id:
-            try:
-                self.blofin.cancel_tpsl(pos.symbol, pos.sl_order_id)
-            except Exception as exc:
-                log.warning("cancel_tpsl failed during tp%d poll: %s", stage, exc)
             self.store.record_sl_order_id(pos.id, None)
 
         # Reload the updated row.
