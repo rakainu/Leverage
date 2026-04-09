@@ -32,3 +32,11 @@ scripts/blofin-bridge/*.db-journal
 scripts/blofin-bridge/__pycache__/
 scripts/blofin-bridge/src/**/__pycache__/
 scripts/blofin-bridge/src/*.egg-info/
+
+# scalping runtime (clone of blofin-bridge)
+scripts/scalping/data/
+scripts/scalping/*.db
+scripts/scalping/*.db-journal
+scripts/scalping/__pycache__/
+scripts/scalping/src/**/__pycache__/
+scripts/scalping/src/*.egg-info/

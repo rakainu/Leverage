@@ -1,0 +1,17 @@
+services:
+  scalping:
+    build: .
+    container_name: scalping
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    ports:
+      # Host port 8788 to avoid collision with blofin-bridge on 8787.
+      - "127.0.0.1:8788:8787"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8787/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
