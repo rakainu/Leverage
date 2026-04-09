@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from .blofin_client import BloFinClient, build_ccxt_client
 from .config import Settings, load_config
-from .notify import Notifier
+from .notify import Notifier, format_entry, format_sl_close, format_reversal, format_error
 from .poller import PositionPoller
 from .router import dispatch, UnknownAction
 from .state import Store
@@ -24,7 +24,7 @@ class WebhookPayload(BaseModel):
     secret: str
     symbol: str
     action: Literal[
-        "buy", "sell", "tp1", "tp2", "tp3", "sl",
+        "buy", "sell", "sl",
         "reversal_buy", "reversal_sell",
     ]
     source: str = Field(default="pro_v3")
@@ -74,6 +74,11 @@ def create_app() -> FastAPI:
         store=store,
         blofin=blofin,
         interval_seconds=settings.defaults.poll_interval_seconds,
+        trail_activate_usdt=settings.defaults.trail_activate_usdt,
+        trail_distance_usdt=settings.defaults.trail_distance_usdt,
+        margin_usdt=settings.defaults.margin_usdt,
+        leverage=settings.defaults.leverage,
+        notifier=notifier,
     )
 
     @asynccontextmanager
@@ -93,12 +98,10 @@ def create_app() -> FastAPI:
     symbol_configs = {
         name: {
             **sc.model_dump(),
-            "safety_sl_pct": settings.defaults.safety_sl_pct,
-            "tp_split": settings.defaults.tp_split,
-            "atr_length": settings.defaults.atr_length,
-            "atr_timeframe": settings.defaults.atr_timeframe,
-            "sl_atr_multiplier": settings.defaults.sl_atr_multiplier,
-            "tp_atr_multipliers": settings.defaults.tp_atr_multipliers,
+            "sl_loss_usdt": settings.defaults.sl_loss_usdt,
+            "trail_activate_usdt": settings.defaults.trail_activate_usdt,
+            "trail_distance_usdt": settings.defaults.trail_distance_usdt,
+            "tp_limit_margin_pct": settings.defaults.tp_limit_margin_pct,
         }
         for name, sc in settings.symbols.items()
     }
@@ -164,7 +167,18 @@ def create_app() -> FastAPI:
                 store=store, blofin=blofin, symbol_configs=symbol_configs,
             )
             store.mark_event_handled(event_id, outcome="ok", error_msg=None)
-            notifier.send(f"{payload.action.upper()} {payload.symbol}: {result}")
+
+            # Format clean Telegram message
+            result["symbol"] = payload.symbol
+            if payload.action in ("buy", "sell") and result.get("opened"):
+                notifier.send(format_entry(result))
+            elif payload.action == "sl":
+                notifier.send(format_sl_close(result, payload.symbol))
+            elif payload.action.startswith("reversal_") and result.get("opened_new"):
+                notifier.send(format_reversal(result, payload.symbol))
+            else:
+                notifier.send(f"ℹ️ {payload.action.upper()} {payload.symbol}: done")
+
             return {"result": result}
         except UnknownAction as exc:
             store.mark_event_handled(event_id, outcome="error",
@@ -174,7 +188,7 @@ def create_app() -> FastAPI:
             log.exception("handler failed")
             store.mark_event_handled(event_id, outcome="error",
                                      error_msg=str(exc))
-            notifier.send(f"ERROR: {payload.action} {payload.symbol}: {exc}")
+            notifier.send(format_error(payload.action, payload.symbol, str(exc)))
             raise HTTPException(status_code=500, detail=str(exc))
 
     return app

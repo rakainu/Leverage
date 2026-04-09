@@ -30,6 +30,8 @@ class PositionRow:
     tp3_order_id: Optional[str]
     sl_distance: Optional[float]
     atr_value: Optional[float]
+    trail_high_price: Optional[float]
+    trail_active: int
     sl_policy: str
     opened_at: str
     closed_at: Optional[str]
@@ -131,6 +133,15 @@ class Store:
                 (atr_value, sl_distance, pid),
             )
 
+    def update_trail(
+        self, pid: int, *, trail_high_price: float, trail_active: bool,
+    ) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE positions SET trail_high_price = ?, trail_active = ? WHERE id = ?",
+                (trail_high_price, int(trail_active), pid),
+            )
+
     def clear_tp_order_id(self, pid: int, stage: int) -> None:
         col = {1: "tp1_order_id", 2: "tp2_order_id", 3: "tp3_order_id"}.get(stage)
         if col is None:
@@ -196,6 +207,8 @@ class Store:
             tp3_order_id=row["tp3_order_id"],
             sl_distance=row["sl_distance"],
             atr_value=row["atr_value"],
+            trail_high_price=row["trail_high_price"],
+            trail_active=row["trail_active"],
             sl_policy=row["sl_policy"],
             opened_at=row["opened_at"], closed_at=row["closed_at"],
             realized_pnl=row["realized_pnl"], source=row["source"],

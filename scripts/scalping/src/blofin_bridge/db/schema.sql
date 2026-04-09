@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS positions (
     tp3_order_id    TEXT,
     sl_distance     REAL,
     atr_value       REAL,
+    trail_high_price REAL,
+    trail_active    INTEGER NOT NULL DEFAULT 0,
     sl_policy       TEXT NOT NULL,
     opened_at       TEXT NOT NULL,
     closed_at       TEXT,

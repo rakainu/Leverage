@@ -17,7 +17,6 @@ def test_notifier_posts_to_telegram():
         args, kwargs = mock_post.call_args
         assert "tok" in args[0]
         assert kwargs["json"]["chat_id"] == "123"
-        assert kwargs["json"]["text"].startswith("FROM: BLOFIN_BRIDGE")
         assert "hello world" in kwargs["json"]["text"]
 
 

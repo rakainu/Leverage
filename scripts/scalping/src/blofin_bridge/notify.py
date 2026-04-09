@@ -1,10 +1,87 @@
-"""Telegram notifier. No-op when unconfigured."""
+"""Telegram notifier with clean formatting."""
 from __future__ import annotations
 import logging
+from typing import Any, Optional
 
 import httpx
 
 log = logging.getLogger(__name__)
+
+
+def format_entry(result: dict[str, Any]) -> str:
+    side = result.get("side", "?")
+    symbol = result.get("symbol", "?")
+    entry = result.get("entry_price", 0)
+    sl = result.get("sl_trigger", 0)
+    tp_ceil = result.get("tp_ceiling_price", 0)
+    sl_loss = result.get("sl_loss_usdt", 0)
+    trail_act = result.get("trail_activate_usdt", 0)
+    trail_dist = result.get("trail_distance_usdt", 0)
+
+    icon = "🟢" if side == "long" else "🔴"
+    direction = "LONG" if side == "long" else "SHORT"
+
+    return (
+        f"{icon} {direction} {symbol}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📍 Entry: ${entry:,.2f}\n"
+        f"🛑 SL: ${sl:,.2f} (−${sl_loss:,.0f})\n"
+        f"🎯 TP Ceiling: ${tp_ceil:,.2f}\n"
+        f"📈 Trail: activates +${trail_act:,.0f} → follows ${trail_dist:,.0f} behind"
+    )
+
+
+def format_sl_close(result: dict[str, Any], symbol: str) -> str:
+    return (
+        f"🔴 SL CLOSED {symbol}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"Position closed by stop loss"
+    )
+
+
+def format_reversal(result: dict[str, Any], symbol: str) -> str:
+    open_result = result.get("open_result", {})
+    side = open_result.get("side", "?")
+    entry = open_result.get("entry_price", 0)
+    sl = open_result.get("sl_trigger", 0)
+
+    icon = "🟢" if side == "long" else "🔴"
+    direction = "LONG" if side == "long" else "SHORT"
+    closed_prev = "✅" if result.get("closed_previous") else "⚠️ no prior"
+
+    return (
+        f"🔄 REVERSAL → {icon} {direction} {symbol}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"Previous: {closed_prev}\n"
+        f"📍 New Entry: ${entry:,.2f}\n"
+        f"🛑 SL: ${sl:,.2f}"
+    )
+
+
+def format_trail_activated(symbol: str, pnl: float, sl_price: float) -> str:
+    return (
+        f"📈 TRAIL ACTIVE {symbol}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"💰 P&L: +${pnl:,.2f}\n"
+        f"🛑 SL moved to: ${sl_price:,.2f}"
+    )
+
+
+def format_trail_update(symbol: str, new_high: float, sl_price: float) -> str:
+    return (
+        f"📈 TRAIL ↑ {symbol}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"🔝 New high: ${new_high:,.2f}\n"
+        f"🛑 SL → ${sl_price:,.2f}"
+    )
+
+
+def format_error(action: str, symbol: str, error: str) -> str:
+    return (
+        f"⚠️ ERROR {action.upper()} {symbol}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"{error}"
+    )
 
 
 class Notifier:
@@ -21,7 +98,7 @@ class Notifier:
             return
         body = {
             "chat_id": self.chat_id,
-            "text": f"FROM: BLOFIN_BRIDGE\n{text}",
+            "text": text,
         }
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         try:

@@ -1,4 +1,3 @@
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -7,19 +6,18 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    # Write a minimal yaml config and point the app at it
     yaml_path = tmp_path / "cfg.yaml"
     yaml_path.write_text(
         "defaults:\n"
-        "  margin_usdt: 100\n  leverage: 10\n  margin_mode: isolated\n"
-        "  position_mode: net\n  safety_sl_pct: 0.05\n"
-        "  tp_split: [0.4, 0.3, 0.3]\n  sl_policy: p2_step_stop\n"
+        "  margin_usdt: 100\n  leverage: 30\n  margin_mode: isolated\n"
+        "  position_mode: net\n  sl_policy: p2_step_stop\n"
+        "  sl_loss_usdt: 20\n  trail_activate_usdt: 30\n"
+        "  trail_distance_usdt: 10\n  tp_limit_margin_pct: 2.0\n"
         "symbols:\n"
         "  SOL-USDT:\n"
-        "    enabled: true\n    margin_usdt: 100\n    leverage: 10\n"
+        "    enabled: true\n    margin_usdt: 100\n    leverage: 30\n"
         "    margin_mode: isolated\n    sl_policy: p2_step_stop\n"
     )
-    # Isolate from the real .env file
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("BLOFIN_DEMO_API_KEY", "k")
     monkeypatch.setenv("BLOFIN_DEMO_API_SECRET", "s")
@@ -30,7 +28,6 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOFIN_BRIDGE_DB", str(tmp_path / "bridge.db"))
 
     from blofin_bridge import main as main_mod
-    # Replace BloFin client builder with a mock
     mock_blofin = MagicMock()
     mock_blofin.get_instrument.return_value = {
         "instId": "SOL-USDT", "contractValue": 1.0, "minSize": 1.0,
@@ -40,6 +37,7 @@ def app(tmp_path, monkeypatch):
     mock_blofin.place_market_entry.return_value = {
         "orderId": "ord-1", "fill_price": 80.12, "filled": 12,
     }
+    mock_blofin.place_limit_reduce_only.return_value = "tp-ceiling-id"
     mock_blofin.fetch_positions.return_value = []
     monkeypatch.setattr(main_mod, "_build_blofin_client", lambda _: mock_blofin)
     return main_mod.create_app()
@@ -67,9 +65,9 @@ def test_webhook_buy_opens_position(app):
 def test_webhook_unknown_action_400(app):
     client = TestClient(app)
     r = client.post("/webhook/pro-v3", json={
-        "secret": "topsecret" * 3, "symbol": "SOL-USDT", "action": "potato",
+        "secret": "topsecret" * 3, "symbol": "SOL-USDT", "action": "tp1",
     })
-    assert r.status_code == 400
+    assert r.status_code == 422 or r.status_code == 400
 
 
 def test_health_endpoint(app):

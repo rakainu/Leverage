@@ -1,27 +1,26 @@
 defaults:
   margin_usdt: 100
-  leverage: 10
+  leverage: 30
   margin_mode: isolated
   position_mode: net
-  safety_sl_pct: 0.05
-  tp_split: [0.40, 0.30, 0.30]
   sl_policy: p2_step_stop
-  atr_length: 14
-  atr_timeframe: "5m"
-  sl_atr_multiplier: 2.5
-  tp_atr_multipliers: [1.0, 2.0, 3.0]
+  # --- SL / Trail / TP ---
+  sl_loss_usdt: 20            # initial SL = $20 loss
+  trail_activate_usdt: 30     # start trailing at $30 profit
+  trail_distance_usdt: 10     # trail $10 behind highest profit
+  tp_limit_margin_pct: 2.0    # hard TP ceiling at 200% ($200 on $100)
   poll_interval_seconds: 10
 
 symbols:
   SOL-USDT:
     enabled: true
     margin_usdt: 100
-    leverage: 10
+    leverage: 30
     margin_mode: isolated
     sl_policy: p2_step_stop
   ZEC-USDT:
     enabled: true
     margin_usdt: 100
-    leverage: 10
+    leverage: 30
     margin_mode: isolated
     sl_policy: p2_step_stop
