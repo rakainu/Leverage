@@ -38,22 +38,16 @@ def contracts_for_margin(
     last_price: float,
     instrument: Instrument,
 ) -> float:
-    """Return size in BASE UNITS (e.g. SOL, ZEC) for the given margin/leverage/price.
+    """Return size in BloFin CONTRACTS for the given margin/leverage/price.
 
-    Internally:
-      1. Compute target notional in base currency: notional / last_price
-      2. Convert to BloFin contracts: base_qty / contractValue
-      3. Floor to instrument lotSize (which is expressed in contracts)
-      4. Verify >= minSize (also in contracts)
-      5. Return as base units: contracts × contractValue
+    ccxt's `amount` parameter for BloFin maps directly to BloFin's `size`
+    field, which is the number of contracts. This is verified empirically:
+    placing `amount=3.0` for ZEC produced a position of 3 contracts (0.3 ZEC),
+    NOT 3 ZEC. So the bridge stores and passes contracts everywhere.
 
-    The bridge passes the returned value as ccxt's `amount` parameter, which
-    ccxt expects in base currency. ccxt re-derives the BloFin contract count
-    internally from the market metadata.
-
-    For SOL-USDT (contractValue=1.0) base units == contracts so the math
-    looks pass-through. For ZEC-USDT (contractValue=0.1) the conversion
-    matters: 30 contracts = 3 ZEC.
+    For SOL (contractValue=1.0) contracts == base SOL coincidentally.
+    For ZEC (contractValue=0.1) contracts == 10 × base ZEC, e.g. 30 contracts
+    means 3 ZEC.
     """
     if leverage <= 0:
         raise SizingError("leverage must be positive")
@@ -64,44 +58,31 @@ def contracts_for_margin(
 
     contract_value = instrument["contractValue"]
     notional = margin_usdt * leverage
-    base_qty = notional / last_price
-    raw_contracts = base_qty / contract_value
+    base_qty = notional / last_price                # e.g. 3.073 ZEC
+    raw_contracts = base_qty / contract_value       # e.g. 30.73
 
-    floored_contracts = _floor_to_lot(raw_contracts, instrument["lotSize"])
+    floored = _floor_to_lot(raw_contracts, instrument["lotSize"])
 
-    if floored_contracts < instrument["minSize"]:
+    if floored < instrument["minSize"]:
         raise SizingError(
-            f"computed size {floored_contracts} contracts is below minSize "
+            f"computed size {floored} contracts is below minSize "
             f"{instrument['minSize']}"
         )
-    base_size = floored_contracts * contract_value
-    # Round to contractValue's decimal precision to kill float noise.
-    if contract_value < 1:
-        decimals = max(0, -math.floor(math.log10(contract_value)))
-        base_size = round(base_size, decimals + 4)
-    return base_size
+    return floored
 
 
 def close_fraction_to_contracts(
-    open_size_base: float,
+    open_contracts: float,
     fraction: float,
     instrument: Instrument,
 ) -> float:
-    """Return size to close (in base units) for a fractional TP.
+    """Return contract count to close for a fractional TP (e.g. 0.40 for TP1).
 
-    Input `open_size_base` is the position size in base currency (what
-    `contracts_for_margin` returns). Output is also in base units, ready
-    to pass as ccxt's `amount`. Internally rounds to lotSize precision via
-    contract conversion so BloFin won't reject the order.
+    Input is in CONTRACTS (matching `contracts_for_margin`'s output).
+    Output is also in contracts. Floors to lotSize.
     """
     if not 0 < fraction <= 1:
         raise SizingError("fraction must be in (0, 1]")
-    contract_value = instrument["contractValue"]
-    raw_base = open_size_base * fraction
-    raw_contracts = raw_base / contract_value
-    floored_contracts = _floor_to_lot(raw_contracts, instrument["lotSize"])
-    base_size = max(0.0, floored_contracts * contract_value)
-    if contract_value < 1 and base_size > 0:
-        decimals = max(0, -math.floor(math.log10(contract_value)))
-        base_size = round(base_size, decimals + 4)
-    return base_size
+    raw = open_contracts * fraction
+    floored = _floor_to_lot(raw, instrument["lotSize"])
+    return max(0.0, floored)

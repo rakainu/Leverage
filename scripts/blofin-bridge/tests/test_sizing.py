@@ -65,42 +65,39 @@ def test_odd_price_keeps_precision(sol_instrument):
 
 # === Multi-instrument tests: contractValue != 1.0 ===
 
-def test_zec_size_returns_base_units_not_contracts(zec_instrument):
-    """$100 margin x 10x at $324 ZEC should return ~3 ZEC (base units)
-    not ~30 (contracts). Each contract = 0.1 ZEC.
+def test_zec_size_returns_contracts(zec_instrument):
+    """$100 margin × 10x at $324 ZEC = 3.084 ZEC = 30.84 contracts (cv=0.1)
+    floored to lot 1.0 = 30 contracts. ccxt's amount field for BloFin maps
+    directly to BloFin's size in contracts.
     """
     size = contracts_for_margin(
         margin_usdt=100, leverage=10, last_price=324.0,
         instrument=zec_instrument,
     )
-    # 1000 / 324 = 3.0864 ZEC
-    # = 30.864 contracts (cv=0.1)
-    # floor to lot 1.0 = 30 contracts
-    # = 30 * 0.1 = 3.0 ZEC base units
-    assert size == 3.0
+    assert size == 30   # 30 contracts == 3 ZEC base
 
 
-def test_zec_partial_close_returns_base_units(zec_instrument):
-    """40% of 3.0 ZEC = 1.2 ZEC = 12 contracts (whole-lot) = 1.2 ZEC base."""
-    closed = close_fraction_to_contracts(3.0, 0.40, zec_instrument)
-    assert closed == 1.2
+def test_zec_partial_close_in_contracts(zec_instrument):
+    """40% of 30 contracts = 12 contracts (whole lot)."""
+    closed = close_fraction_to_contracts(30, 0.40, zec_instrument)
+    assert closed == 12
 
 
 def test_zec_partial_close_with_lot_rounding(zec_instrument):
-    """30% of 3.0 ZEC = 0.9 ZEC = 9 contracts -> 0.9 ZEC base. Whole lot."""
-    closed = close_fraction_to_contracts(3.0, 0.30, zec_instrument)
-    assert closed == 0.9
+    """30% of 30 contracts = 9 contracts (whole lot)."""
+    closed = close_fraction_to_contracts(30, 0.30, zec_instrument)
+    assert closed == 9
 
 
 def test_zec_partial_close_below_lot_rounds_to_zero(zec_instrument):
-    """5% of 0.5 ZEC = 0.025 ZEC = 0.25 contracts -> floors to 0 (below 1 lot)."""
-    closed = close_fraction_to_contracts(0.5, 0.05, zec_instrument)
+    """5% of 5 contracts = 0.25 contracts -> floors to 0 (below 1 lot)."""
+    closed = close_fraction_to_contracts(5, 0.05, zec_instrument)
     assert closed == 0.0
 
 
 def test_zec_below_min_raises(zec_instrument):
-    """$10 margin × 10x at $324 ZEC = 0.31 ZEC = 3.1 contracts. Above min,
-    should pass. Use $1 margin to actually trip the floor."""
+    """$1 margin × 10x at $324 = 0.0308 ZEC = 0.308 contracts -> below
+    minSize of 1 contract, should raise."""
     with pytest.raises(SizingError):
         contracts_for_margin(
             margin_usdt=1, leverage=10, last_price=324.0,
@@ -108,15 +105,10 @@ def test_zec_below_min_raises(zec_instrument):
         )
 
 
-def test_sol_unchanged_after_refactor(sol_instrument):
-    """Sanity: SOL still gives same answer as v1.1 (contractValue=1.0
-    makes the conversion a no-op)."""
-    # $100 margin × 10x at $80 = 12.5 SOL = 1250 contracts (cv=1.0... wait
-    # cv=1.0 so contracts = base). 1250/0.01 lot = 1250 lots, no rounding.
-    # 12.50 contracts × 1.0 = 12.50 ZEC base. Wait SOL.
-    # Just verify: 100/10 = $1000 / $80 = 12.5 SOL.
+def test_sol_returns_contracts_same_as_base(sol_instrument):
+    """SOL contractValue=1.0 means contracts == base SOL count by coincidence."""
     size = contracts_for_margin(
         margin_usdt=100, leverage=10, last_price=80.0,
         instrument=sol_instrument,
     )
-    assert size == 12.5
+    assert size == 12.5   # 12.5 contracts == 12.5 SOL

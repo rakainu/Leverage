@@ -60,6 +60,14 @@ def handle_entry(
     last_price = blofin.fetch_last_price(symbol)
     side: str = "long" if action == "buy" else "short"
 
+    # Set leverage on this symbol BEFORE placing the order. BloFin defaults
+    # to 3x for new accounts; without this call we'd silently use whatever
+    # leverage was last set in the BloFin UI.
+    try:
+        blofin.set_leverage(symbol, leverage=int(leverage), margin_mode=margin_mode)
+    except Exception as exc:
+        log.warning("set_leverage failed for %s @ %sx: %s", symbol, leverage, exc)
+
     # --- ATR path ---
     atr_value: Optional[float] = None
     sl_distance: Optional[float] = None
