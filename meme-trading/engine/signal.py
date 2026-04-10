@@ -28,3 +28,4 @@ class ConvergenceSignal:
     signal_at: datetime
     avg_amount_sol: float
     total_amount_sol: float
+    convergence_minutes: float = 0.0

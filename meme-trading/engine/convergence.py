@@ -81,21 +81,25 @@ class ConvergenceEngine:
             return
         self._signaled[token_mint].add(frozenset(distinct_wallets))
 
+        first_buy = min(e.timestamp for e in events)
+        signal_time = datetime.now(timezone.utc)
         signal = ConvergenceSignal(
             token_mint=token_mint,
             token_symbol=events[0].token_symbol,
             wallets=sorted(distinct_wallets),
             buy_events=list(events),
-            first_buy_at=min(e.timestamp for e in events),
-            signal_at=datetime.now(timezone.utc),
+            first_buy_at=first_buy,
+            signal_at=signal_time,
             avg_amount_sol=mean(e.amount_sol for e in events),
             total_amount_sol=sum(e.amount_sol for e in events),
+            convergence_minutes=(signal_time - first_buy).total_seconds() / 60,
         )
 
         logger.info(
             f"CONVERGENCE SIGNAL: {token_mint[:12]}.. — "
             f"{len(distinct_wallets)} wallets, "
-            f"{signal.total_amount_sol:.2f} SOL total"
+            f"{signal.total_amount_sol:.2f} SOL total, "
+            f"{signal.convergence_minutes:.1f}min convergence"
         )
 
         # Persist signal to DB

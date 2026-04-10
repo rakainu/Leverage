@@ -36,9 +36,23 @@ class Settings(BaseSettings):
     # Position management
     max_concurrent_positions: int = 5
     trade_amount_sol: float = 0.1
-    take_profit_pct: float = 50.0
     stop_loss_pct: float = 25.0
     position_timeout_minutes: int = 240
+
+    # Trailing stop loss
+    # Phase 1: Entry SL at -stop_loss_pct (25%)
+    # Phase 2: Once profit hits trail_activate_pct, move SL to trail_breakeven_pct
+    # Phase 3: Trail at trail_distance_pct below high watermark
+    trail_activate_pct: float = 30.0
+    trail_breakeven_pct: float = 5.0
+    trail_distance_pct: float = 20.0
+
+    # Convergence speed filter (minutes between first buy and signal)
+    min_convergence_minutes: float = 10.0
+    max_convergence_minutes: float = 20.0
+
+    # Time-of-day filter (UTC hours to block trading)
+    blocked_hours_utc: list[int] = [13, 14, 15, 16]
 
     # Safety thresholds
     min_liquidity_sol: float = 10.0
@@ -71,7 +85,7 @@ class Settings(BaseSettings):
     wallets_json_path: str = "config/wallets.json"
     db_path: str = "data/smc.db"
 
-    @field_validator("solana_rpc_urls", "solana_ws_urls", mode="before")
+    @field_validator("solana_rpc_urls", "solana_ws_urls", "blocked_hours_utc", mode="before")
     @classmethod
     def parse_json_list(cls, v):
         if isinstance(v, str):

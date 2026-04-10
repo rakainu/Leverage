@@ -50,6 +50,39 @@ async def signal_router(
     while True:
         signal: ConvergenceSignal = await signal_bus.get()
 
+        # --- Convergence speed filter ---
+        conv_min = signal.convergence_minutes
+        if conv_min < settings.min_convergence_minutes or conv_min > settings.max_convergence_minutes:
+            logger.info(
+                f"SKIP {signal.token_mint[:12]}.. — convergence speed "
+                f"{conv_min:.1f}min outside [{settings.min_convergence_minutes}-{settings.max_convergence_minutes}]min window"
+            )
+            db = await get_db()
+            await db.execute(
+                """UPDATE convergence_signals SET action_taken='skip_speed'
+                   WHERE token_mint=? AND action_taken IS NULL
+                   ORDER BY signal_at DESC LIMIT 1""",
+                (signal.token_mint,),
+            )
+            await db.commit()
+            continue
+
+        # --- Time-of-day filter (UTC) ---
+        current_hour = datetime.now(timezone.utc).hour
+        if current_hour in settings.blocked_hours_utc:
+            logger.info(
+                f"SKIP {signal.token_mint[:12]}.. — blocked hour UTC {current_hour}"
+            )
+            db = await get_db()
+            await db.execute(
+                """UPDATE convergence_signals SET action_taken='skip_hour'
+                   WHERE token_mint=? AND action_taken IS NULL
+                   ORDER BY signal_at DESC LIMIT 1""",
+                (signal.token_mint,),
+            )
+            await db.commit()
+            continue
+
         logger.info(f"Running safety checks on {signal.token_mint[:12]}...")
         result: SafetyResult = await safety.check(signal.token_mint)
 
@@ -153,7 +186,8 @@ async def main():
     logger.info(f"Mode: {settings.mode.upper()}")
     logger.info(f"Convergence: {settings.convergence_threshold} wallets / {settings.convergence_window_minutes}min window")
     logger.info(f"Trade size: {settings.trade_amount_sol} SOL")
-    logger.info(f"TP: {settings.take_profit_pct}% | SL: {settings.stop_loss_pct}% | Timeout: {settings.position_timeout_minutes}min")
+    logger.info(f"SL: {settings.stop_loss_pct}% | Trail: activate@+{settings.trail_activate_pct}%, lock@+{settings.trail_breakeven_pct}%, distance {settings.trail_distance_pct}% | Timeout: {settings.position_timeout_minutes}min")
+    logger.info(f"Convergence speed: {settings.min_convergence_minutes}-{settings.max_convergence_minutes}min | Blocked hours UTC: {settings.blocked_hours_utc}")
     logger.info(f"Dashboard: http://localhost:{settings.dashboard_port}")
     logger.info("=" * 60)
 

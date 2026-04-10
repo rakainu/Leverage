@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS positions (
     pnl_1h_pct REAL,
     pnl_4h_pct REAL,
     pnl_24h_pct REAL,
+    high_watermark_pct REAL DEFAULT 0.0,
     buy_signature TEXT,
     sell_signature TEXT,
     opened_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
