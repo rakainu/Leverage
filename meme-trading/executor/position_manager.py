@@ -48,6 +48,14 @@ class PositionManager:
         entry_price = pos["entry_price"]
         pnl_pct = ((current_price - entry_price) / entry_price) * 100
 
+        # Cap at ±1000% — anything beyond is bad price data
+        if abs(pnl_pct) > 1000:
+            logger.warning(
+                f"Position #{pos['id']} P&L {pnl_pct:+.0f}% exceeds cap, "
+                f"entry={entry_price}, current={current_price} — skipping as bad data"
+            )
+            return
+
         opened_at = datetime.fromisoformat(pos["opened_at"])
         if opened_at.tzinfo is None:
             opened_at = opened_at.replace(tzinfo=timezone.utc)

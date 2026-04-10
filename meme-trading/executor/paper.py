@@ -102,6 +102,11 @@ class PaperExecutor:
 
             pnl_pct = ((current_price - pos["entry_price"]) / pos["entry_price"]) * 100
 
+            # Skip bad price data
+            if abs(pnl_pct) > 1000:
+                logger.warning(f"Paper #{pos['id']} P&L {pnl_pct:+.0f}% exceeds cap — bad price data, skipping")
+                continue
+
             updates = {"current_price": current_price, "pnl_pct": pnl_pct}
 
             if age_minutes >= 60 and pos["price_1h"] is None:
