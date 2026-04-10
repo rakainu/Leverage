@@ -39,18 +39,25 @@ def dispatch(
                 "reason": f"symbol {symbol} disabled in config"}
 
     if action in ("buy", "sell"):
-        return handle_entry(
-            action=action, symbol=symbol, store=store, blofin=blofin,
-            margin_usdt=sym_cfg["margin_usdt"],
-            leverage=sym_cfg["leverage"], margin_mode=sym_cfg["margin_mode"],
-            sl_policy_name=sym_cfg["sl_policy"],
-            sl_loss_usdt=sym_cfg["sl_loss_usdt"],
-            trail_activate_usdt=sym_cfg["trail_activate_usdt"],
-            trail_distance_usdt=sym_cfg["trail_distance_usdt"],
-            tp_limit_margin_pct=sym_cfg["tp_limit_margin_pct"],
+        # Save as pending signal — poller will execute on EMA retest
+        signal_price = blofin.fetch_last_price(symbol)
+        # Cancel any existing pending signals for this symbol
+        store.cancel_pending_signals_for_symbol(symbol)
+        sig_id = store.create_pending_signal(
+            symbol=symbol, action=action, signal_price=signal_price,
+            timeout_minutes=sym_cfg.get("ema_retest_timeout_minutes", 30),
         )
+        return {
+            "pending": True,
+            "signal_id": sig_id,
+            "action": action,
+            "signal_price": signal_price,
+            "reason": "waiting for EMA retest",
+        }
 
     if action == "sl":
+        # Also cancel any pending signals — we're closing
+        store.cancel_pending_signals_for_symbol(symbol)
         return handle_sl(
             symbol=symbol, store=store, blofin=blofin,
             margin_usdt=sym_cfg["margin_usdt"], leverage=sym_cfg["leverage"],
@@ -58,15 +65,24 @@ def dispatch(
 
     if action.startswith("reversal_"):
         new_action = action.split("_", 1)[1]
-        return handle_reversal(
-            new_action=new_action, symbol=symbol, store=store, blofin=blofin,
-            margin_usdt=sym_cfg["margin_usdt"],
-            leverage=sym_cfg["leverage"], margin_mode=sym_cfg["margin_mode"],
-            sl_policy_name=sym_cfg["sl_policy"],
-            sl_loss_usdt=sym_cfg["sl_loss_usdt"],
-            trail_activate_usdt=sym_cfg["trail_activate_usdt"],
-            trail_distance_usdt=sym_cfg["trail_distance_usdt"],
-            tp_limit_margin_pct=sym_cfg["tp_limit_margin_pct"],
+        # Cancel pending, close existing, then queue new pending
+        store.cancel_pending_signals_for_symbol(symbol)
+        closed = handle_sl(
+            symbol=symbol, store=store, blofin=blofin,
+            margin_usdt=sym_cfg["margin_usdt"], leverage=sym_cfg["leverage"],
         )
+        signal_price = blofin.fetch_last_price(symbol)
+        sig_id = store.create_pending_signal(
+            symbol=symbol, action=new_action, signal_price=signal_price,
+            timeout_minutes=sym_cfg.get("ema_retest_timeout_minutes", 30),
+        )
+        return {
+            "closed_previous": closed.get("closed", False),
+            "pending_new": True,
+            "signal_id": sig_id,
+            "action": new_action,
+            "signal_price": signal_price,
+            "close_result": closed,
+        }
 
     raise UnknownAction(action)  # unreachable

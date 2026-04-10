@@ -221,6 +221,57 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # -------- pending signals --------
+
+    def create_pending_signal(
+        self, *, symbol: str, action: str, signal_price: float,
+        timeout_minutes: int = 30,
+    ) -> int:
+        now = datetime.now(timezone.utc)
+        expires = now + __import__("datetime").timedelta(minutes=timeout_minutes)
+        with self._conn() as c:
+            cur = c.execute(
+                """
+                INSERT INTO pending_signals
+                  (symbol, action, signal_price, created_at, expires_at, status)
+                VALUES (?, ?, ?, ?, ?, 'pending')
+                """,
+                (symbol, action, signal_price, now.isoformat(), expires.isoformat()),
+            )
+            return cur.lastrowid
+
+    def list_pending_signals(self) -> list[dict[str, Any]]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM pending_signals WHERE status = 'pending'"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def fill_pending_signal(self, sig_id: int, fill_price: float) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE pending_signals SET status = 'filled', filled_at = ?, "
+                "fill_price = ? WHERE id = ?",
+                (_now_iso(), fill_price, sig_id),
+            )
+
+    def expire_pending_signal(self, sig_id: int) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE pending_signals SET status = 'expired' WHERE id = ?",
+                (sig_id,),
+            )
+
+    def cancel_pending_signals_for_symbol(self, symbol: str) -> int:
+        """Cancel all pending signals for a symbol (e.g. on reversal or new signal)."""
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE pending_signals SET status = 'cancelled' "
+                "WHERE symbol = ? AND status = 'pending'",
+                (symbol,),
+            )
+            return cur.rowcount
+
     # -------- events --------
 
     def append_event(

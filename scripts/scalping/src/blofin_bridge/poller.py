@@ -13,11 +13,16 @@ Every poll cycle (default 10s):
 from __future__ import annotations
 import asyncio
 import logging
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 from .blofin_client import BloFinClient
-from .handlers.entry import _dollar_to_price_distance
-from .notify import Notifier, format_trail_activated, format_trail_update
+from .ema import compute_ema
+from .handlers.entry import handle_entry, _dollar_to_price_distance
+from .notify import (
+    Notifier, format_entry, format_trail_activated, format_trail_update,
+    format_pending_filled, format_pending_expired,
+)
 from .state import Store
 
 log = logging.getLogger(__name__)
@@ -40,6 +45,11 @@ class PositionPoller:
         margin_usdt: float = 100.0,
         leverage: float = 30.0,
         notifier: Optional[Notifier] = None,
+        # EMA retest config
+        ema_retest_period: int = 9,
+        ema_retest_timeframe: str = "5m",
+        # Symbol configs for executing pending entries
+        symbol_configs: Optional[dict[str, dict[str, Any]]] = None,
     ) -> None:
         self.store = store
         self.blofin = blofin
@@ -51,10 +61,20 @@ class PositionPoller:
         self.margin_usdt = margin_usdt
         self.leverage = leverage
         self.notifier = notifier
+        self.ema_retest_period = ema_retest_period
+        self.ema_retest_timeframe = ema_retest_timeframe
+        self.symbol_configs = symbol_configs or {}
         self._task: Optional[asyncio.Task] = None
         self._stop_event: Optional[asyncio.Event] = None
 
     async def poll_once(self) -> None:
+        # --- Check pending signals for EMA retest ---
+        try:
+            self._process_pending_signals()
+        except Exception:
+            log.exception("failed to process pending signals")
+
+        # --- Check open positions ---
         try:
             positions = self.store.list_open_positions()
         except Exception:
@@ -84,6 +104,85 @@ class PositionPoller:
                 self._process_position(pos, blofin_open_symbols=blofin_open_symbols)
             except Exception:
                 log.exception("poller failed for position id=%s", pos.id)
+
+    def _process_pending_signals(self) -> None:
+        """Check each pending signal for EMA retest or expiry."""
+        signals = self.store.list_pending_signals()
+        now = datetime.now(timezone.utc)
+
+        for sig in signals:
+            try:
+                # Check expiry
+                expires_at = datetime.fromisoformat(sig["expires_at"])
+                if now >= expires_at:
+                    self.store.expire_pending_signal(sig["id"])
+                    log.info("Pending signal %d expired for %s", sig["id"], sig["symbol"])
+                    if self.notifier:
+                        self.notifier.send(format_pending_expired(sig["action"], sig["symbol"]))
+                    continue
+
+                # Fetch current price and EMA
+                current_price = self.blofin.fetch_last_price(sig["symbol"])
+                bars = self.blofin.fetch_recent_ohlcv(
+                    sig["symbol"],
+                    timeframe=self.ema_retest_timeframe,
+                    limit=self.ema_retest_period + 10,
+                )
+                closes = [bar[4] for bar in bars]  # index 4 = close
+                ema_value = compute_ema(closes, self.ema_retest_period)
+
+                # Check for retest
+                retest = False
+                if sig["action"] == "buy" and current_price <= ema_value:
+                    retest = True
+                elif sig["action"] == "sell" and current_price >= ema_value:
+                    retest = True
+
+                if not retest:
+                    continue
+
+                log.info(
+                    "EMA(%d) retest confirmed for %s %s: price=%.2f, ema=%.2f",
+                    self.ema_retest_period, sig["action"], sig["symbol"],
+                    current_price, ema_value,
+                )
+
+                # Execute the entry
+                sym_cfg = self.symbol_configs.get(sig["symbol"])
+                if sym_cfg is None:
+                    log.warning("No config for %s, skipping pending signal", sig["symbol"])
+                    continue
+
+                result = handle_entry(
+                    action=sig["action"], symbol=sig["symbol"],
+                    store=self.store, blofin=self.blofin,
+                    margin_usdt=sym_cfg["margin_usdt"],
+                    leverage=sym_cfg["leverage"],
+                    margin_mode=sym_cfg["margin_mode"],
+                    sl_policy_name=sym_cfg["sl_policy"],
+                    sl_loss_usdt=sym_cfg["sl_loss_usdt"],
+                    trail_activate_usdt=sym_cfg["trail_activate_usdt"],
+                    trail_distance_usdt=sym_cfg["trail_distance_usdt"],
+                    tp_limit_margin_pct=sym_cfg["tp_limit_margin_pct"],
+                )
+
+                if result.get("opened"):
+                    self.store.fill_pending_signal(sig["id"], current_price)
+                    if self.notifier:
+                        self.notifier.send(format_pending_filled(
+                            sig["action"], sig["symbol"],
+                            result["entry_price"], sig["signal_price"],
+                        ))
+                        # Also send the full entry notification
+                        result["symbol"] = sig["symbol"]
+                        self.notifier.send(format_entry(result))
+                else:
+                    log.warning(
+                        "Pending signal %d: entry failed: %s",
+                        sig["id"], result.get("reason"),
+                    )
+            except Exception:
+                log.exception("Failed processing pending signal %d", sig["id"])
 
     def _archive_stale_position(self, pos) -> None:
         """Position is gone from BloFin. Cancel leftover orders, archive row."""

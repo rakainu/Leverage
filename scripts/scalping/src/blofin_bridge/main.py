@@ -12,7 +12,10 @@ from pydantic import BaseModel, Field
 
 from .blofin_client import BloFinClient, build_ccxt_client
 from .config import Settings, load_config
-from .notify import Notifier, format_entry, format_sl_close, format_reversal, format_error
+from .notify import (
+    Notifier, format_entry, format_sl_close, format_reversal,
+    format_error, format_pending,
+)
 from .poller import PositionPoller
 from .router import dispatch, UnknownAction
 from .state import Store
@@ -70,6 +73,18 @@ def create_app() -> FastAPI:
             + " — frozen: " + ", ".join(rec_report.frozen_symbols)
         )
 
+    symbol_configs = {
+        name: {
+            **sc.model_dump(),
+            "sl_loss_usdt": settings.defaults.sl_loss_usdt,
+            "trail_activate_usdt": settings.defaults.trail_activate_usdt,
+            "trail_distance_usdt": settings.defaults.trail_distance_usdt,
+            "tp_limit_margin_pct": settings.defaults.tp_limit_margin_pct,
+            "ema_retest_timeout_minutes": settings.defaults.ema_retest_timeout_minutes,
+        }
+        for name, sc in settings.symbols.items()
+    }
+
     poller = PositionPoller(
         store=store,
         blofin=blofin,
@@ -81,6 +96,9 @@ def create_app() -> FastAPI:
         margin_usdt=settings.defaults.margin_usdt,
         leverage=settings.defaults.leverage,
         notifier=notifier,
+        ema_retest_period=settings.defaults.ema_retest_period,
+        ema_retest_timeframe=settings.defaults.ema_retest_timeframe,
+        symbol_configs=symbol_configs,
     )
 
     @asynccontextmanager
@@ -96,17 +114,6 @@ def create_app() -> FastAPI:
         version="0.1.1",
         lifespan=lifespan,
     )
-
-    symbol_configs = {
-        name: {
-            **sc.model_dump(),
-            "sl_loss_usdt": settings.defaults.sl_loss_usdt,
-            "trail_activate_usdt": settings.defaults.trail_activate_usdt,
-            "trail_distance_usdt": settings.defaults.trail_distance_usdt,
-            "tp_limit_margin_pct": settings.defaults.tp_limit_margin_pct,
-        }
-        for name, sc in settings.symbols.items()
-    }
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -153,12 +160,25 @@ def create_app() -> FastAPI:
             store.mark_event_handled(event_id, outcome="ok", error_msg=None)
 
             result["symbol"] = payload.symbol
-            if payload.action in ("buy", "sell") and result.get("opened"):
+            if result.get("pending"):
+                notifier.send(format_pending(
+                    result.get("action", payload.action),
+                    payload.symbol,
+                    result.get("signal_price", 0),
+                ))
+            elif payload.action in ("buy", "sell") and result.get("opened"):
                 notifier.send(format_entry(result))
             elif payload.action == "sl":
                 notifier.send(format_sl_close(result, payload.symbol))
-            elif payload.action.startswith("reversal_") and result.get("opened_new"):
-                notifier.send(format_reversal(result, payload.symbol))
+            elif payload.action.startswith("reversal_"):
+                if result.get("pending_new"):
+                    notifier.send(format_pending(
+                        result.get("action", "buy"),
+                        payload.symbol,
+                        result.get("signal_price", 0),
+                    ))
+                elif result.get("opened_new"):
+                    notifier.send(format_reversal(result, payload.symbol))
             else:
                 notifier.send(f"ℹ️ {payload.action.upper()} {payload.symbol}: done")
         except UnknownAction as exc:

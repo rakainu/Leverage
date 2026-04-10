@@ -76,6 +76,38 @@ def format_trail_update(symbol: str, new_high: float, sl_price: float) -> str:
     )
 
 
+def format_pending(action: str, symbol: str, signal_price: float) -> str:
+    icon = "🟢" if action == "buy" else "🔴"
+    direction = "LONG" if action == "buy" else "SHORT"
+    return (
+        f"⏳ PENDING {icon} {direction} {symbol}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📍 Signal: ${signal_price:,.2f}\n"
+        f"⏱️ Waiting for EMA(9) retest"
+    )
+
+
+def format_pending_filled(action: str, symbol: str, fill_price: float, signal_price: float) -> str:
+    icon = "🟢" if action == "buy" else "🔴"
+    direction = "LONG" if action == "buy" else "SHORT"
+    diff = fill_price - signal_price
+    return (
+        f"✅ EMA RETEST → {icon} {direction} {symbol}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📍 Signal: ${signal_price:,.2f}\n"
+        f"📍 Entry: ${fill_price:,.2f} ({diff:+,.2f})"
+    )
+
+
+def format_pending_expired(action: str, symbol: str) -> str:
+    direction = "LONG" if action == "buy" else "SHORT"
+    return (
+        f"⌛ EXPIRED {direction} {symbol}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"No EMA(9) retest — signal cancelled"
+    )
+
+
 def format_error(action: str, symbol: str, error: str) -> str:
     return (
         f"⚠️ ERROR {action.upper()} {symbol}\n"

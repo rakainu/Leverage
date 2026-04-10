@@ -11,6 +11,10 @@ defaults:
   trail_start_usdt: 30        # trail starts moving at +$30 profit
   trail_distance_usdt: 10     # trail $10 behind highest profit
   tp_limit_margin_pct: 2.0    # hard TP ceiling at 200% ($200 on $100)
+  # --- EMA retest entry ---
+  ema_retest_period: 9        # EMA period (9 = EMA 9)
+  ema_retest_timeframe: "5m"  # candle timeframe for EMA
+  ema_retest_timeout_minutes: 30  # cancel if no retest within 30 min
   poll_interval_seconds: 10
 
 symbols:

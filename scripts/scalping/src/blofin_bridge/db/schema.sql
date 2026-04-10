@@ -65,3 +65,18 @@ CREATE INDEX IF NOT EXISTS idx_trade_log_symbol
     ON trade_log (symbol);
 CREATE INDEX IF NOT EXISTS idx_trade_log_closed
     ON trade_log (closed_at);
+
+CREATE TABLE IF NOT EXISTS pending_signals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol       TEXT NOT NULL,
+    action       TEXT NOT NULL,
+    signal_price REAL NOT NULL,
+    created_at   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    filled_at    TEXT,
+    fill_price   REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_status
+    ON pending_signals (status) WHERE status = 'pending';

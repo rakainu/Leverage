@@ -38,12 +38,17 @@ def cfg():
     }
 
 
-def test_dispatch_buy_calls_entry_handler(store, blofin, cfg):
+def test_dispatch_buy_creates_pending_signal(store, blofin, cfg):
     result = dispatch(
         action="buy", symbol="SOL-USDT",
         store=store, blofin=blofin, symbol_configs=cfg,
     )
-    assert result["opened"] is True
+    assert result["pending"] is True
+    assert result["action"] == "buy"
+    # Verify signal was saved
+    signals = store.list_pending_signals()
+    assert len(signals) == 1
+    assert signals[0]["symbol"] == "SOL-USDT"
 
 
 def test_dispatch_unknown_action_raises(store, blofin, cfg):

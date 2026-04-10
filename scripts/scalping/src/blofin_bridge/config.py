@@ -80,6 +80,10 @@ class Defaults(BaseModel):
     trail_start_usdt: float = 30.0
     trail_distance_usdt: float = 10.0
     tp_limit_margin_pct: float = 2.0
+    # --- EMA retest entry ---
+    ema_retest_period: int = 9
+    ema_retest_timeframe: str = "5m"
+    ema_retest_timeout_minutes: int = 30
     poll_interval_seconds: int = 10
 
     @field_validator("sl_loss_usdt", "breakeven_usdt", "trail_activate_usdt", "trail_start_usdt", "trail_distance_usdt")
