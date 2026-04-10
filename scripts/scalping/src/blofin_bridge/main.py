@@ -141,6 +141,33 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="invalid secret")
         return {"trades": store.get_trade_log(limit=limit)}
 
+    def _process_webhook(payload: WebhookPayload, raw: bytes, event_id: int) -> None:
+        """Process webhook in background so TV doesn't timeout."""
+        try:
+            result = dispatch(
+                action=payload.action, symbol=payload.symbol,
+                store=store, blofin=blofin, symbol_configs=symbol_configs,
+            )
+            store.mark_event_handled(event_id, outcome="ok", error_msg=None)
+
+            result["symbol"] = payload.symbol
+            if payload.action in ("buy", "sell") and result.get("opened"):
+                notifier.send(format_entry(result))
+            elif payload.action == "sl":
+                notifier.send(format_sl_close(result, payload.symbol))
+            elif payload.action.startswith("reversal_") and result.get("opened_new"):
+                notifier.send(format_reversal(result, payload.symbol))
+            else:
+                notifier.send(f"ℹ️ {payload.action.upper()} {payload.symbol}: done")
+        except UnknownAction as exc:
+            store.mark_event_handled(event_id, outcome="error",
+                                     error_msg=f"unknown action {exc}")
+        except Exception as exc:
+            log.exception("handler failed")
+            store.mark_event_handled(event_id, outcome="error",
+                                     error_msg=str(exc))
+            notifier.send(format_error(payload.action, payload.symbol, str(exc)))
+
     @app.post("/webhook/pro-v3")
     async def pro_v3(request: Request) -> dict[str, Any]:
         raw = await request.body()
@@ -153,7 +180,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="invalid secret")
 
         if payload.symbol in frozen:
-            # Log the event with skipped outcome
             skipped_id = store.append_event(
                 position_id=None, event_type=payload.action,
                 payload=raw.decode("utf-8"),
@@ -167,35 +193,13 @@ def create_app() -> FastAPI:
             payload=raw.decode("utf-8"),
         )
 
-        try:
-            result = dispatch(
-                action=payload.action, symbol=payload.symbol,
-                store=store, blofin=blofin, symbol_configs=symbol_configs,
-            )
-            store.mark_event_handled(event_id, outcome="ok", error_msg=None)
+        # Respond immediately so TradingView doesn't timeout,
+        # then process the trade in the background.
+        import asyncio
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, _process_webhook, payload, raw, event_id)
 
-            # Format clean Telegram message
-            result["symbol"] = payload.symbol
-            if payload.action in ("buy", "sell") and result.get("opened"):
-                notifier.send(format_entry(result))
-            elif payload.action == "sl":
-                notifier.send(format_sl_close(result, payload.symbol))
-            elif payload.action.startswith("reversal_") and result.get("opened_new"):
-                notifier.send(format_reversal(result, payload.symbol))
-            else:
-                notifier.send(f"ℹ️ {payload.action.upper()} {payload.symbol}: done")
-
-            return {"result": result}
-        except UnknownAction as exc:
-            store.mark_event_handled(event_id, outcome="error",
-                                     error_msg=f"unknown action {exc}")
-            raise HTTPException(status_code=400, detail=f"unknown action {exc}")
-        except Exception as exc:
-            log.exception("handler failed")
-            store.mark_event_handled(event_id, outcome="error",
-                                     error_msg=str(exc))
-            notifier.send(format_error(payload.action, payload.symbol, str(exc)))
-            raise HTTPException(status_code=500, detail=str(exc))
+        return {"accepted": True, "action": payload.action, "symbol": payload.symbol}
 
     return app
 

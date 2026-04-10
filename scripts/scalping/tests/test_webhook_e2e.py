@@ -59,7 +59,7 @@ def test_webhook_buy_opens_position(app):
     })
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["result"]["opened"] is True
+    assert body["accepted"] is True
 
 
 def test_webhook_unknown_action_400(app):
