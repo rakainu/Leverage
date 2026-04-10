@@ -48,6 +48,7 @@ class PositionPoller:
         # EMA retest config
         ema_retest_period: int = 9,
         ema_retest_timeframe: str = "5m",
+        ema_retest_max_overshoot_pct: float = 0.2,
         # Symbol configs for executing pending entries
         symbol_configs: Optional[dict[str, dict[str, Any]]] = None,
     ) -> None:
@@ -63,6 +64,7 @@ class PositionPoller:
         self.notifier = notifier
         self.ema_retest_period = ema_retest_period
         self.ema_retest_timeframe = ema_retest_timeframe
+        self.ema_retest_max_overshoot_pct = ema_retest_max_overshoot_pct
         self.symbol_configs = symbol_configs or {}
         self._task: Optional[asyncio.Task] = None
         self._stop_event: Optional[asyncio.Event] = None
@@ -131,12 +133,13 @@ class PositionPoller:
                 closes = [bar[4] for bar in bars]  # index 4 = close
                 ema_value = compute_ema(closes, self.ema_retest_period)
 
-                # Check for retest
+                # Check for retest (with overshoot cap)
+                max_overshoot = ema_value * (self.ema_retest_max_overshoot_pct / 100)
                 retest = False
                 if sig["action"] == "buy" and current_price <= ema_value:
-                    retest = True
+                    retest = current_price >= ema_value - max_overshoot
                 elif sig["action"] == "sell" and current_price >= ema_value:
-                    retest = True
+                    retest = current_price <= ema_value + max_overshoot
 
                 if not retest:
                     continue

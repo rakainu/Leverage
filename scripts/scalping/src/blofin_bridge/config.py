@@ -84,6 +84,7 @@ class Defaults(BaseModel):
     ema_retest_period: int = 9
     ema_retest_timeframe: str = "5m"
     ema_retest_timeout_minutes: int = 30
+    ema_retest_max_overshoot_pct: float = 0.2
     poll_interval_seconds: int = 10
 
     @field_validator("sl_loss_usdt", "breakeven_usdt", "trail_activate_usdt", "trail_start_usdt", "trail_distance_usdt")
