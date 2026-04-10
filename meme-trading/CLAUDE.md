@@ -29,7 +29,7 @@ Key settings:
 - `SMC_MODE` — "paper" (default) or "live"
 - `SMC_CONVERGENCE_THRESHOLD` — min wallets for signal (default: 3)
 - `SMC_CONVERGENCE_WINDOW_MINUTES` — sliding window (default: 60)
-- `SMC_TRADE_AMOUNT_SOL` — per-trade size (default: 0.1)
+- `SMC_TRADE_AMOUNT_SOL` — per-trade size (default: 0.25)
 - `SMC_TAKE_PROFIT_PCT` / `SMC_STOP_LOSS_PCT` — exit thresholds
 - `SMC_POSITION_TIMEOUT_MINUTES` — max hold time (default: 240)
 
