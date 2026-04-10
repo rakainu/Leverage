@@ -29,8 +29,9 @@ def blofin():
 def _make_poller(store, blofin, **overrides):
     defaults = dict(
         store=store, blofin=blofin, interval_seconds=0,
-        trail_activate_usdt=25, trail_start_usdt=30,
-        trail_distance_usdt=10, margin_usdt=100, leverage=30,
+        breakeven_usdt=15, trail_activate_usdt=25,
+        trail_start_usdt=30, trail_distance_usdt=10,
+        margin_usdt=100, leverage=30,
     )
     defaults.update(overrides)
     return PositionPoller(**defaults)
@@ -54,35 +55,34 @@ def _short_position(store, entry_price=300.0):
     return pid
 
 
-# === Phase 1: SL jump at trail_activate ($25) ===
+# === Phase 0: Breakeven at +$15 ===
 
 
 @pytest.mark.asyncio
-async def test_sl_jumps_at_activate_threshold(store, blofin):
-    """At +$25 profit, SL jumps to lock in $20 (trail_start - trail_distance)."""
+async def test_breakeven_at_15_profit(store, blofin):
+    """At +$15 profit, SL moves to entry price."""
     pid = _long_position(store, entry_price=300.0)
-    # $25 profit → price = 300 + (25/3000)*300 = 302.5
-    blofin.fetch_last_price.return_value = 302.5
+    # $15 profit → price = 300 + (15/3000)*300 = 301.5
+    blofin.fetch_last_price.return_value = 301.5
 
     poller = _make_poller(store, blofin)
     await poller.poll_once()
 
     row = store.get_open_position("SOL-USDT")
-    assert row.trail_active == 1  # jumped, not trailing yet
+    assert row.trail_active == 1  # breakeven state
 
-    # SL should lock in $20 profit: entry + (20/3000)*300 = 302.0
+    # SL should be at entry price = 300.0
     blofin.place_sl_order.assert_called_once()
     _, kwargs = blofin.place_sl_order.call_args
-    expected_sl = 300.0 + (20 / 3000) * 300.0  # 302.0
-    assert kwargs["trigger_price"] == pytest.approx(expected_sl, rel=1e-3)
+    assert kwargs["trigger_price"] == pytest.approx(300.0)
 
 
 @pytest.mark.asyncio
-async def test_no_jump_below_activate_threshold(store, blofin):
-    """Below +$25 profit, nothing happens."""
+async def test_no_breakeven_below_threshold(store, blofin):
+    """Below +$15 profit, nothing happens."""
     pid = _long_position(store, entry_price=300.0)
-    # $20 profit → price = 302.0
-    blofin.fetch_last_price.return_value = 302.0
+    # $10 profit → price = 301.0
+    blofin.fetch_last_price.return_value = 301.0
 
     poller = _make_poller(store, blofin)
     await poller.poll_once()
@@ -92,53 +92,76 @@ async def test_no_jump_below_activate_threshold(store, blofin):
     blofin.place_sl_order.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_breakeven_waits_for_activate(store, blofin):
+    """In breakeven state (1), SL stays at entry until +$25."""
+    pid = _long_position(store, entry_price=300.0)
+    store.update_trail(pid, trail_high_price=0, trail_active=1)
+
+    # $20 profit — above breakeven but below activate
+    blofin.fetch_last_price.return_value = 302.0
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    row = store.get_open_position("SOL-USDT")
+    assert row.trail_active == 1  # still breakeven
+    blofin.place_sl_order.assert_not_called()
+
+
+# === Phase 1: SL jump at +$25 ===
+
+
+@pytest.mark.asyncio
+async def test_sl_jumps_at_activate_threshold(store, blofin):
+    """At +$25 profit (from breakeven state), SL jumps to lock in $20."""
+    pid = _long_position(store, entry_price=300.0)
+    store.update_trail(pid, trail_high_price=0, trail_active=1)  # breakeven state
+
+    # $25 profit → 302.5
+    blofin.fetch_last_price.return_value = 302.5
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    row = store.get_open_position("SOL-USDT")
+    assert row.trail_active == 2  # jumped, dead zone
+
+    # SL should lock in $20 profit: entry + (20/3000)*300 = 302.0
+    blofin.place_sl_order.assert_called_once()
+    _, kwargs = blofin.place_sl_order.call_args
+    expected_sl = 300.0 + (20 / 3000) * 300.0
+    assert kwargs["trigger_price"] == pytest.approx(expected_sl, rel=1e-3)
+
+
 # === Phase 2: Dead zone ($25 to $30) ===
 
 
 @pytest.mark.asyncio
 async def test_sl_locked_in_dead_zone(store, blofin):
-    """Between $25 and $30 profit, SL stays locked. No movement."""
+    """Between $25 and $30 profit, SL stays locked."""
     pid = _long_position(store, entry_price=300.0)
-    # Simulate: already jumped (trail_active=1)
-    store.update_trail(pid, trail_high_price=302.5, trail_active=1)
+    store.update_trail(pid, trail_high_price=302.5, trail_active=2)
 
-    # Price at $28 profit = 302.8 — in the dead zone
+    # $28 profit = 302.8
     blofin.fetch_last_price.return_value = 302.8
 
     poller = _make_poller(store, blofin)
     await poller.poll_once()
 
     row = store.get_open_position("SOL-USDT")
-    assert row.trail_active == 1  # still locked
-    blofin.place_sl_order.assert_not_called()
-    blofin.cancel_all_tpsl.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_sl_locked_even_at_29_99(store, blofin):
-    """Just below $30 profit — still in dead zone."""
-    pid = _long_position(store, entry_price=300.0)
-    store.update_trail(pid, trail_high_price=302.5, trail_active=1)
-
-    # $29.99 profit → 302.999
-    blofin.fetch_last_price.return_value = 302.999
-
-    poller = _make_poller(store, blofin)
-    await poller.poll_once()
-
-    row = store.get_open_position("SOL-USDT")
-    assert row.trail_active == 1  # still locked
+    assert row.trail_active == 2
     blofin.place_sl_order.assert_not_called()
 
 
-# === Phase 3: Trail starts at $30+ ===
+# === Phase 3: Trail starts at +$30 ===
 
 
 @pytest.mark.asyncio
 async def test_trail_starts_at_trail_start_threshold(store, blofin):
-    """At +$30 profit, trail transitions from locked to trailing."""
+    """At +$30 profit, trail transitions to actively trailing."""
     pid = _long_position(store, entry_price=300.0)
-    store.update_trail(pid, trail_high_price=302.5, trail_active=1)
+    store.update_trail(pid, trail_high_price=302.5, trail_active=2)
 
     # $30 profit → 303.0
     blofin.fetch_last_price.return_value = 303.0
@@ -147,17 +170,16 @@ async def test_trail_starts_at_trail_start_threshold(store, blofin):
     await poller.poll_once()
 
     row = store.get_open_position("SOL-USDT")
-    assert row.trail_active == 2  # now trailing
+    assert row.trail_active == 3  # trailing
 
 
 @pytest.mark.asyncio
 async def test_trail_moves_sl_on_new_high(store, blofin):
-    """Once trailing (state 2), new high moves SL."""
+    """Once trailing (state 3), new high moves SL."""
     pid = _long_position(store, entry_price=300.0)
-    store.update_trail(pid, trail_high_price=303.0, trail_active=2)
+    store.update_trail(pid, trail_high_price=303.0, trail_active=3)
     store.record_sl_order_id(pid, "sl-old")
 
-    # Price makes new high at 306
     blofin.fetch_last_price.return_value = 306.0
 
     poller = _make_poller(store, blofin)
@@ -165,9 +187,8 @@ async def test_trail_moves_sl_on_new_high(store, blofin):
 
     row = store.get_open_position("SOL-USDT")
     assert row.trail_high_price == pytest.approx(306.0)
-    assert row.trail_active == 2
+    assert row.trail_active == 3
 
-    # SL at 306 - trail_distance_as_price
     blofin.place_sl_order.assert_called_once()
     _, kwargs = blofin.place_sl_order.call_args
     expected_sl = 306.0 - (10 / 3000) * 306.0
@@ -176,12 +197,11 @@ async def test_trail_moves_sl_on_new_high(store, blofin):
 
 @pytest.mark.asyncio
 async def test_trail_does_not_move_sl_on_lower_price(store, blofin):
-    """If price drops below the high while trailing, SL stays."""
+    """If price drops while trailing, SL stays."""
     pid = _long_position(store, entry_price=300.0)
-    store.update_trail(pid, trail_high_price=306.0, trail_active=2)
+    store.update_trail(pid, trail_high_price=306.0, trail_active=3)
     store.record_sl_order_id(pid, "sl-current")
 
-    # Price drops to 304
     blofin.fetch_last_price.return_value = 304.0
 
     poller = _make_poller(store, blofin)
@@ -190,41 +210,34 @@ async def test_trail_does_not_move_sl_on_lower_price(store, blofin):
     row = store.get_open_position("SOL-USDT")
     assert row.trail_high_price == pytest.approx(306.0)
     blofin.place_sl_order.assert_not_called()
-    blofin.cancel_all_tpsl.assert_not_called()
 
 
 # === Short position ===
 
 
 @pytest.mark.asyncio
-async def test_short_sl_jumps_at_activate(store, blofin):
-    """Short: SL jumps at +$25 profit, locks in $20."""
+async def test_short_breakeven(store, blofin):
     pid = _short_position(store, entry_price=300.0)
     blofin.fetch_positions.return_value = [{
         "info": {"instId": "SOL-USDT"}, "contracts": 10,
     }]
-    # $25 profit on short → price = 300 - (25/3000)*300 = 297.5
-    blofin.fetch_last_price.return_value = 297.5
+    # $15 profit on short → price = 298.5
+    blofin.fetch_last_price.return_value = 298.5
 
     poller = _make_poller(store, blofin)
     await poller.poll_once()
 
     row = store.get_open_position("SOL-USDT")
     assert row.trail_active == 1
-
-    blofin.place_sl_order.assert_called_once()
     _, kwargs = blofin.place_sl_order.call_args
-    # Lock in $20: entry - (20/3000)*300 = 298.0
-    expected_sl = 300.0 - (20 / 3000) * 300.0
-    assert kwargs["trigger_price"] == pytest.approx(expected_sl, rel=1e-3)
+    assert kwargs["trigger_price"] == pytest.approx(300.0)  # entry
     assert kwargs["side"] == "buy"
 
 
 @pytest.mark.asyncio
 async def test_short_trail_moves_on_new_low(store, blofin):
-    """Short trailing: SL follows when price makes new low."""
     pid = _short_position(store, entry_price=300.0)
-    store.update_trail(pid, trail_high_price=297.0, trail_active=2)
+    store.update_trail(pid, trail_high_price=297.0, trail_active=3)
     store.record_sl_order_id(pid, "sl-old")
     blofin.fetch_positions.return_value = [{
         "info": {"instId": "SOL-USDT"}, "contracts": 10,
@@ -244,7 +257,7 @@ async def test_short_trail_moves_on_new_low(store, blofin):
 
 
 @pytest.mark.asyncio
-async def test_archives_stale_position_when_blofin_flat(store, blofin):
+async def test_archives_stale_position(store, blofin):
     pid = _long_position(store)
     blofin.fetch_positions.return_value = []
 
@@ -255,7 +268,7 @@ async def test_archives_stale_position_when_blofin_flat(store, blofin):
 
 
 @pytest.mark.asyncio
-async def test_skips_drift_check_if_fetch_positions_fails(store, blofin):
+async def test_skips_drift_if_fetch_fails(store, blofin):
     pid = _long_position(store)
     blofin.fetch_positions.side_effect = Exception("ccxt boom")
 
@@ -266,7 +279,7 @@ async def test_skips_drift_check_if_fetch_positions_fails(store, blofin):
 
 
 @pytest.mark.asyncio
-async def test_swallows_exceptions_per_position(store, blofin):
+async def test_swallows_exceptions(store, blofin):
     pid = _long_position(store)
     blofin.fetch_last_price.side_effect = Exception("ccxt boom")
 
@@ -282,33 +295,50 @@ async def test_swallows_exceptions_per_position(store, blofin):
 
 
 @pytest.mark.asyncio
-async def test_full_lifecycle_jump_deadzone_trail(store, blofin):
-    """Complete flow: inactive → jump → dead zone → trailing."""
+async def test_full_lifecycle(store, blofin):
+    """inactive → breakeven → jump → dead zone → trailing."""
     pid = _long_position(store, entry_price=300.0)
     poller = _make_poller(store, blofin)
 
-    # Cycle 1: $25 profit → SL jumps, state=1
-    blofin.fetch_last_price.return_value = 302.5
+    # Cycle 1: $15 profit → breakeven (state=1)
+    blofin.fetch_last_price.return_value = 301.5
     await poller.poll_once()
     row = store.get_open_position("SOL-USDT")
     assert row.trail_active == 1
     assert blofin.place_sl_order.call_count == 1
+    _, kwargs = blofin.place_sl_order.call_args
+    assert kwargs["trigger_price"] == pytest.approx(300.0)
 
-    # Cycle 2: $28 profit → dead zone, no movement
-    blofin.fetch_last_price.return_value = 302.8
+    # Cycle 2: $20 profit → still breakeven, no change
+    blofin.fetch_last_price.return_value = 302.0
     blofin.place_sl_order.reset_mock()
     await poller.poll_once()
     row = store.get_open_position("SOL-USDT")
     assert row.trail_active == 1
     blofin.place_sl_order.assert_not_called()
 
-    # Cycle 3: $31 profit → trail starts (state=2), SL moves
-    blofin.fetch_last_price.return_value = 303.1
+    # Cycle 3: $25 profit → jump, lock in $20 (state=2)
+    blofin.fetch_last_price.return_value = 302.5
     await poller.poll_once()
     row = store.get_open_position("SOL-USDT")
     assert row.trail_active == 2
+    assert blofin.place_sl_order.call_count == 1
 
-    # Cycle 4: $40 profit → trail follows
+    # Cycle 4: $28 profit → dead zone, no change
+    blofin.fetch_last_price.return_value = 302.8
+    blofin.place_sl_order.reset_mock()
+    await poller.poll_once()
+    row = store.get_open_position("SOL-USDT")
+    assert row.trail_active == 2
+    blofin.place_sl_order.assert_not_called()
+
+    # Cycle 5: $31 profit → trail starts (state=3)
+    blofin.fetch_last_price.return_value = 303.1
+    await poller.poll_once()
+    row = store.get_open_position("SOL-USDT")
+    assert row.trail_active == 3
+
+    # Cycle 6: $40 profit → trail follows
     blofin.fetch_last_price.return_value = 304.0
     blofin.place_sl_order.reset_mock()
     await poller.poll_once()

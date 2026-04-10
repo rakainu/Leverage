@@ -8,8 +8,8 @@ def _base_defaults(**overrides):
     d = {
         "margin_usdt": 100, "leverage": 30, "margin_mode": "isolated",
         "position_mode": "net", "sl_policy": "p2_step_stop",
-        "sl_loss_usdt": 15, "trail_activate_usdt": 25,
-        "trail_start_usdt": 30,
+        "sl_loss_usdt": 15, "breakeven_usdt": 15,
+        "trail_activate_usdt": 25, "trail_start_usdt": 30,
         "trail_distance_usdt": 10, "tp_limit_margin_pct": 2.0,
         "poll_interval_seconds": 10,
     }

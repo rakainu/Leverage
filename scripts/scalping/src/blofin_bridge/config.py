@@ -75,13 +75,14 @@ class Defaults(BaseModel):
     sl_policy: SLPolicyName
     # --- SL / Trail / TP ---
     sl_loss_usdt: float = 15.0
+    breakeven_usdt: float = 15.0
     trail_activate_usdt: float = 25.0
     trail_start_usdt: float = 30.0
     trail_distance_usdt: float = 10.0
     tp_limit_margin_pct: float = 2.0
     poll_interval_seconds: int = 10
 
-    @field_validator("sl_loss_usdt", "trail_activate_usdt", "trail_start_usdt", "trail_distance_usdt")
+    @field_validator("sl_loss_usdt", "breakeven_usdt", "trail_activate_usdt", "trail_start_usdt", "trail_distance_usdt")
     @classmethod
     def _positive_dollar(cls, v: float) -> float:
         if v <= 0:

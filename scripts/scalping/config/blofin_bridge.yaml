@@ -6,6 +6,7 @@ defaults:
   sl_policy: p2_step_stop
   # --- SL / Trail / TP ---
   sl_loss_usdt: 15            # initial SL = $15 loss
+  breakeven_usdt: 15          # SL moves to entry at +$15 profit
   trail_activate_usdt: 25     # SL jumps to lock in $20 profit at +$25
   trail_start_usdt: 30        # trail starts moving at +$30 profit
   trail_distance_usdt: 10     # trail $10 behind highest profit
