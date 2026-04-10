@@ -274,6 +274,31 @@ async function fetchTickers() {
     }
 }
 
+function formatPrice(price) {
+    if (!price || price === 0) return '--';
+    const abs = Math.abs(price);
+    if (abs >= 1) return '$' + abs.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    if (abs >= 0.001) return '$' + abs.toFixed(4);
+    // Memecoin subscript notation: 0.0{n}1234 → $0.0₍ₙ₎1234
+    const str = abs.toFixed(20);
+    const m = str.match(/^0\.(0+)([1-9]\d{0,3})/);
+    if (m) {
+        const zeros = m[1].length;
+        const subs = '₀₁₂₃₄₅₆₇₈₉';
+        const sub = String(zeros).split('').map(d => subs[+d]).join('');
+        return (price < 0 ? '-' : '') + '$0.0' + sub + m[2];
+    }
+    return '$' + abs.toPrecision(4);
+}
+
+function formatSol(val) {
+    if (val == null) return '--';
+    const abs = Math.abs(val);
+    if (abs >= 1000) return (val > 0 ? '+' : '') + val.toLocaleString(undefined, {maximumFractionDigits: 2});
+    if (abs >= 1) return (val > 0 ? '+' : '') + val.toFixed(2);
+    return (val > 0 ? '+' : '') + val.toFixed(4);
+}
+
 function pnlClass(val) {
     if (val > 0) return 'green';
     if (val < 0) return 'red';
@@ -345,7 +370,7 @@ async function renderStats() {
     document.getElementById('stat-wins').textContent = s.wins;
     document.getElementById('stat-losses').textContent = s.losses;
     const pnlEl = document.getElementById('stat-pnl');
-    pnlEl.textContent = pnlPrefix(s.total_pnl_sol) + s.total_pnl_sol.toFixed(4);
+    pnlEl.textContent = formatSol(s.total_pnl_sol);
     pnlEl.className = 'text-lg font-bold ' + pnlClass(s.total_pnl_sol);
 }
 
@@ -403,10 +428,10 @@ async function renderPositions() {
             <td>${copyableMint(p.token_mint)}</td>
             <td>${p.mode}</td>
             <td class="${p.status === 'open' ? 'blue' : 'text-slate-400'}">${p.status}</td>
-            <td>${p.entry_price ? p.entry_price.toExponential(3) : '--'}</td>
-            <td>${p.current_price ? p.current_price.toExponential(3) : '--'}</td>
+            <td>${formatPrice(p.entry_price)}</td>
+            <td>${formatPrice(p.current_price)}</td>
             <td class="${pnlClass(pnl)}">${pnlPrefix(pnl)}${pnl.toFixed(1)}%</td>
-            <td class="${pnlClass(pnlSol)}">${pnlPrefix(pnlSol)}${pnlSol.toFixed(4)}</td>
+            <td class="${pnlClass(pnlSol)}">${formatSol(pnlSol)}</td>
             <td class="text-slate-400">${timeAgo(p.opened_at)}</td>
             <td class="text-slate-400">${p.close_reason || '--'}</td>
         </tr>`;
