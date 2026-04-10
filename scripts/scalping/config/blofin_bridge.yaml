@@ -5,8 +5,9 @@ defaults:
   position_mode: net
   sl_policy: p2_step_stop
   # --- SL / Trail / TP ---
-  sl_loss_usdt: 20            # initial SL = $20 loss
-  trail_activate_usdt: 30     # start trailing at $30 profit
+  sl_loss_usdt: 15            # initial SL = $15 loss
+  trail_activate_usdt: 25     # SL jumps to lock in $20 profit at +$25
+  trail_start_usdt: 30        # trail starts moving at +$30 profit
   trail_distance_usdt: 10     # trail $10 behind highest profit
   tp_limit_margin_pct: 2.0    # hard TP ceiling at 200% ($200 on $100)
   poll_interval_seconds: 10

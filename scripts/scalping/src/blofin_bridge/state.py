@@ -134,12 +134,13 @@ class Store:
             )
 
     def update_trail(
-        self, pid: int, *, trail_high_price: float, trail_active: bool,
+        self, pid: int, *, trail_high_price: float, trail_active: int,
     ) -> None:
+        """trail_active: 0=inactive, 1=SL jumped (locked), 2=trailing."""
         with self._conn() as c:
             c.execute(
                 "UPDATE positions SET trail_high_price = ?, trail_active = ? WHERE id = ?",
-                (trail_high_price, int(trail_active), pid),
+                (trail_high_price, trail_active, pid),
             )
 
     def clear_tp_order_id(self, pid: int, stage: int) -> None:

@@ -8,7 +8,8 @@ def _base_defaults(**overrides):
     d = {
         "margin_usdt": 100, "leverage": 30, "margin_mode": "isolated",
         "position_mode": "net", "sl_policy": "p2_step_stop",
-        "sl_loss_usdt": 20, "trail_activate_usdt": 30,
+        "sl_loss_usdt": 15, "trail_activate_usdt": 25,
+        "trail_start_usdt": 30,
         "trail_distance_usdt": 10, "tp_limit_margin_pct": 2.0,
         "poll_interval_seconds": 10,
     }
@@ -41,8 +42,9 @@ def test_load_config_from_yaml(tmp_path, monkeypatch):
 
     cfg = load_config(yaml_path)
     assert cfg.blofin.env == "demo"
-    assert cfg.defaults.sl_loss_usdt == 20
-    assert cfg.defaults.trail_activate_usdt == 30
+    assert cfg.defaults.sl_loss_usdt == 15
+    assert cfg.defaults.trail_activate_usdt == 25
+    assert cfg.defaults.trail_start_usdt == 30
     assert cfg.defaults.trail_distance_usdt == 10
     assert cfg.defaults.tp_limit_margin_pct == 2.0
     assert cfg.defaults.leverage == 30

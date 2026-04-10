@@ -75,6 +75,7 @@ def create_app() -> FastAPI:
         blofin=blofin,
         interval_seconds=settings.defaults.poll_interval_seconds,
         trail_activate_usdt=settings.defaults.trail_activate_usdt,
+        trail_start_usdt=settings.defaults.trail_start_usdt,
         trail_distance_usdt=settings.defaults.trail_distance_usdt,
         margin_usdt=settings.defaults.margin_usdt,
         leverage=settings.defaults.leverage,

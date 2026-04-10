@@ -32,7 +32,7 @@ def cfg():
         "SOL-USDT": {
             "enabled": True, "margin_usdt": 100, "leverage": 30,
             "margin_mode": "isolated", "sl_policy": "p2_step_stop",
-            "sl_loss_usdt": 20, "trail_activate_usdt": 30,
+            "sl_loss_usdt": 15, "trail_activate_usdt": 25,
             "trail_distance_usdt": 10, "tp_limit_margin_pct": 2.0,
         },
     }

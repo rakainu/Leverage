@@ -41,8 +41,8 @@ def _entry_kwargs(**overrides):
         leverage=30,
         margin_mode="isolated",
         sl_policy_name="p2_step_stop",
-        sl_loss_usdt=20,
-        trail_activate_usdt=30,
+        sl_loss_usdt=15,
+        trail_activate_usdt=25,
         trail_distance_usdt=10,
         tp_limit_margin_pct=2.0,
     )
@@ -84,13 +84,13 @@ def test_buy_opens_long_with_fixed_dollar_sl(store, blofin, sol_instrument):
     )
     assert result["opened"] is True
     assert result["side"] == "long"
-    # SL: $20 loss on $100@30x=$3000 notional → (20/3000)*300 = 2.0
-    assert result["sl_trigger"] == pytest.approx(298.0)
+    # SL: $15 loss on $100@30x=$3000 notional → (15/3000)*300 = 1.5
+    assert result["sl_trigger"] == pytest.approx(298.5)
     # TP ceiling: 200% of $100 = $200 profit → (200/3000)*300 = 20.0
     assert result["tp_ceiling_price"] == pytest.approx(320.0)
 
     _, kwargs = blofin.place_market_entry.call_args
-    assert kwargs["safety_sl_trigger"] == pytest.approx(298.0)
+    assert kwargs["safety_sl_trigger"] == pytest.approx(298.5)
 
     # Hard TP ceiling placed
     blofin.place_limit_reduce_only.assert_called_once()
@@ -113,7 +113,8 @@ def test_sell_opens_short_with_sl_above(store, blofin, sol_instrument):
     )
     assert result["opened"] is True
     assert result["side"] == "short"
-    assert result["sl_trigger"] == pytest.approx(302.0)
+    # SL: 300 + (15/3000)*300 = 301.5
+    assert result["sl_trigger"] == pytest.approx(301.5)
     assert result["tp_ceiling_price"] == pytest.approx(280.0)
 
     _, tp_kwargs = blofin.place_limit_reduce_only.call_args
@@ -164,7 +165,8 @@ def test_sl_adjusts_with_margin_size(store, blofin, sol_instrument):
         **_entry_kwargs(margin_usdt=150),
     )
     # $20 / ($150 × 30) × 300 = 1.333
-    assert result["sl_trigger"] == pytest.approx(298.667, rel=1e-3)
+    # $15 / ($150 × 30) × 300 = 1.0
+    assert result["sl_trigger"] == pytest.approx(299.0, rel=1e-3)
 
 
 # === SL handler tests ===
