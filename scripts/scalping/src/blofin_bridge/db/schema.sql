@@ -39,3 +39,29 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_received
     ON events (received_at);
+
+CREATE TABLE IF NOT EXISTS trade_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    position_id     INTEGER REFERENCES positions(id),
+    symbol          TEXT NOT NULL,
+    side            TEXT NOT NULL,
+    entry_price     REAL NOT NULL,
+    exit_price      REAL,
+    margin_usdt     REAL NOT NULL,
+    leverage        REAL NOT NULL,
+    initial_sl      REAL,
+    tp_ceiling      REAL,
+    trail_activated INTEGER NOT NULL DEFAULT 0,
+    trail_high_price REAL,
+    exit_reason     TEXT,       -- 'sl', 'trail_sl', 'tp_ceiling', 'manual', 'drift'
+    pnl_usdt       REAL,
+    pnl_pct        REAL,       -- percent of margin
+    opened_at      TEXT NOT NULL,
+    closed_at      TEXT NOT NULL,
+    duration_secs  INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_trade_log_symbol
+    ON trade_log (symbol);
+CREATE INDEX IF NOT EXISTS idx_trade_log_closed
+    ON trade_log (closed_at);

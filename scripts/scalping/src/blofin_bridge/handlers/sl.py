@@ -8,6 +8,8 @@ from ..state import Store
 
 def handle_sl(
     *, symbol: str, store: Store, blofin: BloFinClient,
+    margin_usdt: float = 100.0, leverage: float = 30.0,
+    initial_sl: float = 0.0, tp_ceiling: float = 0.0,
 ) -> dict[str, Any]:
     row = store.get_open_position(symbol)
     if row is None:
@@ -21,7 +23,7 @@ def handle_sl(
     if row.sl_order_id:
         store.record_sl_order_id(row.id, None)
 
-    # v1.1: cancel any outstanding TP limit orders so they can't orphan on BloFin.
+    # Cancel any outstanding TP limit orders
     for stage, tp_id in (
         (1, row.tp1_order_id), (2, row.tp2_order_id), (3, row.tp3_order_id),
     ):
@@ -30,7 +32,7 @@ def handle_sl(
         try:
             blofin.cancel_order(tp_id, symbol)
         except Exception:
-            pass   # may already be filled or cancelled
+            pass
         store.clear_tp_order_id(row.id, stage=stage)
 
     close_side = "sell" if row.side == "long" else "buy"
@@ -38,9 +40,18 @@ def handle_sl(
         inst_id=symbol, side=close_side, contracts=row.current_size,
     )
 
+    exit_price = fill["fill_price"]
+    exit_reason = "trail_sl" if row.trail_active else "sl"
+
+    store.log_trade(
+        position_id=row.id, exit_price=exit_price, exit_reason=exit_reason,
+        margin_usdt=margin_usdt, leverage=leverage,
+        initial_sl=initial_sl, tp_ceiling=tp_ceiling,
+    )
     store.close_position(row.id, realized_pnl=None)
+
     return {
         "closed": True,
-        "exit_price": fill["fill_price"],
+        "exit_price": exit_price,
         "closed_contracts": row.current_size,
     }

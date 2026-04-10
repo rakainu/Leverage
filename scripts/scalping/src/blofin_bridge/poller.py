@@ -99,6 +99,20 @@ class PositionPoller:
                 self.blofin.cancel_tpsl(pos.symbol, pos.sl_order_id)
             except Exception:
                 pass
+
+        # Try to get last price for trade log
+        exit_price = None
+        try:
+            exit_price = self.blofin.fetch_last_price(pos.symbol)
+        except Exception:
+            pass
+
+        exit_reason = "trail_sl" if pos.trail_active else "drift"
+        self.store.log_trade(
+            position_id=pos.id, exit_price=exit_price, exit_reason=exit_reason,
+            margin_usdt=self.margin_usdt, leverage=self.leverage,
+            initial_sl=None, tp_ceiling=None,
+        )
         self.store.close_position(pos.id, realized_pnl=None)
 
     def _compute_unrealized_pnl_usdt(self, pos, current_price: float) -> float:

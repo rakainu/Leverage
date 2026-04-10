@@ -135,6 +135,12 @@ def create_app() -> FastAPI:
             "recent_events": store.recent_events(limit=20),
         }
 
+    @app.get("/trades")
+    def trades(secret: str = "", limit: int = 50) -> dict[str, Any]:
+        if secret != settings.bridge.shared_secret:
+            raise HTTPException(status_code=401, detail="invalid secret")
+        return {"trades": store.get_trade_log(limit=limit)}
+
     @app.post("/webhook/pro-v3")
     async def pro_v3(request: Request) -> dict[str, Any]:
         raw = await request.body()

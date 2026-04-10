@@ -51,7 +51,10 @@ def dispatch(
         )
 
     if action == "sl":
-        return handle_sl(symbol=symbol, store=store, blofin=blofin)
+        return handle_sl(
+            symbol=symbol, store=store, blofin=blofin,
+            margin_usdt=sym_cfg["margin_usdt"], leverage=sym_cfg["leverage"],
+        )
 
     if action.startswith("reversal_"):
         new_action = action.split("_", 1)[1]

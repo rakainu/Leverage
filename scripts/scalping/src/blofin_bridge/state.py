@@ -163,6 +163,63 @@ class Store:
             ).fetchall()
         return [self._row_to_position(r) for r in rows]
 
+    # -------- trade log --------
+
+    def log_trade(
+        self, *, position_id: int, exit_price: Optional[float],
+        exit_reason: str, margin_usdt: float, leverage: float,
+        initial_sl: Optional[float], tp_ceiling: Optional[float],
+    ) -> int:
+        """Record a completed trade for research/analysis."""
+        pos = self.get_position(position_id)
+        if pos is None:
+            return -1
+
+        closed_at = _now_iso()
+        pnl_usdt: Optional[float] = None
+        pnl_pct: Optional[float] = None
+        duration_secs: Optional[int] = None
+
+        if exit_price is not None and pos.entry_price:
+            notional = margin_usdt * leverage
+            if pos.side == "long":
+                pnl_usdt = ((exit_price - pos.entry_price) / pos.entry_price) * notional
+            else:
+                pnl_usdt = ((pos.entry_price - exit_price) / pos.entry_price) * notional
+            pnl_pct = (pnl_usdt / margin_usdt) * 100 if margin_usdt else None
+
+        try:
+            from datetime import datetime
+            opened = datetime.fromisoformat(pos.opened_at)
+            closed = datetime.fromisoformat(closed_at)
+            duration_secs = int((closed - opened).total_seconds())
+        except Exception:
+            pass
+
+        with self._conn() as c:
+            cur = c.execute(
+                """
+                INSERT INTO trade_log
+                  (position_id, symbol, side, entry_price, exit_price,
+                   margin_usdt, leverage, initial_sl, tp_ceiling,
+                   trail_activated, trail_high_price, exit_reason,
+                   pnl_usdt, pnl_pct, opened_at, closed_at, duration_secs)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (position_id, pos.symbol, pos.side, pos.entry_price,
+                 exit_price, margin_usdt, leverage, initial_sl, tp_ceiling,
+                 pos.trail_active, pos.trail_high_price, exit_reason,
+                 pnl_usdt, pnl_pct, pos.opened_at, closed_at, duration_secs),
+            )
+            return cur.lastrowid
+
+    def get_trade_log(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM trade_log ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     # -------- events --------
 
     def append_event(
