@@ -8,6 +8,10 @@ from runner.cluster.wallet_tier import WalletTierCache
 from runner.config.settings import get_settings
 from runner.config.weights_loader import WeightsLoader
 from runner.db.database import Database
+from runner.enrichment.deployer import DeployerFetcher
+from runner.enrichment.enricher import Enricher
+from runner.enrichment.price_liquidity import PriceLiquidityFetcher
+from runner.enrichment.token_metadata import TokenMetadataFetcher
 from runner.ingest.rpc_pool import RpcPool
 from runner.ingest.transaction_parser import TransactionParser
 from runner.ingest.wallet_monitor import WalletMonitor
@@ -66,6 +70,19 @@ async def _main() -> None:
         weights=weights,
     )
 
+    metadata_fetcher = TokenMetadataFetcher(http, rpc_url=settings.helius_rpc_url)
+    price_fetcher = PriceLiquidityFetcher(http)
+    deployer_fetcher = DeployerFetcher(http, rpc_url=settings.helius_rpc_url)
+
+    enriched_bus: asyncio.Queue = asyncio.Queue()
+    enricher = Enricher(
+        signal_bus=signal_bus,
+        enriched_bus=enriched_bus,
+        metadata_fetcher=metadata_fetcher,
+        price_fetcher=price_fetcher,
+        deployer_fetcher=deployer_fetcher,
+    )
+
     logger.info(
         "wired",
         active_wallets=len(active),
@@ -79,10 +96,13 @@ async def _main() -> None:
         results = await asyncio.gather(
             _supervise(monitor.run, "wallet_monitor", logger),
             _supervise(detector.run, "convergence_detector", logger),
-            _supervise(lambda: _drain(signal_bus, logger), "drain", logger),
+            _supervise(enricher.run, "enricher", logger),
+            _supervise(lambda: _drain_enriched(enriched_bus, logger), "drain_enriched", logger),
             return_exceptions=True,
         )
-        for name, result in zip(["monitor", "detector", "drain"], results):
+        for name, result in zip(
+            ["monitor", "detector", "enricher", "drain_enriched"], results
+        ):
             if isinstance(result, Exception):
                 logger.error("task_exited_with_exception", task=name, error=str(result))
     finally:
@@ -118,22 +138,21 @@ async def _supervise(factory, name: str, logger) -> None:
             backoff = min(backoff * 2.0, 60.0)
 
 
-async def _drain(signal_bus: asyncio.Queue, logger) -> None:
-    """Phase 3 sink: log every signal. Replaced by Enricher in Task 11.
-
-    Wrapped in per-iteration try/except so a bad signal can't kill the process.
-    """
+async def _drain_enriched(enriched_bus: asyncio.Queue, logger) -> None:
+    """Phase 4 sink: log every enriched token. Replaced by Filter pipeline in Plan 2b."""
     while True:
         try:
-            signal = await signal_bus.get()
+            token = await enriched_bus.get()
             logger.info(
-                "signal_drained",
-                mint=signal.token_mint,
-                wallets=signal.wallet_count,
-                tier_counts=signal.tier_counts,
+                "enriched_token_drained",
+                mint=token.token_mint,
+                symbol=token.symbol,
+                liquidity_usd=token.liquidity_usd,
+                deployer=token.deployer_address,
+                errors=token.errors,
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("drain_iteration_error", error=str(e))
+            logger.warning("drain_enriched_iteration_error", error=str(e))
 
 
 if __name__ == "__main__":
