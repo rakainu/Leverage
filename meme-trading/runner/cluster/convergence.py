@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from statistics import mean
 
 from runner.cluster.wallet_tier import Tier, WalletTierCache
+from runner.config.weights_loader import WeightsLoader
 from runner.db.database import Database
 from runner.ingest.events import BuyEvent
 from runner.utils.logging import get_logger
@@ -42,17 +43,31 @@ class ConvergenceDetector:
         min_wallets: int = 3,
         window_minutes: int = 30,
         db: Database | None = None,
+        weights: WeightsLoader | None = None,
     ):
         self.event_bus = event_bus
         self.signal_bus = signal_bus
         self.tier_cache = tier_cache
-        self.min_wallets = min_wallets
-        self.window_minutes = window_minutes
+        self._static_min_wallets = min_wallets
+        self._static_window_minutes = window_minutes
         self.db = db
+        self.weights = weights
         # per-token: list of BuyEvents inside the window
         self._window: dict[str, list[BuyEvent]] = defaultdict(list)
         # per-token: set of frozensets of wallet-address combinations we already signaled
         self._signaled: dict[str, set[frozenset[str]]] = defaultdict(set)
+
+    @property
+    def min_wallets(self) -> int:
+        if self.weights is not None:
+            return int(self.weights.get("cluster.min_wallets", self._static_min_wallets))
+        return self._static_min_wallets
+
+    @property
+    def window_minutes(self) -> int:
+        if self.weights is not None:
+            return int(self.weights.get("cluster.window_minutes", self._static_window_minutes))
+        return self._static_window_minutes
 
     async def run(self) -> None:
         logger.info(
@@ -65,6 +80,8 @@ class ConvergenceDetector:
             await self._process(event)
 
     async def _process(self, event: BuyEvent) -> None:
+        if self.weights is not None:
+            self.weights.check_and_reload()
         # Reject C-tier immediately — they do not contribute to the cluster.
         tier = self.tier_cache.tier_of(event.wallet_address)
         if tier == Tier.C:

@@ -195,3 +195,61 @@ async def test_mid_price_is_mean_of_cluster_prices():
 
     sig = sig_bus.get_nowait()
     assert abs(sig.mid_price_sol - 0.0002) < 1e-9
+
+
+@pytest.mark.asyncio
+async def test_picks_up_weights_changes_at_runtime(tmp_path):
+    """Editing weights.yaml during runtime changes detection thresholds."""
+    from runner.config.weights_loader import WeightsLoader
+
+    yaml_file = tmp_path / "weights.yaml"
+    yaml_file.write_text(
+        """
+cluster:
+  min_wallets: 4
+  window_minutes: 30
+"""
+    )
+    loader = WeightsLoader(yaml_file)
+
+    tier_cache = _StubTierCache(
+        {"A1": Tier.A, "A2": Tier.A, "B1": Tier.B}
+    )
+    ev_bus: asyncio.Queue = asyncio.Queue()
+    sig_bus: asyncio.Queue = asyncio.Queue()
+
+    det = ConvergenceDetector(
+        event_bus=ev_bus,
+        signal_bus=sig_bus,
+        tier_cache=tier_cache,
+        weights=loader,
+    )
+
+    base = datetime(2026, 4, 11, 10, 0, tzinfo=timezone.utc)
+    await det._process(_ev("s1", "A1", "TOKEN", base))
+    await det._process(_ev("s2", "A2", "TOKEN", base + timedelta(minutes=5)))
+    await det._process(_ev("s3", "B1", "TOKEN", base + timedelta(minutes=10)))
+
+    # With min_wallets=4, 3 wallets should NOT fire a signal
+    assert sig_bus.empty()
+
+    # Now lower the threshold by editing the YAML
+    import time
+    time.sleep(0.01)
+    yaml_file.write_text(
+        """
+cluster:
+  min_wallets: 3
+  window_minutes: 30
+"""
+    )
+    yaml_file.touch()
+
+    # Next event triggers reload on check; now 3 wallets should fire
+    await det._process(_ev("s4", "A1", "TOKEN2", base))
+    await det._process(_ev("s5", "A2", "TOKEN2", base + timedelta(minutes=5)))
+    await det._process(_ev("s6", "B1", "TOKEN2", base + timedelta(minutes=10)))
+
+    signal = sig_bus.get_nowait()
+    assert signal.token_mint == "TOKEN2"
+    assert signal.wallet_count == 3
