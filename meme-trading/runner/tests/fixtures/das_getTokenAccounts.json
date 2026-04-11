@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "total": 7,
+    "limit": 1000,
+    "token_accounts": [
+      {"address": "Ata1", "mint": "M", "owner": "Holder1", "amount": 50000000000, "frozen": false},
+      {"address": "Ata2", "mint": "M", "owner": "Holder2", "amount": 30000000000, "frozen": false},
+      {"address": "Ata3", "mint": "M", "owner": "Holder3", "amount": 8000000000, "frozen": false},
+      {"address": "Ata4", "mint": "M", "owner": "Holder4", "amount": 5000000000, "frozen": false},
+      {"address": "Ata5", "mint": "M", "owner": "Holder5", "amount": 3000000000, "frozen": false},
+      {"address": "Ata6", "mint": "M", "owner": "Holder6", "amount": 2000000000, "frozen": false},
+      {"address": "Ata7", "mint": "M", "owner": "DeployerWallet", "amount": 2000000000, "frozen": false}
+    ]
+  }
+}
