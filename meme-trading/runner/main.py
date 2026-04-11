@@ -46,10 +46,12 @@ async def _main() -> None:
     helius_rps = weights.get("http_rate_limits.helius_rps", 10)
     dexscreener_rps = weights.get("http_rate_limits.dexscreener_rps", 3)
     jupiter_rps = weights.get("http_rate_limits.jupiter_rps", 5)
+    rugcheck_rps = weights.get("http_rate_limits.rugcheck_rps", 2)
 
     per_host_rps: dict[str, float] = {
         "api.dexscreener.com": dexscreener_rps,
         "quote-api.jup.ag": jupiter_rps,
+        "api.rugcheck.xyz": rugcheck_rps,
     }
     if helius_host:
         per_host_rps[helius_host] = helius_rps
@@ -134,6 +136,7 @@ async def _main() -> None:
         helius_rps=helius_rps,
         dexscreener_rps=dexscreener_rps,
         jupiter_rps=jupiter_rps,
+        rugcheck_rps=rugcheck_rps,
     )
 
     try:
