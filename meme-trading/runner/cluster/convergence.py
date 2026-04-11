@@ -5,12 +5,14 @@ when min_wallets distinct A+B-tier wallets buy the same token within
 window_minutes.
 """
 import asyncio
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from statistics import mean
 
 from runner.cluster.wallet_tier import Tier, WalletTierCache
+from runner.db.database import Database
 from runner.ingest.events import BuyEvent
 from runner.utils.logging import get_logger
 
@@ -39,12 +41,14 @@ class ConvergenceDetector:
         tier_cache: WalletTierCache,
         min_wallets: int = 3,
         window_minutes: int = 30,
+        db: Database | None = None,
     ):
         self.event_bus = event_bus
         self.signal_bus = signal_bus
         self.tier_cache = tier_cache
         self.min_wallets = min_wallets
         self.window_minutes = window_minutes
+        self.db = db
         # per-token: list of BuyEvents inside the window
         self._window: dict[str, list[BuyEvent]] = defaultdict(list)
         # per-token: set of frozensets of wallet-address combinations we already signaled
@@ -117,6 +121,33 @@ class ConvergenceDetector:
             convergence_seconds=int((last_t - first_t).total_seconds()),
             mid_price_sol=mid_price,
         )
+        if self.db is not None and self.db.conn is not None:
+            try:
+                await self.db.conn.execute(
+                    """
+                    INSERT INTO cluster_signals
+                    (token_mint, wallet_count, wallets_json, tier_counts_json,
+                     first_buy_time, last_buy_time, convergence_seconds, mid_price_sol)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        signal.token_mint,
+                        signal.wallet_count,
+                        json.dumps(signal.wallets),
+                        json.dumps(signal.tier_counts),
+                        signal.first_buy_time.isoformat(),
+                        signal.last_buy_time.isoformat(),
+                        signal.convergence_seconds,
+                        signal.mid_price_sol,
+                    ),
+                )
+                await self.db.conn.commit()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "cluster_signal_persist_failed",
+                    mint=signal.token_mint,
+                    error=str(e),
+                )
         logger.info(
             "cluster_signal",
             mint=token,
