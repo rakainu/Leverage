@@ -5,7 +5,7 @@ from datetime import datetime
 from runner.cluster.convergence import ClusterSignal
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class EnrichedToken:
     """A cluster signal expanded with metadata, price, liquidity, and deployer info.
 
