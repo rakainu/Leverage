@@ -26,6 +26,10 @@ class EnrichedToken:
     decimals: int | None = None
     supply: float | None = None
     token_created_at: datetime | None = None
+    # Authority flags — None means unknown, "revoked" is represented as None/empty
+    # and any non-empty/non-null value means the authority still exists (rug risk).
+    mint_authority: str | None = None
+    freeze_authority: str | None = None
 
     # Price / liquidity (DexScreener + Jupiter)
     price_sol: float | None = None

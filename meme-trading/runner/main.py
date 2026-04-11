@@ -38,10 +38,19 @@ async def _main() -> None:
 
     helius_host = urlparse(settings.helius_rpc_url).netloc.lower()
     helius_rps = weights.get("http_rate_limits.helius_rps", 10)
+    dexscreener_rps = weights.get("http_rate_limits.dexscreener_rps", 3)
+    jupiter_rps = weights.get("http_rate_limits.jupiter_rps", 5)
+
+    per_host_rps: dict[str, float] = {
+        "api.dexscreener.com": dexscreener_rps,
+        "quote-api.jup.ag": jupiter_rps,
+    }
+    if helius_host:
+        per_host_rps[helius_host] = helius_rps
 
     http = RateLimitedClient(
         default_rps=helius_rps,
-        per_host_rps={helius_host: helius_rps} if helius_host else {},
+        per_host_rps=per_host_rps,
         timeout=15.0,
     )
 
@@ -90,6 +99,8 @@ async def _main() -> None:
         cluster_window=weights.get("cluster.window_minutes"),
         helius_host=helius_host,
         helius_rps=helius_rps,
+        dexscreener_rps=dexscreener_rps,
+        jupiter_rps=jupiter_rps,
     )
 
     try:

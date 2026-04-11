@@ -79,6 +79,8 @@ class Enricher:
             decimals=(meta or {}).get("decimals"),
             supply=(meta or {}).get("supply"),
             token_created_at=None,
+            mint_authority=(meta or {}).get("mint_authority"),
+            freeze_authority=(meta or {}).get("freeze_authority"),
             price_sol=(price or {}).get("price_sol"),
             price_usd=(price or {}).get("price_usd"),
             liquidity_usd=(price or {}).get("liquidity_usd"),
