@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0.0",
+  "pairs": [
+    {
+      "chainId": "solana",
+      "dexId": "raydium",
+      "url": "https://dexscreener.com/solana/testpair1",
+      "pairAddress": "TestPair1111111111111111111111111111111111",
+      "baseToken": {
+        "address": "TestMint1111111111111111111111111111111111",
+        "name": "WIF Hat",
+        "symbol": "WIFHAT"
+      },
+      "quoteToken": {
+        "address": "So11111111111111111111111111111111111111112",
+        "name": "Wrapped SOL",
+        "symbol": "SOL"
+      },
+      "priceNative": "0.0000002600",
+      "priceUsd": "0.0001",
+      "liquidity": {
+        "usd": 42000.0,
+        "base": 4200000000.0,
+        "quote": 162.5
+      },
+      "volume": {
+        "h24": 150000.0,
+        "h6": 40000.0,
+        "h1": 12000.0
+      },
+      "pairCreatedAt": 1744371000000
+    },
+    {
+      "chainId": "solana",
+      "dexId": "orca",
+      "pairAddress": "TestPair2222222222222222222222222222222222",
+      "baseToken": {
+        "address": "TestMint1111111111111111111111111111111111",
+        "symbol": "WIFHAT"
+      },
+      "quoteToken": {
+        "address": "So11111111111111111111111111111111111111112",
+        "symbol": "SOL"
+      },
+      "priceNative": "0.0000002620",
+      "priceUsd": "0.000101",
+      "liquidity": {
+        "usd": 8000.0,
+        "base": 800000000.0,
+        "quote": 30.8
+      },
+      "volume": {"h24": 5000.0},
+      "pairCreatedAt": 1744370000000
+    }
+  ]
+}

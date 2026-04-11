@@ -1,0 +1,11 @@
+{
+  "inputMint": "So11111111111111111111111111111111111111112",
+  "outputMint": "TestMint1111111111111111111111111111111111",
+  "inAmount": "250000000",
+  "outAmount": "960000000",
+  "otherAmountThreshold": "950400000",
+  "swapMode": "ExactIn",
+  "slippageBps": 50,
+  "priceImpactPct": "0.012",
+  "routePlan": []
+}
