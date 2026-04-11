@@ -1,0 +1,21 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "blockTime": 1744000000,
+    "meta": {
+      "err": null,
+      "fee": 5000
+    },
+    "transaction": {
+      "message": {
+        "accountKeys": [
+          {"pubkey": "DeployerWallet111111111111111111111111111", "signer": true, "writable": true},
+          {"pubkey": "TestMint1111111111111111111111111111111111", "signer": false, "writable": true},
+          {"pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "signer": false, "writable": false}
+        ]
+      },
+      "signatures": ["DeployerInitSig11111111111111111111111111"]
+    }
+  }
+}
