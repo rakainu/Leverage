@@ -1,5 +1,6 @@
 """Parse Solana transactions to extract swap/buy events."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
