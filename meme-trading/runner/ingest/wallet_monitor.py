@@ -9,6 +9,7 @@ from collections import OrderedDict
 
 import websockets
 
+from runner.db.database import Database
 from runner.ingest.transaction_parser import TransactionParser
 from runner.utils.logging import get_logger
 
@@ -31,6 +32,7 @@ class WalletMonitor:
         parser: TransactionParser,
         ws_url: str = "",
         max_seen: int = 10000,
+        db: Database | None = None,
     ):
         self.wallets = wallets
         self.event_bus = event_bus
@@ -38,6 +40,7 @@ class WalletMonitor:
         self.ws_url = ws_url
         self._seen_signatures: OrderedDict[str, None] = OrderedDict()
         self._max_seen = max_seen
+        self.db = db
         self._running = True
 
     async def handle_signature(self, signature: str, wallet_address: str) -> None:
@@ -59,6 +62,24 @@ class WalletMonitor:
         if event is None:
             return
         await self.event_bus.put(event)
+        if self.db is not None and self.db.conn is not None:
+            try:
+                await self.db.conn.execute(
+                    """
+                    INSERT OR IGNORE INTO buy_events
+                    (signature, wallet_address, token_mint, sol_amount,
+                     token_amount, price_sol, block_time)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    event.to_db_row(),
+                )
+                await self.db.conn.commit()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "buy_event_persist_failed",
+                    signature=event.signature,
+                    error=str(e),
+                )
         logger.info(
             "buy_event",
             signature=event.signature,
