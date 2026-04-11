@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {"id": "Insider1", "type": "wallet", "balance": 15000000000},
+    {"id": "Insider2", "type": "wallet", "balance": 12000000000},
+    {"id": "Insider3", "type": "wallet", "balance": 8000000000},
+    {"id": "Insider4", "type": "wallet", "balance": 3000000000}
+  ],
+  "edges": [
+    {"source": "Insider1", "target": "Insider2"},
+    {"source": "Insider2", "target": "Insider3"}
+  ]
+}
