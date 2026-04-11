@@ -1,0 +1,46 @@
+cluster:
+  min_wallets: 3
+  window_minutes: 30
+  speed_bonus_sweet_spot_min: 10
+  speed_bonus_sweet_spot_max: 20
+
+gates:
+  lp_locked_pct_min: 85
+  deployer_max_pct: 5
+  top10_max_pct: 70
+  token_age_min_sec: 120
+  token_age_max_hr: 72
+
+weights:
+  wallet_quality: 0.20
+  cluster_quality: 0.15
+  entry_quality: 0.15
+  holder_quality: 0.15
+  rug_risk: 0.15
+  follow_through: 0.15
+  narrative: 0.05
+
+verdict_thresholds:
+  watch: 40
+  strong_candidate: 60
+  probable_runner: 78
+
+position_sizing:
+  strong_candidate_sol: 0.25
+  probable_runner_sol: 0.375
+
+probe:
+  follow_through_minutes: 5
+
+wallet_tier:
+  a_tier_win_rate: 0.60
+  a_tier_min_trades: 5
+  b_tier_win_rate: 0.35
+  rebuild_hour_utc: 4
+  rolling_window_days: 30
+
+http_rate_limits:
+  helius_rps: 10
+  rugcheck_rps: 2
+  dexscreener_rps: 3
+  jupiter_rps: 5
