@@ -31,6 +31,7 @@ class FilterPipeline:
         self.sync_filters = sync_filters
         self.probe_filter = probe_filter
         self.db = db
+        self._tasks: set[asyncio.Task] = set()
 
     async def run(self) -> None:
         logger.info(
@@ -41,7 +42,10 @@ class FilterPipeline:
         while True:
             enriched: EnrichedToken = await self.enriched_bus.get()
             # Spawn a per-candidate task so probes don't block other candidates.
-            asyncio.create_task(self._process_one(enriched))
+            # Strong-ref via self._tasks to prevent GC mid-execution (RUF006).
+            task = asyncio.create_task(self._process_one(enriched))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
     async def _process_one(self, enriched: EnrichedToken) -> None:
         results: list[FilterResult] = []

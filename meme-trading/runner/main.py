@@ -12,6 +12,12 @@ from runner.enrichment.deployer import DeployerFetcher
 from runner.enrichment.enricher import Enricher
 from runner.enrichment.price_liquidity import PriceLiquidityFetcher
 from runner.enrichment.token_metadata import TokenMetadataFetcher
+from runner.filters.entry_quality import EntryQualityFilter
+from runner.filters.follow_through import FollowThroughProbe
+from runner.filters.holder_filter import HolderFilter
+from runner.filters.insider_filter import InsiderFilter
+from runner.filters.pipeline import FilterPipeline
+from runner.filters.rug_gate import RugGate
 from runner.ingest.rpc_pool import RpcPool
 from runner.ingest.transaction_parser import TransactionParser
 from runner.ingest.wallet_monitor import WalletMonitor
@@ -92,6 +98,33 @@ async def _main() -> None:
         deployer_fetcher=deployer_fetcher,
     )
 
+    rug_gate = RugGate(
+        http,
+        lp_locked_pct_min=weights.get("gates.lp_locked_pct_min", 85),
+    )
+    holder_filter = HolderFilter(
+        http,
+        rpc_url=settings.helius_rpc_url,
+        top10_max_pct=weights.get("gates.top10_max_pct", 70),
+    )
+    insider_filter = InsiderFilter(http)
+    entry_quality_filter = EntryQualityFilter()
+    follow_through_probe = FollowThroughProbe(
+        db=db,
+        tier_cache=tier_cache,
+        price_fetcher=price_fetcher,
+        probe_minutes=weights.get("probe.follow_through_minutes", 5),
+    )
+
+    filtered_bus: asyncio.Queue = asyncio.Queue()
+    filter_pipeline = FilterPipeline(
+        enriched_bus=enriched_bus,
+        filtered_bus=filtered_bus,
+        sync_filters=[rug_gate, holder_filter, insider_filter, entry_quality_filter],
+        probe_filter=follow_through_probe,
+        db=db,
+    )
+
     logger.info(
         "wired",
         active_wallets=len(active),
@@ -108,11 +141,13 @@ async def _main() -> None:
             _supervise(monitor.run, "wallet_monitor", logger),
             _supervise(detector.run, "convergence_detector", logger),
             _supervise(enricher.run, "enricher", logger),
-            _supervise(lambda: _drain_enriched(enriched_bus, logger), "drain_enriched", logger),
+            _supervise(filter_pipeline.run, "filter_pipeline", logger),
+            _supervise(lambda: _drain_filtered(filtered_bus, logger), "drain_filtered", logger),
             return_exceptions=True,
         )
         for name, result in zip(
-            ["monitor", "detector", "enricher", "drain_enriched"], results
+            ["monitor", "detector", "enricher", "filter_pipeline", "drain_filtered"],
+            results,
         ):
             if isinstance(result, Exception):
                 logger.error("task_exited_with_exception", task=name, error=str(result))
@@ -149,21 +184,21 @@ async def _supervise(factory, name: str, logger) -> None:
             backoff = min(backoff * 2.0, 60.0)
 
 
-async def _drain_enriched(enriched_bus: asyncio.Queue, logger) -> None:
-    """Phase 4 sink: log every enriched token. Replaced by Filter pipeline in Plan 2b."""
+async def _drain_filtered(filtered_bus: asyncio.Queue, logger) -> None:
+    """Phase 5 sink: log every filtered candidate. Replaced by Scoring engine in Plan 2c."""
     while True:
         try:
-            token = await enriched_bus.get()
+            fc = await filtered_bus.get()
             logger.info(
-                "enriched_token_drained",
-                mint=token.token_mint,
-                symbol=token.symbol,
-                liquidity_usd=token.liquidity_usd,
-                deployer=token.deployer_address,
-                errors=token.errors,
+                "filtered_candidate_drained",
+                mint=fc.enriched.token_mint,
+                symbol=fc.enriched.symbol,
+                gate_passed=fc.gate_passed,
+                hard_fail_reason=fc.hard_fail_reason,
+                filter_count=len(fc.filter_results),
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("drain_enriched_iteration_error", error=str(e))
+            logger.warning("drain_filtered_iteration_error", error=str(e))
 
 
 if __name__ == "__main__":
