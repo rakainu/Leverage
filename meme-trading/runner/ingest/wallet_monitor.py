@@ -5,10 +5,10 @@ of work — `handle_signature()` — is pure and testable without a real socket.
 """
 import asyncio
 import json
+from collections import OrderedDict
 
 import websockets
 
-from runner.ingest.events import BuyEvent
 from runner.ingest.transaction_parser import TransactionParser
 from runner.utils.logging import get_logger
 
@@ -36,7 +36,7 @@ class WalletMonitor:
         self.event_bus = event_bus
         self.parser = parser
         self.ws_url = ws_url
-        self._seen_signatures: set[str] = set()
+        self._seen_signatures: OrderedDict[str, None] = OrderedDict()
         self._max_seen = max_seen
         self._running = True
 
@@ -48,10 +48,12 @@ class WalletMonitor:
             return
 
         if len(self._seen_signatures) >= self._max_seen:
-            # Crude LRU-ish pruning — drop the oldest half.
-            keep = list(self._seen_signatures)[-(self._max_seen // 2):]
-            self._seen_signatures = set(keep)
-        self._seen_signatures.add(signature)
+            # FIFO prune: drop the oldest half.
+            for _ in range(self._max_seen // 2):
+                if not self._seen_signatures:
+                    break
+                self._seen_signatures.popitem(last=False)
+        self._seen_signatures[signature] = None
 
         event = await self.parser.parse_transaction(signature, wallet_address)
         if event is None:
