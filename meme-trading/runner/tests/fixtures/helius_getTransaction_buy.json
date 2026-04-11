@@ -1,0 +1,43 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "blockTime": 1744372800,
+    "meta": {
+      "err": null,
+      "fee": 5000,
+      "preTokenBalances": [
+        {
+          "accountIndex": 2,
+          "mint": "So11111111111111111111111111111111111111112",
+          "owner": "TestWallet11111111111111111111111111111111",
+          "uiTokenAmount": {"uiAmount": 1.0, "decimals": 9}
+        },
+        {
+          "accountIndex": 3,
+          "mint": "TestTokenMint111111111111111111111111111111",
+          "owner": "TestWallet11111111111111111111111111111111",
+          "uiTokenAmount": {"uiAmount": 0.0, "decimals": 6}
+        }
+      ],
+      "postTokenBalances": [
+        {
+          "accountIndex": 2,
+          "mint": "So11111111111111111111111111111111111111112",
+          "owner": "TestWallet11111111111111111111111111111111",
+          "uiTokenAmount": {"uiAmount": 0.5, "decimals": 9}
+        },
+        {
+          "accountIndex": 3,
+          "mint": "TestTokenMint111111111111111111111111111111",
+          "owner": "TestWallet11111111111111111111111111111111",
+          "uiTokenAmount": {"uiAmount": 1250.0, "decimals": 6}
+        }
+      ]
+    },
+    "slot": 100000000,
+    "transaction": {
+      "signatures": ["TestSig11111111111111111111111111111111111111"]
+    }
+  }
+}
