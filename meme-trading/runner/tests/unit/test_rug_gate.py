@@ -123,7 +123,8 @@ async def test_hard_fails_when_mint_authority_still_enabled():
 @pytest.mark.asyncio
 async def test_passes_with_zero_score_when_rugcheck_fails():
     """API failure should not hard-fail; gate degrades to low sub-score but passes."""
-    client = RateLimitedClient(default_rps=100)
+    # max_retries=0 skips the 5xx retry loop so this test runs in <1s instead of ~7s
+    client = RateLimitedClient(default_rps=100, max_retries=0)
     gate = RugGate(client, lp_locked_pct_min=85)
 
     with respx.mock(base_url="https://api.rugcheck.xyz") as mock:
