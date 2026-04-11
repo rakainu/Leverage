@@ -58,6 +58,36 @@ CREATE TABLE IF NOT EXISTS cluster_signals (
 CREATE INDEX IF NOT EXISTS idx_cluster_signals_mint ON cluster_signals(token_mint);
 CREATE INDEX IF NOT EXISTS idx_cluster_signals_time ON cluster_signals(created_at);
 
+-- Filter pipeline results — one row per (candidate, filter) pair.
+CREATE TABLE IF NOT EXISTS filter_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_mint TEXT NOT NULL,
+    filter_name TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    hard_fail_reason TEXT,
+    sub_scores_json TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    cluster_signal_id INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_filter_results_mint ON filter_results(token_mint);
+CREATE INDEX IF NOT EXISTS idx_filter_results_cluster ON filter_results(cluster_signal_id);
+
+-- Final Runner Score + Verdict — one row per candidate (populated by scoring engine in Plan 2c).
+CREATE TABLE IF NOT EXISTS runner_scores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_mint TEXT NOT NULL,
+    cluster_signal_id INTEGER,
+    runner_score REAL NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('ignore', 'watch', 'strong_candidate', 'probable_runner')),
+    sub_scores_json TEXT NOT NULL,
+    explanation_json TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_runner_scores_mint ON runner_scores(token_mint);
+CREATE INDEX IF NOT EXISTS idx_runner_scores_verdict ON runner_scores(verdict);
+CREATE INDEX IF NOT EXISTS idx_runner_scores_time ON runner_scores(created_at);
+
 -- Schema migration marker.
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,
