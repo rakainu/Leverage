@@ -4,10 +4,14 @@ import sys
 
 import structlog
 
-_configured = False
 
+def configure_logging(level: str = "INFO") -> None:
+    """Set up structlog to emit JSON lines to stdout.
 
-def _configure_structlog(log_level: int) -> None:
+    Safe to call multiple times — each call re-binds the filter level.
+    """
+    log_level = getattr(logging, level.upper(), logging.INFO)
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
@@ -23,36 +27,6 @@ def _configure_structlog(log_level: int) -> None:
     )
 
 
-def configure_logging(level: str = "INFO") -> None:
-    """Set up structlog + stdlib logging to emit JSON lines to stdout.
-
-    Safe to call multiple times — idempotent.
-    """
-    global _configured
-    log_level = getattr(logging, level.upper(), logging.INFO)
-
-    if _configured:
-        # Allow level updates on re-configure without duplicating handlers.
-        logging.getLogger().setLevel(log_level)
-        _configure_structlog(log_level)
-        return
-
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(log_level)
-    root = logging.getLogger()
-    # Replace existing handlers to keep output clean during tests.
-    root.handlers = [handler]
-    root.setLevel(log_level)
-
-    _configure_structlog(log_level)
-
-    _configured = True
-
-
-def get_logger(name: str) -> structlog.stdlib.BoundLogger:
-    """Get a structlog bound logger with the given name.
-
-    The name is bound into the event dict as ``logger`` so it appears in
-    every JSON line this logger emits.
-    """
+def get_logger(name: str) -> "structlog.typing.FilteringBoundLogger":
+    """Get a structlog bound logger with the `logger` field preset to `name`."""
     return structlog.get_logger().bind(logger=name)
