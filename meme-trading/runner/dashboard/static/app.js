@@ -25,10 +25,13 @@ function formatPnl(val) {
   return `<span class="${cls}">${sign}${val.toFixed(1)}%</span>`;
 }
 
-function verdictBadge(verdict) {
-  const cls = 'verdict-' + verdict;
+function verdictPill(verdict) {
   const label = verdict.replace(/_/g, ' ');
-  return `<span class="${cls} font-bold">${label}</span>`;
+  return `<span class="pill pill-${verdict}">${label}</span>`;
+}
+
+function actionPill(action) {
+  return `<span class="action-pill action-${action}">${action}</span>`;
 }
 
 function formatTime(iso) {
@@ -46,6 +49,16 @@ function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function scoreColor(verdict) {
+  const map = { ignore: '#9ca3af', watch: '#fbbf24', strong_candidate: '#4ade80', probable_runner: '#60a5fa' };
+  return map[verdict] || '#94a3b8';
+}
+
+function cautionSpan(text) {
+  if (!text || text === 'None') return '<span class="caution-none">—</span>';
+  return `<span class="caution-text">${escapeHtml(text)}</span>`;
+}
+
 // ── render: stats cards ─────────────────────────────────────────
 
 function renderStats(data) {
@@ -58,9 +71,10 @@ function renderStats(data) {
   const pnlEl = document.getElementById('stat-pnl');
   if (data.avg_pnl_closed != null) {
     const sign = data.avg_pnl_closed >= 0 ? '+' : '';
-    pnlEl.innerHTML = `<span class="${data.avg_pnl_closed >= 0 ? 'pnl-pos' : 'pnl-neg'}">${sign}${data.avg_pnl_closed.toFixed(1)}%</span>`;
+    pnlEl.innerHTML = `<span class="${data.avg_pnl_closed >= 0 ? 'pnl-pos' : 'pnl-neg'} stat-value">${sign}${data.avg_pnl_closed.toFixed(1)}%</span>`;
   } else {
     pnlEl.textContent = '—';
+    pnlEl.className = 'stat-value text-slate-500';
   }
 }
 
@@ -69,19 +83,19 @@ function renderStats(data) {
 function renderScores(scores) {
   const tbody = document.getElementById('scores-table');
   if (!scores || !scores.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="p-3 text-slate-500 text-center">No scored candidates yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-slate-600 text-center text-xs">No scored candidates yet</td></tr>';
     return;
   }
   tbody.innerHTML = scores.map(s => `
-    <tr class="clickable border-b border-slate-700/50" onclick="showDetail(${s.id})">
-      <td class="p-2 text-slate-400">${formatTime(s.created_at)}</td>
-      <td class="p-2"><code>${escapeHtml(s.short_token)}</code></td>
-      <td class="p-2 text-right font-bold verdict-${s.verdict}">${s.runner_score.toFixed(1)}</td>
-      <td class="p-2">${verdictBadge(s.verdict)}</td>
-      <td class="p-2 text-slate-300 truncate max-w-[200px]">${escapeHtml(s.top_reason)}</td>
-      <td class="p-2 text-slate-400 truncate max-w-[180px]">${escapeHtml(s.top_caution)}</td>
-      <td class="p-2 text-center">${s.has_position ? '<span class="text-green-400">Y</span>' : ''}</td>
-      <td class="p-2 text-center">${s.short_circuited ? '<span class="text-red-400">Y</span>' : ''}</td>
+    <tr class="clickable" onclick="showDetail(${s.id})">
+      <td class="text-slate-500">${formatTime(s.created_at)}</td>
+      <td><code class="text-slate-300">${escapeHtml(s.short_token)}</code></td>
+      <td class="text-right font-bold" style="color:${scoreColor(s.verdict)}">${s.runner_score.toFixed(1)}</td>
+      <td>${verdictPill(s.verdict)}</td>
+      <td class="text-slate-400 truncate max-w-[200px]" title="${escapeHtml(s.top_reason)}">${escapeHtml(s.top_reason)}</td>
+      <td>${cautionSpan(s.top_caution)}</td>
+      <td class="text-center">${s.has_position ? '<span class="text-green-400 text-xs">&#9679;</span>' : ''}</td>
+      <td class="text-center">${s.short_circuited ? '<span class="text-red-400 text-xs">&#9679;</span>' : ''}</td>
     </tr>
   `).join('');
 }
@@ -91,25 +105,27 @@ function renderScores(scores) {
 function renderPositions(positions) {
   const tbody = document.getElementById('positions-table');
   if (!positions || !positions.length) {
-    tbody.innerHTML = '<tr><td colspan="12" class="p-3 text-slate-500 text-center">No paper positions yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="p-4 text-slate-600 text-center text-xs">No paper positions yet</td></tr>';
     return;
   }
-  tbody.innerHTML = positions.map(p => `
-    <tr class="border-b border-slate-700/50">
-      <td class="p-2"><code>${escapeHtml(p.symbol || p.short_token)}</code></td>
-      <td class="p-2 text-slate-400">${formatTime(p.signal_time)}</td>
-      <td class="p-2">${verdictBadge(p.verdict)}</td>
-      <td class="p-2 text-right">${p.entry_price_usd != null ? '$' + p.entry_price_usd.toPrecision(3) : '—'}</td>
-      <td class="p-2 text-right">${formatPnl(p.pnl_5m)}</td>
-      <td class="p-2 text-right">${formatPnl(p.pnl_30m)}</td>
-      <td class="p-2 text-right">${formatPnl(p.pnl_1h)}</td>
-      <td class="p-2 text-right">${formatPnl(p.pnl_4h)}</td>
-      <td class="p-2 text-right">${formatPnl(p.pnl_24h)}</td>
-      <td class="p-2 text-right">${formatPnl(p.mfe)}</td>
-      <td class="p-2 text-right">${formatPnl(p.mae)}</td>
-      <td class="p-2 text-center"><span class="${p.status === 'open' ? 'text-yellow-400' : 'text-slate-400'}">${p.status}</span></td>
+  tbody.innerHTML = positions.map(p => {
+    const statusCls = p.status === 'open' ? 'pill-watch' : 'pill-ignore';
+    return `
+    <tr>
+      <td><code class="text-slate-300">${escapeHtml(p.symbol || p.short_token)}</code></td>
+      <td class="text-slate-500">${formatTime(p.signal_time)}</td>
+      <td>${verdictPill(p.verdict)}</td>
+      <td class="text-right text-slate-300">${p.entry_price_usd != null ? '$' + p.entry_price_usd.toPrecision(3) : '—'}</td>
+      <td class="text-right">${formatPnl(p.pnl_5m)}</td>
+      <td class="text-right">${formatPnl(p.pnl_30m)}</td>
+      <td class="text-right">${formatPnl(p.pnl_1h)}</td>
+      <td class="text-right">${formatPnl(p.pnl_4h)}</td>
+      <td class="text-right">${formatPnl(p.pnl_24h)}</td>
+      <td class="text-right">${formatPnl(p.mfe)}</td>
+      <td class="text-right">${formatPnl(p.mae)}</td>
+      <td class="text-center"><span class="pill ${statusCls}">${p.status}</span></td>
     </tr>
-  `).join('');
+  `}).join('');
 }
 
 // ── detail panel ────────────────────────────────────────────────
@@ -121,99 +137,119 @@ async function showDetail(scoreId) {
   const title = document.getElementById('detail-title');
 
   panel.classList.remove('hidden');
-  content.innerHTML = '<p class="text-slate-500">Loading...</p>';
+  content.innerHTML = '<p class="text-slate-600 text-xs">Loading...</p>';
 
   const d = await fetchJSON(`/api/scores/${scoreId}`);
   if (!d) {
-    content.innerHTML = '<p class="text-red-400">Failed to load detail</p>';
+    content.innerHTML = '<p class="text-red-400 text-xs">Failed to load detail</p>';
     return;
   }
 
-  title.innerHTML = `${escapeHtml(d.short_token)} — ${verdictBadge(d.verdict)} (${d.runner_score.toFixed(1)})`;
+  title.innerHTML = `<code class="text-slate-300 mr-2">${escapeHtml(d.short_token)}</code> ${verdictPill(d.verdict)} <span class="text-slate-500 text-xs ml-2">${d.runner_score.toFixed(1)} pts</span>`;
 
-  let html = '<div class="grid grid-cols-2 gap-4">';
+  let html = '<div class="grid grid-cols-2 gap-6">';
 
-  // Left: dimensions
+  // Left: score breakdown
   html += '<div>';
-  html += '<h4 class="text-xs font-bold text-slate-400 mb-2">Score Breakdown</h4>';
+  html += '<div class="detail-section">';
+  html += '<div class="detail-label">Score Breakdown</div>';
   const dimOrder = ['wallet_quality', 'cluster_quality', 'entry_quality', 'holder_quality', 'rug_risk', 'follow_through', 'narrative'];
   for (const key of dimOrder) {
     const dim = (d.dimensions || {})[key];
     if (!dim) continue;
     const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const pct = Math.max(0, Math.min(100, dim.score));
-    const color = dim.score >= 60 ? 'bg-green-600' : dim.score >= 40 ? 'bg-yellow-600' : 'bg-red-600';
+    const barColor = dim.score >= 60 ? '#4ade80' : dim.score >= 40 ? '#fbbf24' : '#f87171';
     html += `
-      <div class="mb-1.5">
-        <div class="flex justify-between text-xs mb-0.5">
-          <span class="text-slate-300">${label}</span>
-          <span class="text-slate-400">${dim.score.toFixed(0)} (x${dim.weight.toFixed(2)} = ${dim.weighted.toFixed(1)})</span>
+      <div class="mb-2">
+        <div class="flex justify-between text-[11px] mb-1">
+          <span class="text-slate-400">${label}</span>
+          <span class="text-slate-500">${dim.score.toFixed(0)} <span class="text-slate-600">x${dim.weight.toFixed(2)}</span> = <span class="text-slate-300">${dim.weighted.toFixed(1)}</span></span>
         </div>
-        <div class="w-full bg-slate-700 rounded h-1.5">
-          <div class="bar-fill ${color} rounded h-1.5" style="width:${pct}%"></div>
+        <div class="score-track">
+          <div class="score-bar" style="width:${pct}%; background:${barColor}"></div>
         </div>
       </div>
     `;
   }
-  html += '</div>';
+  html += '</div>'; // detail-section
+
+  // Raw scores
+  html += '<div class="detail-section">';
+  html += '<div class="detail-label">Raw Risk Scores</div>';
+  html += `<div class="flex gap-6 text-[11px]">`;
+  html += `<div><span class="text-slate-500">Rug Risk</span> <span class="text-slate-200 font-bold ml-1">${d.raw_rug_risk ?? '—'}</span></div>`;
+  html += `<div><span class="text-slate-500">Insider Risk</span> <span class="text-slate-200 font-bold ml-1">${d.raw_insider_risk ?? '—'}</span></div>`;
+  html += `</div></div>`;
+
+  html += '</div>'; // left column
 
   // Right: reasons + cautions + meta
   html += '<div>';
 
   // Top 3 reasons
-  html += '<h4 class="text-xs font-bold text-slate-400 mb-1">Top Reasons</h4>';
-  html += '<ol class="text-xs text-slate-300 mb-3 list-decimal list-inside">';
+  html += '<div class="detail-section">';
+  html += '<div class="detail-label">Top Reasons</div>';
   for (const r of (d.top_reasons || [])) {
-    html += `<li>${escapeHtml(r.name)} ${r.score.toFixed(0)} (x${r.weight.toFixed(2)} = ${r.weighted.toFixed(1)})</li>`;
+    const barW = Math.min(100, r.weighted / 20 * 100); // normalize to max ~20
+    html += `<div class="flex items-center gap-2 mb-1.5 text-[11px]">
+      <span class="text-slate-300 w-28 shrink-0">${escapeHtml(r.name)}</span>
+      <div class="flex-1 score-track"><div class="score-bar" style="width:${barW}%; background:#4ade80"></div></div>
+      <span class="text-slate-500 w-16 text-right">${r.score.toFixed(0)} (${r.weighted.toFixed(1)})</span>
+    </div>`;
   }
-  html += '</ol>';
+  html += '</div>';
 
   // Cautions
-  html += '<h4 class="text-xs font-bold text-slate-400 mb-1">Cautions</h4>';
-  html += '<ul class="text-xs text-slate-300 mb-3">';
+  html += '<div class="detail-section">';
+  html += '<div class="detail-label">Cautions</div>';
   for (const c of (d.cautions || [])) {
-    html += `<li class="${c === 'None' ? 'text-slate-500' : 'text-yellow-400'}">• ${escapeHtml(c)}</li>`;
+    if (c === 'None') {
+      html += '<div class="text-[11px] text-slate-600">No major cautions</div>';
+    } else {
+      html += `<div class="text-[11px] mb-1"><span class="caution-text">${escapeHtml(c)}</span></div>`;
+    }
   }
-  html += '</ul>';
-
-  // Raw scores
-  html += '<h4 class="text-xs font-bold text-slate-400 mb-1">Raw Scores</h4>';
-  html += `<div class="text-xs text-slate-300 mb-3">Rug Risk: ${d.raw_rug_risk ?? '—'} | Insider Risk: ${d.raw_insider_risk ?? '—'}</div>`;
+  html += '</div>';
 
   // Cluster
-  html += '<h4 class="text-xs font-bold text-slate-400 mb-1">Cluster</h4>';
+  html += '<div class="detail-section">';
+  html += '<div class="detail-label">Cluster</div>';
   const cl = d.cluster || {};
   const tiers = Array.isArray(cl.tier_counts) ? cl.tier_counts.join(', ') : JSON.stringify(cl.tier_counts || {});
-  html += `<div class="text-xs text-slate-300 mb-3">${cl.wallet_count || 0} wallets, ${(cl.convergence_minutes || 0).toFixed(0)} min convergence, tiers: ${tiers}</div>`;
-
-  // Version
-  html += `<div class="text-xs text-slate-500 mb-3">v: ${escapeHtml(d.scoring_version)} | hash: ${escapeHtml(d.weights_hash)}</div>`;
+  html += `<div class="text-[11px] text-slate-400">${cl.wallet_count || 0} wallets &middot; ${(cl.convergence_minutes || 0).toFixed(0)} min &middot; tiers: ${tiers}</div>`;
+  html += '</div>';
 
   // Position milestones
   if (d.position) {
     const p = d.position;
-    html += '<h4 class="text-xs font-bold text-slate-400 mb-1">Position</h4>';
-    html += '<div class="text-xs text-slate-300 mb-1">';
-    html += `Status: ${p.status} | Entry: $${(p.entry_price_usd || 0).toPrecision(3)} | Size: ${p.amount_sol} SOL`;
-    html += '</div>';
-    html += '<div class="text-xs text-slate-300 mb-1">';
+    html += '<div class="detail-section">';
+    html += '<div class="detail-label">Position</div>';
+    html += `<div class="text-[11px] text-slate-400 mb-1">${verdictPill(d.verdict)} &middot; Entry $${(p.entry_price_usd || 0).toPrecision(3)} &middot; ${p.amount_sol} SOL &middot; <span class="pill pill-${p.status === 'open' ? 'watch' : 'ignore'}">${p.status}</span></div>`;
+
     const milestones = ['5m', '30m', '1h', '4h', '24h'];
-    const vals = milestones.map(m => {
-      const v = p['pnl_' + m];
-      return v != null ? `${m}: ${v >= 0 ? '+' : ''}${v.toFixed(1)}%` : null;
-    }).filter(Boolean);
-    html += vals.join(' | ') || 'No milestones yet';
+    const captured = milestones.filter(m => p['pnl_' + m] != null);
+    if (captured.length) {
+      html += '<div class="flex gap-3 text-[11px] mt-1">';
+      for (const m of captured) {
+        html += `<div class="text-slate-500">${m}: ${formatPnl(p['pnl_' + m])}</div>`;
+      }
+      html += '</div>';
+    }
+    html += `<div class="flex gap-4 text-[11px] mt-1"><div class="text-slate-500">MFE: ${formatPnl(p.mfe)}</div><div class="text-slate-500">MAE: ${formatPnl(p.mae)}</div></div>`;
     html += '</div>';
-    html += `<div class="text-xs text-slate-300">MFE: ${formatPnl(p.mfe)} | MAE: ${formatPnl(p.mae)}</div>`;
   }
 
-  // Links
-  html += '<div class="mt-3 text-xs">';
-  html += `<a href="${d.links?.dexscreener || '#'}" target="_blank" class="text-blue-400 hover:underline mr-3">DexScreener</a>`;
-  html += `<a href="${d.links?.solscan || '#'}" target="_blank" class="text-blue-400 hover:underline">Solscan</a>`;
-  html += '</div>';
-
+  // Version + links
+  html += '<div class="flex items-center justify-between mt-2">';
+  html += `<span class="text-[10px] text-slate-600">v${escapeHtml(d.scoring_version)} &middot; ${escapeHtml(d.weights_hash)}</span>`;
+  html += '<div class="flex gap-2">';
+  html += `<a href="${d.links?.dexscreener || '#'}" target="_blank" class="ext-link">DexScreener</a>`;
+  html += `<a href="${d.links?.solscan || '#'}" target="_blank" class="ext-link">Solscan</a>`;
   html += '</div></div>';
+
+  html += '</div>'; // right column
+  html += '</div>'; // grid
   content.innerHTML = html;
 }
 
@@ -234,17 +270,16 @@ function renderWalletActivity(data) {
   const tbody = document.getElementById('wallet-events-table');
   const events = data.events || [];
   if (!events.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="p-3 text-slate-500 text-center">No wallet registry events yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-slate-600 text-center text-xs">No wallet registry events yet</td></tr>';
     return;
   }
-  const actionColor = {added: 'text-green-400', deactivated: 'text-red-400', reactivated: 'text-blue-400', updated: 'text-yellow-400'};
   tbody.innerHTML = events.map(e => `
-    <tr class="border-b border-slate-700/50">
-      <td class="p-2 text-slate-400">${formatTime(e.created_at)}</td>
-      <td class="p-2"><code>${escapeHtml(e.short_address)}</code></td>
-      <td class="p-2 ${actionColor[e.action] || 'text-slate-300'} font-bold">${e.action}</td>
-      <td class="p-2 text-slate-400">${escapeHtml(e.source || '—')}</td>
-      <td class="p-2 text-slate-400">${escapeHtml(e.label || '—')}</td>
+    <tr>
+      <td class="text-slate-500">${formatTime(e.created_at)}</td>
+      <td><code class="text-slate-400">${escapeHtml(e.short_address)}</code></td>
+      <td>${actionPill(e.action)}</td>
+      <td class="text-slate-500">${escapeHtml(e.source || '—')}</td>
+      <td class="text-slate-500">${escapeHtml(e.label || '—')}</td>
     </tr>
   `).join('');
 }
@@ -253,6 +288,7 @@ function renderWalletActivity(data) {
 
 async function refreshAll() {
   const indicator = document.getElementById('status-indicator');
+  const dot = document.getElementById('live-dot');
   try {
     const [stats, scores, positions, wallets] = await Promise.all([
       fetchJSON('/api/stats'),
@@ -264,11 +300,13 @@ async function refreshAll() {
     renderScores(scores?.scores);
     renderPositions(positions?.positions);
     renderWalletActivity(wallets);
-    indicator.textContent = 'updated ' + new Date().toLocaleTimeString();
-    indicator.className = 'text-xs text-green-600';
+    indicator.textContent = new Date().toLocaleTimeString();
+    indicator.className = 'text-[10px] text-slate-600 label-text';
+    dot.className = 'w-2 h-2 rounded-full bg-green-500';
   } catch (e) {
-    indicator.textContent = 'poll error';
-    indicator.className = 'text-xs text-red-500';
+    indicator.textContent = 'error';
+    indicator.className = 'text-[10px] text-red-500 label-text';
+    dot.className = 'w-2 h-2 rounded-full bg-red-500';
   }
 }
 

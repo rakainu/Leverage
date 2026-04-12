@@ -5,54 +5,130 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Runner Intel</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        panel: '#111827',
+        surface: '#1e2533',
+        border: '#2a3346',
+      }
+    }
+  }
+}
+</script>
 <style>
-  body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
-  .verdict-ignore { color: #9ca3af; }
-  .verdict-watch { color: #eab308; }
-  .verdict-strong_candidate { color: #22c55e; }
-  .verdict-probable_runner { color: #3b82f6; }
-  .pnl-pos { color: #22c55e; }
-  .pnl-neg { color: #ef4444; }
-  .pnl-nil { color: #6b7280; }
-  .bar-fill { transition: width 0.2s ease; }
-  tr.clickable:hover { background: #1e293b; cursor: pointer; }
-  .detail-row { display: none; }
-  .detail-row.open { display: table-row; }
+  body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; background: #0b0f19; }
+  .label-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  /* verdict pills */
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 9999px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .pill-ignore { background: #374151; color: #9ca3af; }
+  .pill-watch { background: #422006; color: #fbbf24; border: 1px solid #92400e; }
+  .pill-strong_candidate { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+  .pill-probable_runner { background: #172554; color: #60a5fa; border: 1px solid #1e40af; }
+
+  /* wallet action pills */
+  .action-pill { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+  .action-added { background: #052e16; color: #4ade80; }
+  .action-deactivated { background: #450a0a; color: #f87171; }
+  .action-reactivated { background: #172554; color: #60a5fa; }
+  .action-updated { background: #422006; color: #fbbf24; }
+
+  /* P&L coloring */
+  .pnl-pos { color: #4ade80; }
+  .pnl-neg { color: #f87171; }
+  .pnl-nil { color: #4b5563; }
+
+  /* caution styling */
+  .caution-text { color: #fbbf24; background: #422006; padding: 1px 6px; border-radius: 4px; font-size: 10px; }
+  .caution-none { color: #6b7280; }
+
+  /* table */
+  .data-table { border-collapse: separate; border-spacing: 0; }
+  .data-table thead th { position: sticky; top: 0; background: #1e2533; z-index: 1; padding: 8px 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; border-bottom: 1px solid #2a3346; }
+  .data-table tbody td { padding: 7px 10px; border-bottom: 1px solid #1a2030; }
+  .data-table tbody tr:hover { background: #1a2236; }
+  tr.clickable { cursor: pointer; }
+
+  /* score bar */
+  .score-bar { height: 6px; border-radius: 3px; transition: width 0.2s ease; }
+  .score-track { height: 6px; border-radius: 3px; background: #1e2533; }
+
+  /* detail panel */
+  .detail-section { border-left: 2px solid #2a3346; padding-left: 12px; margin-bottom: 14px; }
+  .detail-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-bottom: 4px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  /* card */
+  .stat-card { background: #1e2533; border: 1px solid #2a3346; border-radius: 8px; padding: 14px 16px; }
+  .stat-value { font-size: 1.75rem; font-weight: 700; line-height: 1.1; }
+  .stat-label { font-size: 11px; color: #64748b; margin-bottom: 4px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  /* section */
+  .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 600; margin-bottom: 8px; padding-left: 2px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .section-wrap { background: #111827; border: 1px solid #1e2533; border-radius: 8px; overflow: hidden; }
+
+  /* links */
+  .ext-link { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; background: #1e2533; border: 1px solid #2a3346; color: #94a3b8; font-size: 11px; text-decoration: none; }
+  .ext-link:hover { background: #2a3346; color: #e2e8f0; }
 </style>
 </head>
-<body class="bg-slate-900 text-slate-200 text-sm">
+<body class="text-slate-300 text-[13px]">
 
-<div class="max-w-[1400px] mx-auto px-4 py-4">
+<div class="max-w-[1440px] mx-auto px-5 py-5">
+
   <!-- Header -->
-  <div class="flex items-center justify-between mb-4">
-    <h1 class="text-lg font-bold text-slate-100">Runner Intel Dashboard</h1>
-    <span id="status-indicator" class="text-xs text-slate-500">polling...</span>
+  <div class="flex items-center justify-between mb-5">
+    <div class="flex items-center gap-3">
+      <div class="w-2 h-2 rounded-full bg-green-500" id="live-dot"></div>
+      <h1 class="text-base font-bold text-slate-100 label-text tracking-wide">RUNNER INTEL</h1>
+    </div>
+    <span id="status-indicator" class="text-[10px] text-slate-600 label-text">polling...</span>
   </div>
 
   <!-- Summary Cards -->
-  <div id="stats-cards" class="grid grid-cols-6 gap-3 mb-6">
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Scored</div><div class="text-xl font-bold" id="stat-total">—</div></div>
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Strong Candidates</div><div class="text-xl font-bold text-green-500" id="stat-strong">—</div></div>
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Probable Runners</div><div class="text-xl font-bold text-blue-500" id="stat-runner">—</div></div>
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Open Positions</div><div class="text-xl font-bold" id="stat-open">—</div></div>
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Closed Positions</div><div class="text-xl font-bold" id="stat-closed">—</div></div>
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Avg P&L (closed)</div><div class="text-xl font-bold" id="stat-pnl">—</div></div>
+  <div class="grid grid-cols-6 gap-3 mb-7">
+    <div class="stat-card">
+      <div class="stat-label">Scored</div>
+      <div class="stat-value text-slate-100" id="stat-total">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Strong Candidates</div>
+      <div class="stat-value text-green-400" id="stat-strong">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Probable Runners</div>
+      <div class="stat-value text-blue-400" id="stat-runner">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Open Positions</div>
+      <div class="stat-value text-amber-400" id="stat-open">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Closed Positions</div>
+      <div class="stat-value text-slate-300" id="stat-closed">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg P&L (closed)</div>
+      <div class="stat-value" id="stat-pnl">—</div>
+    </div>
   </div>
 
   <!-- Scored Candidates -->
-  <h2 class="text-sm font-bold text-slate-300 mb-2">Recent Scored Candidates</h2>
-  <div class="bg-slate-800 rounded mb-6 overflow-x-auto">
-    <table class="w-full text-xs">
+  <div class="section-title">Scored Candidates</div>
+  <div class="section-wrap mb-7 overflow-x-auto">
+    <table class="data-table w-full">
       <thead>
-        <tr class="text-slate-400 border-b border-slate-700">
-          <th class="text-left p-2">Time</th>
-          <th class="text-left p-2">Token</th>
-          <th class="text-right p-2">Score</th>
-          <th class="text-left p-2">Verdict</th>
-          <th class="text-left p-2">Top Reason</th>
-          <th class="text-left p-2">Top Caution</th>
-          <th class="text-center p-2">Pos</th>
-          <th class="text-center p-2">SC</th>
+        <tr>
+          <th class="text-left">Time</th>
+          <th class="text-left">Token</th>
+          <th class="text-right">Score</th>
+          <th class="text-left">Verdict</th>
+          <th class="text-left">Top Reason</th>
+          <th class="text-left">Top Caution</th>
+          <th class="text-center">Pos</th>
+          <th class="text-center">SC</th>
         </tr>
       </thead>
       <tbody id="scores-table"></tbody>
@@ -60,23 +136,23 @@
   </div>
 
   <!-- Paper Positions -->
-  <h2 class="text-sm font-bold text-slate-300 mb-2">Paper Positions</h2>
-  <div class="bg-slate-800 rounded mb-6 overflow-x-auto">
-    <table class="w-full text-xs">
+  <div class="section-title">Paper Positions</div>
+  <div class="section-wrap mb-7 overflow-x-auto">
+    <table class="data-table w-full">
       <thead>
-        <tr class="text-slate-400 border-b border-slate-700">
-          <th class="text-left p-2">Token</th>
-          <th class="text-left p-2">Opened</th>
-          <th class="text-left p-2">Verdict</th>
-          <th class="text-right p-2">Entry $</th>
-          <th class="text-right p-2">5m</th>
-          <th class="text-right p-2">30m</th>
-          <th class="text-right p-2">1h</th>
-          <th class="text-right p-2">4h</th>
-          <th class="text-right p-2">24h</th>
-          <th class="text-right p-2">MFE</th>
-          <th class="text-right p-2">MAE</th>
-          <th class="text-center p-2">Status</th>
+        <tr>
+          <th class="text-left">Token</th>
+          <th class="text-left">Opened</th>
+          <th class="text-left">Verdict</th>
+          <th class="text-right">Entry $</th>
+          <th class="text-right">5m</th>
+          <th class="text-right">30m</th>
+          <th class="text-right">1h</th>
+          <th class="text-right">4h</th>
+          <th class="text-right">24h</th>
+          <th class="text-right">MFE</th>
+          <th class="text-right">MAE</th>
+          <th class="text-center">Status</th>
         </tr>
       </thead>
       <tbody id="positions-table"></tbody>
@@ -84,36 +160,39 @@
   </div>
 
   <!-- Wallet Registry Activity -->
-  <h2 class="text-sm font-bold text-slate-300 mb-2">Wallet Registry Activity</h2>
+  <div class="section-title">Wallet Registry</div>
   <div class="grid grid-cols-4 gap-3 mb-3">
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Tracked Wallets</div><div class="text-lg font-bold" id="wallet-total">—</div></div>
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Added (6h)</div><div class="text-lg font-bold text-green-500" id="wallet-added">—</div></div>
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Deactivated (6h)</div><div class="text-lg font-bold text-red-400" id="wallet-deactivated">—</div></div>
-    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Last Event</div><div class="text-sm" id="wallet-last-sync">—</div></div>
+    <div class="stat-card"><div class="stat-label">Tracked</div><div class="text-xl font-bold text-slate-100" id="wallet-total">—</div></div>
+    <div class="stat-card"><div class="stat-label">Added (6h)</div><div class="text-xl font-bold text-green-400" id="wallet-added">—</div></div>
+    <div class="stat-card"><div class="stat-label">Deactivated (6h)</div><div class="text-xl font-bold text-red-400" id="wallet-deactivated">—</div></div>
+    <div class="stat-card"><div class="stat-label">Last Event</div><div class="text-sm text-slate-400" id="wallet-last-sync">—</div></div>
   </div>
-  <div class="bg-slate-800 rounded mb-6 overflow-x-auto">
-    <table class="w-full text-xs">
+  <div class="section-wrap mb-7 overflow-x-auto">
+    <table class="data-table w-full">
       <thead>
-        <tr class="text-slate-400 border-b border-slate-700">
-          <th class="text-left p-2">Time</th>
-          <th class="text-left p-2">Wallet</th>
-          <th class="text-left p-2">Action</th>
-          <th class="text-left p-2">Source</th>
-          <th class="text-left p-2">Label</th>
+        <tr>
+          <th class="text-left">Time</th>
+          <th class="text-left">Wallet</th>
+          <th class="text-left">Action</th>
+          <th class="text-left">Source</th>
+          <th class="text-left">Label</th>
         </tr>
       </thead>
       <tbody id="wallet-events-table"></tbody>
     </table>
   </div>
 
-  <!-- Detail Panel (shown on row click) -->
-  <div id="detail-panel" class="bg-slate-800 rounded p-4 mb-6 hidden">
-    <div class="flex justify-between items-center mb-3">
-      <h3 class="font-bold text-slate-100" id="detail-title">—</h3>
-      <button onclick="closeDetail()" class="text-slate-400 hover:text-slate-200 text-xs">[close]</button>
+  <!-- Detail Panel -->
+  <div id="detail-panel" class="hidden mb-7">
+    <div class="section-wrap p-5">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="font-bold text-slate-100 text-sm" id="detail-title">—</h3>
+        <button onclick="closeDetail()" class="text-slate-500 hover:text-slate-300 text-xs label-text px-2 py-1 rounded hover:bg-surface">close</button>
+      </div>
+      <div id="detail-content"></div>
     </div>
-    <div id="detail-content"></div>
   </div>
+
 </div>
 
 <script src="/static/app.js"></script>
