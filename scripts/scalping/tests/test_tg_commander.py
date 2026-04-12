@@ -212,10 +212,21 @@ async def test_callback_start_sol_resumes(commander, gate):
 
 
 @pytest.mark.asyncio
-async def test_callback_status_refreshes_menu(commander):
+async def test_callback_status_shows_alert_without_editing(commander, gate):
+    """Status button cannot edit the message (Telegram rejects 'not modified'),
+    so it must show the current state as a popup alert instead."""
+    await gate.pause("SOL-USDT")
     await commander._handle_update(_callback_update("status"))
-    commander._edit_message.assert_called_once()
+
+    # No edit — state didn't change, nothing to re-render.
+    commander._edit_message.assert_not_called()
+
+    # Popup alert with the rendered status text.
     commander._answer_callback.assert_called_once()
+    _, kwargs = commander._answer_callback.call_args
+    assert kwargs["show_alert"] is True
+    assert "SOL-USDT" in kwargs["text"]
+    assert "paused" in kwargs["text"].lower()
 
 
 @pytest.mark.asyncio

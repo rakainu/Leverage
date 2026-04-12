@@ -185,8 +185,19 @@ class TelegramCommander:
         message_id = message.get("message_id")
 
         action, _, target = data.partition(":")
-        toast = ""
 
+        # Status button: no state change → can't editMessageText (Telegram
+        # rejects "not modified"). Show the current state as a popup alert
+        # so the operator gets visible feedback.
+        if action == "status":
+            await self._answer_callback(
+                callback_id=cb_id,
+                text=self._render_status_text(),
+                show_alert=True,
+            )
+            return
+
+        toast = ""
         try:
             if action == "stop" and target:
                 await self.gate.pause(target)
@@ -195,8 +206,6 @@ class TelegramCommander:
             elif action == "start" and target:
                 await self.gate.resume(target)
                 toast = f"{target.split('-')[0]} running"
-            elif action == "status":
-                toast = "Refreshed"
             else:
                 toast = "Unknown action"
         except ValueError as exc:
@@ -368,12 +377,18 @@ class TelegramCommander:
 
     async def _answer_callback(
         self, *, callback_id: str, text: str = "",
+        show_alert: bool = False,
     ) -> dict[str, Any]:
         if self._client is None:
             return {}
+        body = {
+            "callback_query_id": callback_id,
+            "text": text,
+            "show_alert": show_alert,
+        }
         r = await self._client.post(
             f"{API_BASE}/bot{self.bot_token}/answerCallbackQuery",
-            json={"callback_query_id": callback_id, "text": text},
+            json=body,
             timeout=10.0,
         )
         return r.json()
