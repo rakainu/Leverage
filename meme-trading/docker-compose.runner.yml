@@ -10,6 +10,8 @@ services:
       - ../data:/app/data
       - ./runner/config/weights.yaml:/app/config/weights.yaml
       - /docker/smc-trading/config/wallets.json:/app/config/wallets.json:ro
+    ports:
+      - "127.0.0.1:8421:8421"
     environment:
       - TZ=UTC
     logging:

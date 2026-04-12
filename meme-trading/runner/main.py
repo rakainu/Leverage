@@ -22,6 +22,7 @@ from runner.ingest.rpc_pool import RpcPool
 from runner.executor.paper import PaperExecutor
 from runner.executor.snapshotter import MilestoneSnapshotter
 from runner.alerts.telegram import TelegramAlerter
+from runner.dashboard.app import create_app
 from runner.scoring.engine import ScoringEngine
 from runner.ingest.transaction_parser import TransactionParser
 from runner.ingest.wallet_monitor import WalletMonitor
@@ -154,6 +155,8 @@ async def _main() -> None:
         alert_bus=alert_bus, bot_token=settings.telegram_bot_token, chat_id=settings.telegram_chat_id,
     )
 
+    dashboard_app = create_app(db)
+
     logger.info(
         "runner_config",
         db_path=str(settings.db_path),
@@ -182,11 +185,12 @@ async def _main() -> None:
             _supervise(paper_executor.run, "paper_executor", logger),
             _supervise(snapshotter.run, "milestone_snapshotter", logger),
             _supervise(telegram.run, "telegram_alerter", logger),
+            _supervise(lambda: _run_dashboard(dashboard_app, logger), "dashboard", logger),
             return_exceptions=True,
         )
         for name, result in zip(
             ["monitor", "detector", "enricher", "filter_pipeline", "scoring_engine",
-             "paper_executor", "milestone_snapshotter", "telegram_alerter"],
+             "paper_executor", "milestone_snapshotter", "telegram_alerter", "dashboard"],
             results,
         ):
             if isinstance(result, Exception):
@@ -194,6 +198,15 @@ async def _main() -> None:
     finally:
         await http.aclose()
         await db.close()
+
+
+async def _run_dashboard(app, logger) -> None:
+    """Run the dashboard as a uvicorn ASGI server."""
+    import uvicorn
+    config = uvicorn.Config(app, host="0.0.0.0", port=8421, log_level="warning")
+    server = uvicorn.Server(config)
+    logger.info("dashboard_start", port=8421)
+    await server.serve()
 
 
 async def _supervise(factory, name: str, logger) -> None:
