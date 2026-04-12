@@ -1,7 +1,9 @@
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 
+from blofin_bridge.entry_gate import EntryGate
 from blofin_bridge.router import dispatch, UnknownAction
 from blofin_bridge.state import Store
 
@@ -85,3 +87,38 @@ def test_dispatch_tp_actions_are_unknown(store, blofin, cfg):
                 action=action, symbol="SOL-USDT",
                 store=store, blofin=blofin, symbol_configs=cfg,
             )
+
+
+def test_dispatch_returns_paused_when_gate_is_paused(store, blofin, cfg):
+    """When EntryGate has the symbol paused, dispatch must NOT create a
+    pending signal and must return a paused response."""
+    gate = EntryGate(symbols=["SOL-USDT", "ZEC-USDT"])
+    asyncio.new_event_loop().run_until_complete(gate.pause("SOL-USDT"))
+
+    result = dispatch(
+        action="buy", symbol="SOL-USDT",
+        store=store, blofin=blofin, symbol_configs=cfg, gate=gate,
+    )
+
+    assert result == {
+        "paused": True,
+        "symbol": "SOL-USDT",
+        "action": "buy",
+        "reason": "entries paused by operator",
+    }
+    # No pending signal row should have been created.
+    assert store.list_pending_signals() == []
+
+
+def test_dispatch_sl_not_blocked_by_gate(store, blofin, cfg):
+    """SL close actions are never blocked — operator safety."""
+    gate = EntryGate(symbols=["SOL-USDT"])
+    asyncio.new_event_loop().run_until_complete(gate.pause("SOL-USDT"))
+
+    result = dispatch(
+        action="sl", symbol="SOL-USDT",
+        store=store, blofin=blofin, symbol_configs=cfg, gate=gate,
+    )
+    # With no open position, handle_sl returns {closed: False, reason: ...}
+    # The key point: the response must NOT carry a "paused" flag.
+    assert "paused" not in result

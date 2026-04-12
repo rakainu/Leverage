@@ -1,12 +1,15 @@
 """Action dispatch: webhook payload -> correct handler."""
 from __future__ import annotations
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .blofin_client import BloFinClient
 from .handlers.entry import handle_entry
 from .handlers.reversal import handle_reversal
 from .handlers.sl import handle_sl
 from .state import Store
+
+if TYPE_CHECKING:
+    from .entry_gate import EntryGate
 
 
 class UnknownAction(ValueError):
@@ -26,6 +29,7 @@ def dispatch(
     store: Store,
     blofin: BloFinClient,
     symbol_configs: dict[str, dict[str, Any]],
+    gate: "EntryGate | None" = None,
 ) -> dict[str, Any]:
     if action not in VALID_ACTIONS:
         raise UnknownAction(action)
@@ -37,6 +41,16 @@ def dispatch(
     if not sym_cfg.get("enabled", False):
         return {"opened": False, "handled": False,
                 "reason": f"symbol {symbol} disabled in config"}
+
+    # Operator-initiated pause: block new entries but always allow SL (close-safe).
+    entry_actions = ("buy", "sell", "reversal_buy", "reversal_sell")
+    if gate is not None and action in entry_actions and gate.is_paused(symbol):
+        return {
+            "paused": True,
+            "symbol": symbol,
+            "action": action,
+            "reason": "entries paused by operator",
+        }
 
     if action in ("buy", "sell"):
         # Save as pending signal — poller will execute on EMA retest
