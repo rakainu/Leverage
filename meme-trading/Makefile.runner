@@ -1,0 +1,30 @@
+COMPOSE = docker compose -f docker-compose.runner.yml
+
+.PHONY: build up down logs restart update bootstrap status db
+
+build:
+	$(COMPOSE) build
+
+up:
+	$(COMPOSE) up -d
+
+down:
+	$(COMPOSE) down
+
+logs:
+	$(COMPOSE) logs -f --tail 100
+
+restart:
+	$(COMPOSE) restart
+
+update:
+	git pull && $(COMPOSE) up -d --build
+
+bootstrap:
+	$(COMPOSE) run --rm runner-intel python -m runner.scripts.bootstrap_wallet_tiers
+
+status:
+	docker ps | grep runner-intel
+
+db:
+	docker exec runner-intel python -c "import sqlite3; c = sqlite3.connect('/app/data/runner.db'); print('scores:', c.execute('SELECT COUNT(*) FROM runner_scores').fetchone()[0]); print('positions:', c.execute('SELECT COUNT(*) FROM paper_positions').fetchone()[0]); print('open:', c.execute(\"SELECT COUNT(*) FROM paper_positions WHERE status='open'\").fetchone()[0])"
