@@ -120,6 +120,19 @@ CREATE INDEX IF NOT EXISTS idx_paper_positions_mint ON paper_positions(token_min
 CREATE INDEX IF NOT EXISTS idx_paper_positions_status ON paper_positions(status);
 CREATE INDEX IF NOT EXISTS idx_paper_positions_verdict ON paper_positions(verdict);
 
+-- Wallet registry change events — logged by periodic diff-on-reload.
+CREATE TABLE IF NOT EXISTS wallet_registry_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    wallet_address TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('added', 'deactivated', 'reactivated', 'updated')),
+    source TEXT,
+    label TEXT,
+    detail_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_wallet_events_time ON wallet_registry_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_wallet_events_action ON wallet_registry_events(action);
+
 -- Schema migration marker.
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,
