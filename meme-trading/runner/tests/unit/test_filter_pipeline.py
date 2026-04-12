@@ -102,6 +102,7 @@ async def test_pipeline_short_circuits_on_hard_fail(tmp_path):
     fc: FilteredCandidate = filtered_bus.get_nowait()
     assert fc.gate_passed is False
     assert fc.hard_fail_reason == "bad thing"
+    assert fc.hard_fail_filter_name == "f2"
     assert len(fc.filter_results) == 2  # f1 + f2
     assert fc.filter_results[-1].filter_name == "f2"
 
