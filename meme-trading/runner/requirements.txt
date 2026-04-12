@@ -8,6 +8,8 @@ pyyaml==6.0.2
 structlog==24.4.0
 tenacity==9.0.0
 python-telegram-bot==21.7
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
 
 # Dev / tests
 pytest==8.3.3
