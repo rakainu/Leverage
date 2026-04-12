@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .blofin_client import BloFinClient, build_ccxt_client
 from .config import Settings, load_config
+from .entry_gate import EntryGate
 from .notify import (
     Notifier, format_entry, format_sl_close, format_reversal,
     format_error, format_pending,
@@ -19,6 +20,7 @@ from .notify import (
 from .poller import PositionPoller
 from .router import dispatch, UnknownAction
 from .state import Store
+from .tg_commander import TelegramCommander
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +65,17 @@ def create_app() -> FastAPI:
         chat_id=settings.bridge.telegram_chat_id,
     )
 
+    gate = EntryGate(symbols=[
+        name for name, c in settings.symbols.items() if c.enabled
+    ])
+
+    commander = TelegramCommander(
+        bot_token=settings.bridge.telegram_bot_token,
+        allowed_user_id=settings.bridge.telegram_allowed_user_id,
+        gate=gate,
+        store=store,
+    )
+
     from .reconcile import reconcile
     rec_report = reconcile(store=store, blofin=blofin)
     frozen: set[str] = set(rec_report.frozen_symbols)
@@ -101,14 +114,17 @@ def create_app() -> FastAPI:
         ema_retest_timeframe=settings.defaults.ema_retest_timeframe,
         ema_retest_max_overshoot_pct=settings.defaults.ema_retest_max_overshoot_pct,
         symbol_configs=symbol_configs,
+        gate=gate,
     )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         poller.start()
+        commander.start()
         try:
             yield
         finally:
+            await commander.stop()
             await poller.stop()
 
     app = FastAPI(
@@ -158,8 +174,16 @@ def create_app() -> FastAPI:
             result = dispatch(
                 action=payload.action, symbol=payload.symbol,
                 store=store, blofin=blofin, symbol_configs=symbol_configs,
+                gate=gate,
             )
             store.mark_event_handled(event_id, outcome="ok", error_msg=None)
+
+            if result.get("paused"):
+                log.info(
+                    "webhook for %s %s ignored: entries paused",
+                    payload.symbol, payload.action,
+                )
+                return
 
             result["symbol"] = payload.symbol
             if result.get("pending"):
