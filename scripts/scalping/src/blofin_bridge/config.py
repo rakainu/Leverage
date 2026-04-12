@@ -65,6 +65,9 @@ class BridgeCreds(BaseSettings):
     shared_secret: str = Field(alias="BRIDGE_SECRET")
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN", default="")
     telegram_chat_id: str = Field(alias="TELEGRAM_CHAT_ID", default="")
+    telegram_allowed_user_id: int = Field(
+        alias="TG_ALLOWED_USER_ID", default=6421609315,
+    )
 
 
 class Defaults(BaseModel):
