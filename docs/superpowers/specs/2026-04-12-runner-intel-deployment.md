@@ -92,7 +92,9 @@ services:
       start_period: 30s
 ```
 
-No ports. Healthcheck validates DB is accessible. Log rotation 150MB total.
+No ports. Healthcheck validates DB file is accessible — this is a minimal liveness check (proves the container and volume mount are working), not a full pipeline health signal. Log rotation 150MB total.
+
+Build context: compose runs from `meme-trading/`. `Dockerfile.runner` expects `./runner/` relative to that directory. All paths are relative to `meme-trading/` as the build root.
 
 ## 6. Environment variables — `.env.runner`
 
@@ -126,7 +128,9 @@ runner_config:
   helius_host: mainnet.helius-rpc.com
 ```
 
-Fail clearly at startup if wallets file is missing or invalid (already handled by `WalletRegistry.load()` which raises `FileNotFoundError`).
+Fail clearly at startup if wallets file is missing, empty, or malformed. `WalletRegistry.load()` already raises `FileNotFoundError` for missing files — add validation that the loaded JSON is a non-empty list/dict with expected structure (at least one wallet entry with an `address` field). Since this file is shared with smc-trading, startup errors must be explicit about what went wrong.
+
+The app treats `weights.yaml` as read-only input — it reads via mtime-based reload but never writes back to the file.
 
 ## 8. Makefile — `meme-trading/Makefile.runner`
 
