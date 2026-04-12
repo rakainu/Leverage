@@ -222,19 +222,48 @@ function closeDetail() {
   currentDetailId = null;
 }
 
+// ── render: wallet activity ──────────────────────────────────────
+
+function renderWalletActivity(data) {
+  if (!data) return;
+  document.getElementById('wallet-total').textContent = data.total_tracked ?? '—';
+  document.getElementById('wallet-added').textContent = data.added_6h ?? 0;
+  document.getElementById('wallet-deactivated').textContent = data.deactivated_6h ?? 0;
+  document.getElementById('wallet-last-sync').textContent = data.last_event_time ? formatTime(data.last_event_time) : 'no events';
+
+  const tbody = document.getElementById('wallet-events-table');
+  const events = data.events || [];
+  if (!events.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="p-3 text-slate-500 text-center">No wallet registry events yet</td></tr>';
+    return;
+  }
+  const actionColor = {added: 'text-green-400', deactivated: 'text-red-400', reactivated: 'text-blue-400', updated: 'text-yellow-400'};
+  tbody.innerHTML = events.map(e => `
+    <tr class="border-b border-slate-700/50">
+      <td class="p-2 text-slate-400">${formatTime(e.created_at)}</td>
+      <td class="p-2"><code>${escapeHtml(e.short_address)}</code></td>
+      <td class="p-2 ${actionColor[e.action] || 'text-slate-300'} font-bold">${e.action}</td>
+      <td class="p-2 text-slate-400">${escapeHtml(e.source || '—')}</td>
+      <td class="p-2 text-slate-400">${escapeHtml(e.label || '—')}</td>
+    </tr>
+  `).join('');
+}
+
 // ── polling ─────────────────────────────────────────────────────
 
 async function refreshAll() {
   const indicator = document.getElementById('status-indicator');
   try {
-    const [stats, scores, positions] = await Promise.all([
+    const [stats, scores, positions, wallets] = await Promise.all([
       fetchJSON('/api/stats'),
       fetchJSON('/api/scores?limit=50'),
       fetchJSON('/api/positions?limit=50'),
+      fetchJSON('/api/wallets?limit=30'),
     ]);
     renderStats(stats);
     renderScores(scores?.scores);
     renderPositions(positions?.positions);
+    renderWalletActivity(wallets);
     indicator.textContent = 'updated ' + new Date().toLocaleTimeString();
     indicator.className = 'text-xs text-green-600';
   } catch (e) {

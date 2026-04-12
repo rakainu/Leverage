@@ -297,3 +297,56 @@ async def get_score_detail(db: Database, score_id: int) -> dict | None:
             "solscan": f"https://solscan.io/token/{mint}",
         },
     }
+
+
+async def get_wallet_activity(db: Database, limit: int = 30) -> dict:
+    """Wallet registry activity: counts, recent events, last sync."""
+    assert db.conn is not None
+
+    # Active wallet count (from wallet_tiers as proxy — all known wallets)
+    async with db.conn.execute("SELECT COUNT(*) FROM wallet_tiers") as cur:
+        total_tracked = (await cur.fetchone())[0]
+
+    # Recent events (last 6h counts by action)
+    async with db.conn.execute(
+        """SELECT action, COUNT(*) FROM wallet_registry_events
+           WHERE created_at >= datetime('now', '-6 hours')
+           GROUP BY action"""
+    ) as cur:
+        recent_counts = {row[0]: row[1] async for row in cur}
+
+    # Last sync time (most recent event timestamp)
+    async with db.conn.execute(
+        "SELECT MAX(created_at) FROM wallet_registry_events"
+    ) as cur:
+        last_event_time = (await cur.fetchone())[0]
+
+    # Recent events feed
+    async with db.conn.execute(
+        """SELECT wallet_address, action, source, label, detail_json, created_at
+           FROM wallet_registry_events
+           ORDER BY created_at DESC
+           LIMIT ?""",
+        (limit,),
+    ) as cur:
+        rows = await cur.fetchall()
+
+    events = []
+    for r in rows:
+        events.append({
+            "wallet_address": r[0],
+            "short_address": _short_token(r[0]),
+            "action": r[1],
+            "source": r[2],
+            "label": r[3],
+            "created_at": r[5],
+        })
+
+    return {
+        "total_tracked": total_tracked,
+        "added_6h": recent_counts.get("added", 0),
+        "deactivated_6h": recent_counts.get("deactivated", 0),
+        "reactivated_6h": recent_counts.get("reactivated", 0),
+        "last_event_time": last_event_time,
+        "events": events,
+    }

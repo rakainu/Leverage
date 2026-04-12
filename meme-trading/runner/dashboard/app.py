@@ -11,6 +11,7 @@ from runner.dashboard.queries import (
     get_score_detail,
     get_scores,
     get_stats,
+    get_wallet_activity,
 )
 from runner.db.database import Database
 
@@ -42,6 +43,10 @@ def create_app(db: Database) -> FastAPI:
     @app.get("/api/positions")
     async def positions(limit: int = Query(50, ge=1, le=200)):
         return await get_positions(db, limit=limit)
+
+    @app.get("/api/wallets")
+    async def wallet_activity(limit: int = Query(30, ge=1, le=100)):
+        return await get_wallet_activity(db, limit=limit)
 
     @app.get("/")
     async def index():
