@@ -19,6 +19,8 @@ from runner.filters.insider_filter import InsiderFilter
 from runner.filters.pipeline import FilterPipeline
 from runner.filters.rug_gate import RugGate
 from runner.ingest.rpc_pool import RpcPool
+from runner.scoring.engine import ScoringEngine
+from runner.scoring.models import ScoredCandidate
 from runner.ingest.transaction_parser import TransactionParser
 from runner.ingest.wallet_monitor import WalletMonitor
 from runner.utils.http import RateLimitedClient
@@ -127,6 +129,15 @@ async def _main() -> None:
         db=db,
     )
 
+    scored_bus: asyncio.Queue = asyncio.Queue()
+    scoring_engine = ScoringEngine(
+        filtered_bus=filtered_bus,
+        scored_bus=scored_bus,
+        weights=weights,
+        tier_cache=tier_cache,
+        db=db,
+    )
+
     logger.info(
         "wired",
         active_wallets=len(active),
@@ -145,11 +156,12 @@ async def _main() -> None:
             _supervise(detector.run, "convergence_detector", logger),
             _supervise(enricher.run, "enricher", logger),
             _supervise(filter_pipeline.run, "filter_pipeline", logger),
-            _supervise(lambda: _drain_filtered(filtered_bus, logger), "drain_filtered", logger),
+            _supervise(scoring_engine.run, "scoring_engine", logger),
+            _supervise(lambda: _drain_scored(scored_bus, logger), "drain_scored", logger),
             return_exceptions=True,
         )
         for name, result in zip(
-            ["monitor", "detector", "enricher", "filter_pipeline", "drain_filtered"],
+            ["monitor", "detector", "enricher", "filter_pipeline", "scoring_engine", "drain_scored"],
             results,
         ):
             if isinstance(result, Exception):
@@ -187,21 +199,21 @@ async def _supervise(factory, name: str, logger) -> None:
             backoff = min(backoff * 2.0, 60.0)
 
 
-async def _drain_filtered(filtered_bus: asyncio.Queue, logger) -> None:
-    """Phase 5 sink: log every filtered candidate. Replaced by Scoring engine in Plan 2c."""
+async def _drain_scored(scored_bus: asyncio.Queue, logger) -> None:
+    """Temporary sink: log every scored candidate. Replaced by executor in Plan 3."""
     while True:
         try:
-            fc = await filtered_bus.get()
+            sc: ScoredCandidate = await scored_bus.get()
             logger.info(
-                "filtered_candidate_drained",
-                mint=fc.enriched.token_mint,
-                symbol=fc.enriched.symbol,
-                gate_passed=fc.gate_passed,
-                hard_fail_reason=fc.hard_fail_reason,
-                filter_count=len(fc.filter_results),
+                "scored_candidate_drained",
+                mint=sc.filtered.enriched.token_mint,
+                symbol=sc.filtered.enriched.symbol,
+                score=round(sc.runner_score, 2),
+                verdict=sc.verdict,
+                short_circuited=sc.explanation.get("short_circuited", False),
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("drain_filtered_iteration_error", error=str(e))
+            logger.warning("drain_scored_iteration_error", error=str(e))
 
 
 if __name__ == "__main__":
