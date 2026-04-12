@@ -141,7 +141,9 @@ CREATE INDEX IF NOT EXISTS idx_paper_positions_verdict ON paper_positions(verdic
 - `notes_json` — lightweight extensibility. Stores `entry_price_source` (e.g. `"dexscreener"`), error closure reasons, etc.
 - Milestone columns: NULL until captured, never overwritten after first write.
 
-**Migration:** Same PRAGMA table_info pattern — fresh DBs get the table from schema, existing DBs get CREATE TABLE IF NOT EXISTS.
+**Migration:** Fresh DBs get the table from `CREATE TABLE IF NOT EXISTS` in schema.sql. If an older `paper_positions` table exists without later-added columns, use `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` to add them — same pattern as the `short_circuited` migration in Plan 2c.
+
+**Foreign key enforcement:** The runner DB already enables `PRAGMA foreign_keys=ON` in `Database.connect()`. The `REFERENCES runner_scores(id)` constraint on `runner_score_id` is actively enforced — INSERTs with a non-existent `runner_score_id` will fail. This is correct behavior: the executor should never create a paper position for a score that wasn't persisted.
 
 ## 6. PaperExecutor — `executor/paper.py`
 
@@ -400,9 +402,11 @@ Escape `<`, `>`, `&` in any user/token-derived text. Applied to symbol, caution 
 
 Small change to `ScoringEngine.run()` loop:
 
-1. In `_persist()`, after INSERT, read `cursor.lastrowid` and return it
+1. In `_persist()`, after INSERT, read `cursor.lastrowid` and return it (currently returns None)
 2. In `run()`, after `_persist()` returns the DB ID, use `dataclasses.replace(scored, runner_score_db_id=db_id)` to produce the copy
 3. Emit the copy (with ID) onto `scored_bus` instead of the original
+
+**Sequencing guarantee:** `PaperExecutor` only ever receives `ScoredCandidate` objects that have already been persisted and carry a valid `runner_score_db_id`. The `scored_bus.put()` in `ScoringEngine.run()` happens AFTER `_persist()` succeeds and the ID is attached. If `_persist()` fails (returns None), the ScoredCandidate still flows through with `runner_score_db_id=None` — `PaperExecutor` must check for this and skip if None (the FK constraint would reject the INSERT anyway).
 
 Add field to `ScoredCandidate`:
 
