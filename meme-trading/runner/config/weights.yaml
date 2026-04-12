@@ -44,3 +44,11 @@ http_rate_limits:
   rugcheck_rps: 2
   dexscreener_rps: 3
   jupiter_rps: 5
+
+scoring:
+  rug_insider_rug_weight: 0.70
+  insider_cap_threshold: 25
+  insider_cap_value: 35
+  neutral_fallback: 50
+  version: "v1"
+  reload_interval_sec: 30

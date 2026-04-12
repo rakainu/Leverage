@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS runner_scores (
     cluster_signal_id INTEGER,
     runner_score REAL NOT NULL,
     verdict TEXT NOT NULL CHECK (verdict IN ('ignore', 'watch', 'strong_candidate', 'probable_runner')),
+    short_circuited INTEGER DEFAULT 0,
     sub_scores_json TEXT NOT NULL,
     explanation_json TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

@@ -31,6 +31,19 @@ class Database:
         schema_sql = _SCHEMA_PATH.read_text(encoding="utf-8")
         await self.conn.executescript(schema_sql)
         await self.conn.commit()
+        await self._run_migrations()
+
+    async def _run_migrations(self) -> None:
+        """Apply schema migrations for columns added after initial table creation."""
+        assert self.conn is not None
+        # Migration 1: add short_circuited to runner_scores (Plan 2c)
+        async with self.conn.execute("PRAGMA table_info(runner_scores)") as cur:
+            columns = {row[1] async for row in cur}
+        if "short_circuited" not in columns:
+            await self.conn.execute(
+                "ALTER TABLE runner_scores ADD COLUMN short_circuited INTEGER DEFAULT 0"
+            )
+            await self.conn.commit()
 
     async def close(self) -> None:
         if self.conn is not None:

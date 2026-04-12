@@ -82,3 +82,50 @@ async def test_database_is_idempotent_on_reconnect(tmp_path: Path):
         count = (await cur.fetchone())[0]
     assert count >= 5
     await db2.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_adds_short_circuited_column(tmp_path):
+    """Existing runner_scores table without short_circuited gets the column on migration."""
+    db_path = tmp_path / "migrate.db"
+
+    # Create the old schema without short_circuited
+    import aiosqlite
+    conn = await aiosqlite.connect(db_path)
+    await conn.execute("PRAGMA journal_mode=WAL;")
+    await conn.execute("""
+        CREATE TABLE runner_scores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_mint TEXT NOT NULL,
+            cluster_signal_id INTEGER,
+            runner_score REAL NOT NULL,
+            verdict TEXT NOT NULL,
+            sub_scores_json TEXT NOT NULL,
+            explanation_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await conn.commit()
+    await conn.close()
+
+    # Now open with Database which should run migration
+    from runner.db.database import Database
+    db = Database(db_path)
+    await db.connect()
+
+    # Verify the column exists by inserting a row that uses it
+    await db.conn.execute(
+        """INSERT INTO runner_scores
+           (token_mint, runner_score, verdict, short_circuited, sub_scores_json, explanation_json)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("MINT1", 0.0, "ignore", 1, "{}", "{}"),
+    )
+    await db.conn.commit()
+
+    async with db.conn.execute(
+        "SELECT short_circuited FROM runner_scores WHERE token_mint = 'MINT1'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row[0] == 1
+
+    await db.close()
