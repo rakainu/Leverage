@@ -32,3 +32,4 @@ class ScoredCandidate:
     dimension_scores: dict[str, float]
     explanation: dict[str, Any]
     scored_at: datetime
+    runner_score_db_id: int | None = None

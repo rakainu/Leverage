@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from statistics import mean
 from typing import Any
@@ -342,7 +343,9 @@ class ScoringEngine:
                         )
 
             scored = self.score(fc)
-            await self._persist(scored)
+            db_id = await self._persist(scored)
+            if db_id is not None:
+                scored = replace(scored, runner_score_db_id=db_id)
             await self.scored_bus.put(scored)
 
             logger.info(
@@ -353,10 +356,10 @@ class ScoringEngine:
                 short_circuited=scored.explanation.get("short_circuited", False),
             )
 
-    async def _persist(self, sc: ScoredCandidate) -> None:
-        """Insert scored candidate into runner_scores table."""
+    async def _persist(self, sc: ScoredCandidate) -> int | None:
+        """Insert scored candidate into runner_scores table. Returns lastrowid or None."""
         if self.db is None or self.db.conn is None:
-            return
+            return None
 
         sub_scores = dict(sc.dimension_scores)
         raw_rug = self._lookup_sub_score_raw(sc.filtered, "rug_gate", "rug_risk")
@@ -365,7 +368,7 @@ class ScoringEngine:
         sub_scores["raw_insider_risk"] = raw_insider if raw_insider is not None else 0.0
 
         try:
-            await self.db.conn.execute(
+            cursor = await self.db.conn.execute(
                 """
                 INSERT INTO runner_scores
                 (token_mint, cluster_signal_id, runner_score, verdict,
@@ -383,9 +386,11 @@ class ScoringEngine:
                 ),
             )
             await self.db.conn.commit()
+            return cursor.lastrowid
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "runner_scores_persist_failed",
                 mint=sc.filtered.enriched.token_mint,
                 error=str(e),
             )
+            return None
