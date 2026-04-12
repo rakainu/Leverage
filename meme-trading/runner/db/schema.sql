@@ -89,6 +89,37 @@ CREATE INDEX IF NOT EXISTS idx_runner_scores_mint ON runner_scores(token_mint);
 CREATE INDEX IF NOT EXISTS idx_runner_scores_verdict ON runner_scores(verdict);
 CREATE INDEX IF NOT EXISTS idx_runner_scores_time ON runner_scores(created_at);
 
+-- Paper positions — one per scored candidate that reached execution threshold.
+CREATE TABLE IF NOT EXISTS paper_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_mint TEXT NOT NULL,
+    symbol TEXT,
+    runner_score_id INTEGER NOT NULL REFERENCES runner_scores(id),
+    verdict TEXT NOT NULL,
+    runner_score REAL NOT NULL,
+    entry_price_sol REAL NOT NULL,
+    entry_price_usd REAL,
+    amount_sol REAL NOT NULL,
+    signal_time TIMESTAMP NOT NULL,
+    entry_source TEXT NOT NULL DEFAULT 'paper_executor_v1',
+    price_5m_sol REAL, pnl_5m_pct REAL,
+    price_30m_sol REAL, pnl_30m_pct REAL,
+    price_1h_sol REAL, pnl_1h_pct REAL,
+    price_4h_sol REAL, pnl_4h_pct REAL,
+    price_24h_sol REAL, pnl_24h_pct REAL,
+    max_favorable_pct REAL DEFAULT 0.0,
+    max_adverse_pct REAL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+    close_reason TEXT CHECK (close_reason IN ('completed', 'error')),
+    opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMP,
+    notes_json TEXT,
+    UNIQUE(runner_score_id)
+);
+CREATE INDEX IF NOT EXISTS idx_paper_positions_mint ON paper_positions(token_mint);
+CREATE INDEX IF NOT EXISTS idx_paper_positions_status ON paper_positions(status);
+CREATE INDEX IF NOT EXISTS idx_paper_positions_verdict ON paper_positions(verdict);
+
 -- Schema migration marker.
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,

@@ -52,3 +52,7 @@ scoring:
   neutral_fallback: 50
   version: "v1"
   reload_interval_sec: 30
+
+executor:
+  check_interval_sec: 30
+  error_closure_hours: 36
