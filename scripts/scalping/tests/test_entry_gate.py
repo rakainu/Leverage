@@ -43,6 +43,12 @@ async def test_pause_unknown_symbol_raises(gate):
 
 
 @pytest.mark.asyncio
+async def test_resume_unknown_symbol_raises(gate):
+    with pytest.raises(ValueError):
+        await gate.resume("DOGE-USDT")
+
+
+@pytest.mark.asyncio
 async def test_pause_idempotent(gate):
     await gate.pause("SOL-USDT")
     await gate.pause("SOL-USDT")  # second call should not error

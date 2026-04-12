@@ -24,18 +24,21 @@ class EntryGate:
         self._lock = asyncio.Lock()
 
     def is_paused(self, symbol: str) -> bool:
+        """Return True if entries are blocked for this symbol. Unknown symbols return False."""
         return symbol in self._paused
 
     def status(self) -> dict[str, bool]:
         return {sym: (sym in self._paused) for sym in sorted(self._known)}
 
     async def pause(self, symbol: str) -> None:
+        # _known is write-once (set in __init__) — safe to read outside the lock.
         if symbol not in self._known:
             raise ValueError(f"unknown symbol {symbol}")
         async with self._lock:
             self._paused.add(symbol)
 
     async def resume(self, symbol: str) -> None:
+        # _known is write-once (set in __init__) — safe to read outside the lock.
         if symbol not in self._known:
             raise ValueError(f"unknown symbol {symbol}")
         async with self._lock:
