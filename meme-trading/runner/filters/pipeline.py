@@ -51,6 +51,7 @@ class FilterPipeline:
         results: list[FilterResult] = []
         gate_passed = True
         hard_fail_reason: str | None = None
+        hard_fail_filter_name: str | None = None
 
         for f in self.sync_filters:
             try:
@@ -73,6 +74,7 @@ class FilterPipeline:
             if not result.passed:
                 gate_passed = False
                 hard_fail_reason = result.hard_fail_reason
+                hard_fail_filter_name = f.name
                 break
 
         # Only run probe if all sync filters passed.
@@ -99,6 +101,7 @@ class FilterPipeline:
             filter_results=results,
             gate_passed=gate_passed,
             hard_fail_reason=hard_fail_reason,
+            hard_fail_filter_name=hard_fail_filter_name,
         )
 
         await self._persist(fc)
@@ -130,7 +133,7 @@ class FilterPipeline:
                         result.hard_fail_reason,
                         json.dumps(result.sub_scores),
                         json.dumps(result.evidence, default=str),
-                        None,  # cluster_signal_id wired in Plan 2c if needed
+                        fc.enriched.cluster_signal_id,
                     ),
                 )
             await self.db.conn.commit()

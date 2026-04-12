@@ -91,4 +91,5 @@ class Enricher:
             deployer_age_seconds=(deployer or {}).get("deployer_age_seconds"),
             deployer_token_count=(deployer or {}).get("deployer_token_count"),
             errors=errors,
+            cluster_signal_id=signal.id,
         )

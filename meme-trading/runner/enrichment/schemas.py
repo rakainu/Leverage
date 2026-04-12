@@ -46,3 +46,6 @@ class EnrichedToken:
 
     # Per-fetcher failures, collected non-fatally
     errors: list[str] = field(default_factory=list)
+
+    # Pipeline threading — links back to the originating cluster_signals row
+    cluster_signal_id: int | None = None

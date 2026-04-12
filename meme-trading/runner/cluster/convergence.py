@@ -7,7 +7,7 @@ window_minutes.
 import asyncio
 import json
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from statistics import mean
 
@@ -32,6 +32,7 @@ class ClusterSignal:
     last_buy_time: datetime
     convergence_seconds: int
     mid_price_sol: float
+    id: int | None = None
 
 
 class ConvergenceDetector:
@@ -140,7 +141,7 @@ class ConvergenceDetector:
         )
         if self.db is not None and self.db.conn is not None:
             try:
-                await self.db.conn.execute(
+                cursor = await self.db.conn.execute(
                     """
                     INSERT INTO cluster_signals
                     (token_mint, wallet_count, wallets_json, tier_counts_json,
@@ -159,6 +160,7 @@ class ConvergenceDetector:
                     ),
                 )
                 await self.db.conn.commit()
+                signal = replace(signal, id=cursor.lastrowid)
             except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "cluster_signal_persist_failed",

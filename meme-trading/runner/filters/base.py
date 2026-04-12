@@ -36,6 +36,7 @@ class FilteredCandidate:
     filter_results: list[FilterResult]
     gate_passed: bool
     hard_fail_reason: str | None
+    hard_fail_filter_name: str | None = None
 
 
 class BaseFilter(ABC):
