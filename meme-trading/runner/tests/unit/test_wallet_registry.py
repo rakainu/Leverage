@@ -66,3 +66,35 @@ def test_reload_picks_up_changes(tmp_path: Path):
     )
     reg.load()
     assert reg.active_count() == 2
+
+
+def test_load_raises_on_empty_wallets_list(tmp_path):
+    p = tmp_path / "wallets.json"
+    p.write_text('{"wallets": []}', encoding="utf-8")
+    reg = WalletRegistry(p)
+    with pytest.raises(ValueError, match="no valid wallet"):
+        reg.load()
+
+
+def test_load_raises_on_malformed_json(tmp_path):
+    p = tmp_path / "wallets.json"
+    p.write_text("not json at all", encoding="utf-8")
+    reg = WalletRegistry(p)
+    with pytest.raises(Exception):
+        reg.load()
+
+
+def test_load_raises_on_missing_wallets_key(tmp_path):
+    p = tmp_path / "wallets.json"
+    p.write_text('{"other": "data"}', encoding="utf-8")
+    reg = WalletRegistry(p)
+    with pytest.raises(ValueError, match="no valid wallet"):
+        reg.load()
+
+
+def test_load_raises_on_entries_without_address(tmp_path):
+    p = tmp_path / "wallets.json"
+    p.write_text('{"wallets": [{"name": "bad"}, {"name": "also bad"}]}', encoding="utf-8")
+    reg = WalletRegistry(p)
+    with pytest.raises(ValueError, match="no valid wallet"):
+        reg.load()

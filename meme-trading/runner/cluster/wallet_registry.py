@@ -27,6 +27,11 @@ class WalletRegistry:
         self._wallets = {
             w["address"]: w for w in (data.get("wallets") or []) if "address" in w
         }
+        if not self._wallets:
+            raise ValueError(
+                f"wallets file has no valid wallet entries (need at least one "
+                f"with 'address' field): {self.path}"
+            )
 
     def active_addresses(self) -> set[str]:
         return {addr for addr, w in self._wallets.items() if w.get("active")}
