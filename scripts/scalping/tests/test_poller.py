@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from blofin_bridge.entry_gate import EntryGate
 from blofin_bridge.poller import PositionPoller
 from blofin_bridge.state import Store
 
@@ -32,6 +33,7 @@ def _make_poller(store, blofin, **overrides):
         breakeven_usdt=15, trail_activate_usdt=25,
         trail_start_usdt=30, trail_distance_usdt=10,
         margin_usdt=100, leverage=30,
+        gate=None,
     )
     defaults.update(overrides)
     return PositionPoller(**defaults)
@@ -337,6 +339,31 @@ async def test_swallows_exceptions(store, blofin):
     row = store.get_open_position("SOL-USDT")
     assert row is not None
     assert row.trail_active == 0
+
+
+# === EntryGate integration ===
+
+
+@pytest.mark.asyncio
+async def test_pending_signal_for_paused_symbol_is_expired(store, blofin):
+    """Signal queued before pause → poller expires it instead of firing."""
+    sig_id = store.create_pending_signal(
+        symbol="SOL-USDT", action="buy", signal_price=300.0,
+        timeout_minutes=30,
+    )
+
+    gate = EntryGate(symbols=["SOL-USDT"])
+    await gate.pause("SOL-USDT")
+
+    poller = _make_poller(store, blofin, gate=gate)
+    await poller.poll_once()
+
+    # The signal should no longer be 'pending'.
+    remaining = store.list_pending_signals()
+    assert all(s["id"] != sig_id for s in remaining)
+
+    # No entry was attempted.
+    blofin.place_market_entry.assert_not_called()
 
 
 # === Full lifecycle ===

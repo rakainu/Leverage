@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 from .blofin_client import BloFinClient
 from .ema import compute_ema
+from .entry_gate import EntryGate
 from .handlers.entry import handle_entry, _dollar_to_price_distance
 from .notify import (
     Notifier, format_entry, format_trail_activated, format_trail_update,
@@ -52,6 +53,8 @@ class PositionPoller:
         ema_retest_max_overshoot_pct: float = 0.2,
         # Symbol configs for executing pending entries
         symbol_configs: Optional[dict[str, dict[str, Any]]] = None,
+        # Operator-initiated per-symbol pause
+        gate: Optional[EntryGate] = None,
     ) -> None:
         self.store = store
         self.blofin = blofin
@@ -68,6 +71,7 @@ class PositionPoller:
         self.ema_retest_timeframe = ema_retest_timeframe
         self.ema_retest_max_overshoot_pct = ema_retest_max_overshoot_pct
         self.symbol_configs = symbol_configs or {}
+        self.gate = gate
         self._task: Optional[asyncio.Task] = None
         self._stop_event: Optional[asyncio.Event] = None
 
@@ -123,6 +127,15 @@ class PositionPoller:
                     log.info("Pending signal %d expired for %s", sig["id"], sig["symbol"])
                     if self.notifier:
                         self.notifier.send(format_pending_expired(sig["action"], sig["symbol"]))
+                    continue
+
+                # Operator pause: drop the pending signal without firing.
+                if self.gate is not None and self.gate.is_paused(sig["symbol"]):
+                    self.store.expire_pending_signal(sig["id"])
+                    log.info(
+                        "Pending signal %d for %s dropped: entries paused",
+                        sig["id"], sig["symbol"],
+                    )
                     continue
 
                 # Fetch current price and EMA
