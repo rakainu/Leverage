@@ -268,6 +268,54 @@ async def test_archives_stale_position(store, blofin):
 
 
 @pytest.mark.asyncio
+async def test_drift_exit_relabeled_sl_when_near_initial_sl(store, blofin):
+    """Position gone from BloFin with exit price at the initial SL → 'sl'."""
+    pid = _long_position(store, entry_price=300.0)
+    blofin.fetch_positions.return_value = []
+    # Initial SL for a long @ 300 with $15 loss / $100 margin / 30x:
+    # distance = (15 / (100*30)) * 300 = 1.5 → SL price = 298.5
+    blofin.fetch_last_price.return_value = 298.5
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    trades = store.get_trade_log(limit=1)
+    assert len(trades) == 1
+    assert trades[0]["exit_reason"] == "sl"
+    assert trades[0]["initial_sl"] == pytest.approx(298.5, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_drift_exit_stays_drift_when_exit_far_from_sl(store, blofin):
+    """Position gone from BloFin with exit price nowhere near SL → 'drift'."""
+    pid = _long_position(store, entry_price=300.0)
+    blofin.fetch_positions.return_value = []
+    # Exit price at 305 is ~2.2% above the 298.5 SL — clearly not an SL fill.
+    blofin.fetch_last_price.return_value = 305.0
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    trades = store.get_trade_log(limit=1)
+    assert trades[0]["exit_reason"] == "drift"
+
+
+@pytest.mark.asyncio
+async def test_drift_exit_short_sl_relabel(store, blofin):
+    """Short position: initial SL lives above entry."""
+    pid = _short_position(store, entry_price=300.0)
+    blofin.fetch_positions.return_value = []
+    # Short SL @ 301.5
+    blofin.fetch_last_price.return_value = 301.5
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    trades = store.get_trade_log(limit=1)
+    assert trades[0]["exit_reason"] == "sl"
+
+
+@pytest.mark.asyncio
 async def test_skips_drift_if_fetch_fails(store, blofin):
     pid = _long_position(store)
     blofin.fetch_positions.side_effect = Exception("ccxt boom")

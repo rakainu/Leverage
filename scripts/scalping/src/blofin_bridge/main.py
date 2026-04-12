@@ -93,6 +93,7 @@ def create_app() -> FastAPI:
         trail_activate_usdt=settings.defaults.trail_activate_usdt,
         trail_start_usdt=settings.defaults.trail_start_usdt,
         trail_distance_usdt=settings.defaults.trail_distance_usdt,
+        sl_loss_usdt=settings.defaults.sl_loss_usdt,
         margin_usdt=settings.defaults.margin_usdt,
         leverage=settings.defaults.leverage,
         notifier=notifier,

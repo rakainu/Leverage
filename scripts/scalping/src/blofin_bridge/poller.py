@@ -42,6 +42,7 @@ class PositionPoller:
         trail_activate_usdt: float = 25.0,
         trail_start_usdt: float = 30.0,
         trail_distance_usdt: float = 10.0,
+        sl_loss_usdt: float = 15.0,
         margin_usdt: float = 100.0,
         leverage: float = 30.0,
         notifier: Optional[Notifier] = None,
@@ -59,6 +60,7 @@ class PositionPoller:
         self.trail_activate_usdt = trail_activate_usdt
         self.trail_start_usdt = trail_start_usdt
         self.trail_distance_usdt = trail_distance_usdt
+        self.sl_loss_usdt = sl_loss_usdt
         self.margin_usdt = margin_usdt
         self.leverage = leverage
         self.notifier = notifier
@@ -213,11 +215,29 @@ class PositionPoller:
         except Exception:
             pass
 
-        exit_reason = "trail_sl" if pos.trail_active else "drift"
+        # Compute the initial SL price from entry + configured $ loss so we can
+        # distinguish an SL fill (exit near SL price) from a true drift
+        # (external close / manual / unknown).
+        sl_price_distance = _dollar_to_price_distance(
+            self.sl_loss_usdt, self.margin_usdt, self.leverage, pos.entry_price,
+        )
+        if pos.side == "long":
+            initial_sl_price = pos.entry_price - sl_price_distance
+        else:
+            initial_sl_price = pos.entry_price + sl_price_distance
+
+        if pos.trail_active:
+            exit_reason = "trail_sl"
+        elif exit_price is not None and abs(exit_price - initial_sl_price) / pos.entry_price <= 0.003:
+            # Within 0.3% of the initial SL price — treat as SL hit.
+            exit_reason = "sl"
+        else:
+            exit_reason = "drift"
+
         self.store.log_trade(
             position_id=pos.id, exit_price=exit_price, exit_reason=exit_reason,
             margin_usdt=self.margin_usdt, leverage=self.leverage,
-            initial_sl=None, tp_ceiling=None,
+            initial_sl=initial_sl_price, tp_ceiling=None,
         )
         self.store.close_position(pos.id, realized_pnl=None)
 
