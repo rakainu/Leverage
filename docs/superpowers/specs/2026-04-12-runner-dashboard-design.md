@@ -74,6 +74,28 @@ Summary numbers for the top cards.
 }
 ```
 
+### `GET /api/health`
+
+Lightweight debugging endpoint. Read-only, no heavy queries.
+
+```json
+{
+  "ok": true,
+  "time": "2026-04-12T14:30:00Z",
+  "db_reachable": true,
+  "scoring_version": "v1",
+  "row_counts": {
+    "runner_scores": 142,
+    "paper_positions": 14,
+    "cluster_signals": 210
+  }
+}
+```
+
+`db_reachable` = `SELECT 1` succeeds. `scoring_version` from weights.yaml if available. Row counts are simple `COUNT(*)` queries — lightweight enough for a health endpoint.
+
+---
+
 `avg_score_eligible` = average runner_score WHERE verdict NOT IN ('ignore'). `avg_pnl_closed` = average pnl_24h_pct WHERE status='closed' AND pnl_24h_pct IS NOT NULL. Returns `null` if no data.
 
 ### `GET /api/scores?limit=50`
@@ -188,6 +210,8 @@ Full detail for the inline expand panel.
     "mae": -3.2,
     "status": "closed"
   },
+  "scoring_version": "v1",
+  "weights_hash": "a3f2c1",
   "links": {
     "dexscreener": "https://dexscreener.com/solana/5HpYvuTgQoG8TePPBQ4Cfbfmrd9RVBz1v5aodqLkabc1",
     "solscan": "https://solscan.io/token/5HpYvuTgQoG8TePPBQ4Cfbfmrd9RVBz1v5aodqLkabc1"
@@ -240,6 +264,7 @@ Columns: Time | Token | Score | Verdict | Top Reason | Top Caution | Position | 
 Columns: Token | Symbol | Opened | Verdict | Entry $ | 5m | 30m | 1h | 4h | 24h | MFE | MAE | Status
 
 - All P&L columns green/red by sign, "—" for null
+- Symbol column: show `symbol` if present, fall back to `short_token` if symbol is null/empty
 - Monospace for numbers
 
 ### D. Inline detail panel (accordion on score row click)
@@ -295,6 +320,8 @@ _supervise(_run_dashboard, "dashboard", logger),
 ```
 
 The dashboard module is isolated — `create_app(db)` takes only a Database reference. It can be split into its own process/container later by running `uvicorn runner.dashboard.app:create_app(...)` standalone.
+
+**Read-only guarantee:** The dashboard only runs SELECT queries against the DB. No writes, no mutations, no interference with the core pipeline. All queries use short timeouts to avoid blocking the WAL.
 
 ## 10. Docker compose change
 
