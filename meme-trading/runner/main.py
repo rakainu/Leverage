@@ -155,15 +155,21 @@ async def _main() -> None:
     )
 
     logger.info(
-        "wired",
-        active_wallets=len(active),
-        cluster_min=weights.get("cluster.min_wallets"),
-        cluster_window=weights.get("cluster.window_minutes"),
+        "runner_config",
+        db_path=str(settings.db_path),
+        wallets_file=str(settings.wallets_json_path),
+        wallets_loaded=len(active),
+        weights_file=str(settings.weights_yaml_path),
+        telegram_enabled=bool(settings.telegram_bot_token and settings.telegram_chat_id),
+        executor_enabled=settings.enable_executor,
+        check_interval=weights.get("executor.check_interval_sec", 30),
         helius_host=helius_host,
         helius_rps=helius_rps,
         dexscreener_rps=dexscreener_rps,
         jupiter_rps=jupiter_rps,
         rugcheck_rps=rugcheck_rps,
+        cluster_min=weights.get("cluster.min_wallets"),
+        cluster_window=weights.get("cluster.window_minutes"),
     )
 
     try:
