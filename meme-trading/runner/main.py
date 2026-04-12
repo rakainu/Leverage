@@ -19,6 +19,7 @@ from runner.filters.insider_filter import InsiderFilter
 from runner.filters.pipeline import FilterPipeline
 from runner.filters.rug_gate import RugGate
 from runner.ingest.rpc_pool import RpcPool
+from runner.cluster.wallet_tracker import WalletRegistryTracker
 from runner.executor.paper import PaperExecutor
 from runner.executor.snapshotter import MilestoneSnapshotter
 from runner.alerts.telegram import TelegramAlerter
@@ -46,6 +47,8 @@ async def _main() -> None:
 
     tier_cache = WalletTierCache(db)
     await tier_cache.load()
+
+    wallet_tracker = WalletRegistryTracker(registry, db, reload_interval_sec=300.0)
 
     helius_host = urlparse(settings.helius_rpc_url).netloc.lower()
     helius_rps = weights.get("http_rate_limits.helius_rps", 10)
@@ -185,12 +188,14 @@ async def _main() -> None:
             _supervise(paper_executor.run, "paper_executor", logger),
             _supervise(snapshotter.run, "milestone_snapshotter", logger),
             _supervise(telegram.run, "telegram_alerter", logger),
+            _supervise(wallet_tracker.run, "wallet_tracker", logger),
             _supervise(lambda: _run_dashboard(dashboard_app, logger), "dashboard", logger),
             return_exceptions=True,
         )
         for name, result in zip(
             ["monitor", "detector", "enricher", "filter_pipeline", "scoring_engine",
-             "paper_executor", "milestone_snapshotter", "telegram_alerter", "dashboard"],
+             "paper_executor", "milestone_snapshotter", "telegram_alerter",
+             "wallet_tracker", "dashboard"],
             results,
         ):
             if isinstance(result, Exception):
