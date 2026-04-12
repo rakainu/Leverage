@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Runner Intel</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
+  .verdict-ignore { color: #9ca3af; }
+  .verdict-watch { color: #eab308; }
+  .verdict-strong_candidate { color: #22c55e; }
+  .verdict-probable_runner { color: #3b82f6; }
+  .pnl-pos { color: #22c55e; }
+  .pnl-neg { color: #ef4444; }
+  .pnl-nil { color: #6b7280; }
+  .bar-fill { transition: width 0.2s ease; }
+  tr.clickable:hover { background: #1e293b; cursor: pointer; }
+  .detail-row { display: none; }
+  .detail-row.open { display: table-row; }
+</style>
+</head>
+<body class="bg-slate-900 text-slate-200 text-sm">
+
+<div class="max-w-[1400px] mx-auto px-4 py-4">
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-lg font-bold text-slate-100">Runner Intel Dashboard</h1>
+    <span id="status-indicator" class="text-xs text-slate-500">polling...</span>
+  </div>
+
+  <!-- Summary Cards -->
+  <div id="stats-cards" class="grid grid-cols-6 gap-3 mb-6">
+    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Scored</div><div class="text-xl font-bold" id="stat-total">—</div></div>
+    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Strong Candidates</div><div class="text-xl font-bold text-green-500" id="stat-strong">—</div></div>
+    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Probable Runners</div><div class="text-xl font-bold text-blue-500" id="stat-runner">—</div></div>
+    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Open Positions</div><div class="text-xl font-bold" id="stat-open">—</div></div>
+    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Closed Positions</div><div class="text-xl font-bold" id="stat-closed">—</div></div>
+    <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Avg P&L (closed)</div><div class="text-xl font-bold" id="stat-pnl">—</div></div>
+  </div>
+
+  <!-- Scored Candidates -->
+  <h2 class="text-sm font-bold text-slate-300 mb-2">Recent Scored Candidates</h2>
+  <div class="bg-slate-800 rounded mb-6 overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead>
+        <tr class="text-slate-400 border-b border-slate-700">
+          <th class="text-left p-2">Time</th>
+          <th class="text-left p-2">Token</th>
+          <th class="text-right p-2">Score</th>
+          <th class="text-left p-2">Verdict</th>
+          <th class="text-left p-2">Top Reason</th>
+          <th class="text-left p-2">Top Caution</th>
+          <th class="text-center p-2">Pos</th>
+          <th class="text-center p-2">SC</th>
+        </tr>
+      </thead>
+      <tbody id="scores-table"></tbody>
+    </table>
+  </div>
+
+  <!-- Paper Positions -->
+  <h2 class="text-sm font-bold text-slate-300 mb-2">Paper Positions</h2>
+  <div class="bg-slate-800 rounded mb-6 overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead>
+        <tr class="text-slate-400 border-b border-slate-700">
+          <th class="text-left p-2">Token</th>
+          <th class="text-left p-2">Opened</th>
+          <th class="text-left p-2">Verdict</th>
+          <th class="text-right p-2">Entry $</th>
+          <th class="text-right p-2">5m</th>
+          <th class="text-right p-2">30m</th>
+          <th class="text-right p-2">1h</th>
+          <th class="text-right p-2">4h</th>
+          <th class="text-right p-2">24h</th>
+          <th class="text-right p-2">MFE</th>
+          <th class="text-right p-2">MAE</th>
+          <th class="text-center p-2">Status</th>
+        </tr>
+      </thead>
+      <tbody id="positions-table"></tbody>
+    </table>
+  </div>
+
+  <!-- Detail Panel (shown on row click) -->
+  <div id="detail-panel" class="bg-slate-800 rounded p-4 mb-6 hidden">
+    <div class="flex justify-between items-center mb-3">
+      <h3 class="font-bold text-slate-100" id="detail-title">—</h3>
+      <button onclick="closeDetail()" class="text-slate-400 hover:text-slate-200 text-xs">[close]</button>
+    </div>
+    <div id="detail-content"></div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
