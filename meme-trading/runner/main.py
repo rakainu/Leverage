@@ -19,8 +19,10 @@ from runner.filters.insider_filter import InsiderFilter
 from runner.filters.pipeline import FilterPipeline
 from runner.filters.rug_gate import RugGate
 from runner.ingest.rpc_pool import RpcPool
+from runner.executor.paper import PaperExecutor
+from runner.executor.snapshotter import MilestoneSnapshotter
+from runner.alerts.telegram import TelegramAlerter
 from runner.scoring.engine import ScoringEngine
-from runner.scoring.models import ScoredCandidate
 from runner.ingest.transaction_parser import TransactionParser
 from runner.ingest.wallet_monitor import WalletMonitor
 from runner.utils.http import RateLimitedClient
@@ -138,6 +140,20 @@ async def _main() -> None:
         db=db,
     )
 
+    alert_bus: asyncio.Queue = asyncio.Queue()
+    paper_executor = PaperExecutor(
+        scored_bus=scored_bus, alert_bus=alert_bus, weights=weights,
+        price_fetcher=price_fetcher, db=db, enable_executor=settings.enable_executor,
+    )
+    snapshotter = MilestoneSnapshotter(
+        alert_bus=alert_bus, price_fetcher=price_fetcher, db=db,
+        check_interval_sec=float(weights.get("executor.check_interval_sec", 30)),
+        error_closure_hours=float(weights.get("executor.error_closure_hours", 36)),
+    )
+    telegram = TelegramAlerter(
+        alert_bus=alert_bus, bot_token=settings.telegram_bot_token, chat_id=settings.telegram_chat_id,
+    )
+
     logger.info(
         "wired",
         active_wallets=len(active),
@@ -157,11 +173,14 @@ async def _main() -> None:
             _supervise(enricher.run, "enricher", logger),
             _supervise(filter_pipeline.run, "filter_pipeline", logger),
             _supervise(scoring_engine.run, "scoring_engine", logger),
-            _supervise(lambda: _drain_scored(scored_bus, logger), "drain_scored", logger),
+            _supervise(paper_executor.run, "paper_executor", logger),
+            _supervise(snapshotter.run, "milestone_snapshotter", logger),
+            _supervise(telegram.run, "telegram_alerter", logger),
             return_exceptions=True,
         )
         for name, result in zip(
-            ["monitor", "detector", "enricher", "filter_pipeline", "scoring_engine", "drain_scored"],
+            ["monitor", "detector", "enricher", "filter_pipeline", "scoring_engine",
+             "paper_executor", "milestone_snapshotter", "telegram_alerter"],
             results,
         ):
             if isinstance(result, Exception):
@@ -197,23 +216,6 @@ async def _supervise(factory, name: str, logger) -> None:
             )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2.0, 60.0)
-
-
-async def _drain_scored(scored_bus: asyncio.Queue, logger) -> None:
-    """Temporary sink: log every scored candidate. Replaced by executor in Plan 3."""
-    while True:
-        try:
-            sc: ScoredCandidate = await scored_bus.get()
-            logger.info(
-                "scored_candidate_drained",
-                mint=sc.filtered.enriched.token_mint,
-                symbol=sc.filtered.enriched.symbol,
-                score=round(sc.runner_score, 2),
-                verdict=sc.verdict,
-                short_circuited=sc.explanation.get("short_circuited", False),
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.warning("drain_scored_iteration_error", error=str(e))
 
 
 if __name__ == "__main__":
