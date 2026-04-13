@@ -77,8 +77,10 @@ class Defaults(BaseModel):
     position_mode: PositionMode
     sl_policy: SLPolicyName
     # --- SL / Trail / TP ---
-    sl_loss_usdt: float = 15.0
+    sl_loss_usdt: float = 13.0
     breakeven_usdt: float = 15.0
+    lock_profit_activate_usdt: float = 20.0
+    lock_profit_usdt: float = 15.0
     trail_activate_usdt: float = 25.0
     trail_start_usdt: float = 30.0
     trail_distance_usdt: float = 10.0
@@ -90,7 +92,7 @@ class Defaults(BaseModel):
     ema_retest_max_overshoot_pct: float = 0.2
     poll_interval_seconds: int = 10
 
-    @field_validator("sl_loss_usdt", "breakeven_usdt", "trail_activate_usdt", "trail_start_usdt", "trail_distance_usdt")
+    @field_validator("sl_loss_usdt", "breakeven_usdt", "lock_profit_activate_usdt", "lock_profit_usdt", "trail_activate_usdt", "trail_start_usdt", "trail_distance_usdt")
     @classmethod
     def _positive_dollar(cls, v: float) -> float:
         if v <= 0:

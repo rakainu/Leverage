@@ -1,14 +1,10 @@
 """Background position poller with trailing stop logic.
 
-Every poll cycle (default 10s):
+Every poll cycle (default 2s):
   1. Drift check: archive positions gone from BloFin.
   2. For each open position, fetch current price and compute unrealized P&L.
-  3. If profit >= trail_activate_usdt and trail not yet active:
-       - Move SL to (current_price - trail_distance) for longs.
-       - Mark trail active, record high-water price.
-  4. If trail already active and price made a new high:
-       - Move SL to (new_high - trail_distance).
-  5. SL never moves backward (only tightens).
+  3. SL state machine: 0→1→2→3→4 (see _process_position).
+  4. SL never moves backward (only tightens).
 """
 from __future__ import annotations
 import asyncio
@@ -40,10 +36,12 @@ class PositionPoller:
         interval_seconds: int,
         # Trail config (injected from settings at startup)
         breakeven_usdt: float = 15.0,
+        lock_profit_activate_usdt: float = 20.0,
+        lock_profit_usdt: float = 15.0,
         trail_activate_usdt: float = 25.0,
         trail_start_usdt: float = 30.0,
         trail_distance_usdt: float = 10.0,
-        sl_loss_usdt: float = 15.0,
+        sl_loss_usdt: float = 13.0,
         margin_usdt: float = 100.0,
         leverage: float = 30.0,
         notifier: Optional[Notifier] = None,
@@ -60,6 +58,8 @@ class PositionPoller:
         self.blofin = blofin
         self.interval_seconds = interval_seconds
         self.breakeven_usdt = breakeven_usdt
+        self.lock_profit_activate_usdt = lock_profit_activate_usdt
+        self.lock_profit_usdt = lock_profit_usdt
         self.trail_activate_usdt = trail_activate_usdt
         self.trail_start_usdt = trail_start_usdt
         self.trail_distance_usdt = trail_distance_usdt
@@ -288,7 +288,7 @@ class PositionPoller:
         pnl = self._compute_unrealized_pnl_usdt(pos, current_price)
 
         # --- Trail logic ---
-        # trail_active: 0=inactive, 1=breakeven, 2=jumped/locked (dead zone), 3=trailing
+        # trail_active: 0=inactive, 1=breakeven, 2=lock profit, 3=jumped/locked (dead zone), 4=trailing
         if pos.trail_active == 0:
             if pnl >= self.breakeven_usdt:
                 log.info(
@@ -297,24 +297,33 @@ class PositionPoller:
                 )
                 self._move_to_breakeven(pos)
         elif pos.trail_active == 1:
-            # Breakeven — waiting for trail_activate threshold
+            # Breakeven — waiting for lock_profit threshold
+            if pnl >= self.lock_profit_activate_usdt:
+                log.info(
+                    "Lock profit for %s (pos %d): pnl=$%.2f >= $%.2f, locking $%.0f",
+                    pos.symbol, pos.id, pnl, self.lock_profit_activate_usdt,
+                    self.lock_profit_usdt,
+                )
+                self._lock_profit(pos)
+        elif pos.trail_active == 2:
+            # Profit locked — waiting for trail_activate threshold
             if pnl >= self.trail_activate_usdt:
                 log.info(
                     "Trail jump for %s (pos %d): pnl=$%.2f >= $%.2f, locking profit",
                     pos.symbol, pos.id, pnl, self.trail_activate_usdt,
                 )
                 self._activate_trail(pos, current_price)
-        elif pos.trail_active == 2:
+        elif pos.trail_active == 3:
             # Dead zone: SL is locked, waiting for trail_start_usdt
             if pnl >= self.trail_start_usdt:
                 log.info(
                     "Trail starting for %s (pos %d): pnl=$%.2f >= $%.2f, now trailing",
                     pos.symbol, pos.id, pnl, self.trail_start_usdt,
                 )
-                self.store.update_trail(pos.id, trail_high_price=current_price, trail_active=3)
+                self.store.update_trail(pos.id, trail_high_price=current_price, trail_active=4)
                 self._update_trail(pos, current_price)
         else:
-            # trail_active == 3: actively trailing
+            # trail_active == 4: actively trailing
             self._update_trail(pos, current_price)
 
     def _move_to_breakeven(self, pos) -> None:
@@ -329,6 +338,30 @@ class PositionPoller:
                 f"━━━━━━━━━━━━━━━\n"
                 f"🛑 SL moved to entry: ${new_sl:,.2f}\n"
                 f"💰 Zero risk"
+            )
+
+    def _lock_profit(self, pos) -> None:
+        """At +$20: SL moves to lock in $15 profit."""
+        lock_price_dist = _dollar_to_price_distance(
+            self.lock_profit_usdt, self.margin_usdt, self.leverage, pos.entry_price,
+        )
+        if pos.side == "long":
+            new_sl = pos.entry_price + lock_price_dist
+        else:
+            new_sl = pos.entry_price - lock_price_dist
+
+        self._replace_sl(pos, new_sl)
+        self.store.update_trail(pos.id, trail_high_price=0, trail_active=2)
+        log.info(
+            "Lock profit SL for %s: locking $%.0f, SL=%.4f",
+            pos.symbol, self.lock_profit_usdt, new_sl,
+        )
+        if self.notifier:
+            self.notifier.send(
+                f"🔒 LOCK PROFIT {pos.symbol}\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"🛑 SL moved to +${self.lock_profit_usdt:.0f}: ${new_sl:,.2f}\n"
+                f"💰 ${self.lock_profit_usdt:.0f} locked in"
             )
 
     def _activate_trail(self, pos, current_price: float) -> None:
@@ -348,8 +381,8 @@ class PositionPoller:
 
         self._replace_sl(pos, new_sl)
 
-        # trail_active=2 means SL jumped but locked (dead zone)
-        self.store.update_trail(pos.id, trail_high_price=high_price, trail_active=2)
+        # trail_active=3 means SL jumped but locked (dead zone)
+        self.store.update_trail(pos.id, trail_high_price=high_price, trail_active=3)
         log.info(
             "Trail jumped for %s: locking $%.0f profit, SL=%.4f (dead zone until +$%.0f)",
             pos.symbol, lock_in_usdt, new_sl, self.trail_start_usdt,
@@ -375,7 +408,7 @@ class PositionPoller:
             new_high = current_price
 
         self._replace_sl(pos, new_sl)
-        self.store.update_trail(pos.id, trail_high_price=new_high, trail_active=3)
+        self.store.update_trail(pos.id, trail_high_price=new_high, trail_active=4)
         log.info(
             "Trail updated for %s: high=%.4f → %.4f, SL=%.4f",
             pos.symbol, old_high, new_high, new_sl,
