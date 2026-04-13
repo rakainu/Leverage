@@ -1,121 +1,141 @@
-/* Runner Intel Dashboard — fetch, render, poll */
+/* Runner Intel Dashboard — fetch, render, poll, filter */
 
 const POLL_INTERVAL = 15000;
 let currentDetailId = null;
+let allScores = [];
+let activeVerdictFilter = 'all';
+let filterPos = false;
+let filterSc = false;
 
-// ── fetch helper ────────────────────────────────────────────────
+// ── fetch ───────────────────────────────────────────────────────
 
 async function fetchJSON(url) {
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
-    return await resp.json();
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    return await r.json();
   } catch (e) {
     console.warn('fetch failed:', url, e);
     return null;
   }
 }
 
-// ── formatting helpers ──────────────────────────────────────────
+// ── formatting ──────────────────────────────────────────────────
 
 function formatPnl(val) {
   if (val == null) return '<span class="pnl-nil">—</span>';
-  const sign = val >= 0 ? '+' : '';
-  const cls = val >= 0 ? 'pnl-pos' : 'pnl-neg';
-  return `<span class="${cls}">${sign}${val.toFixed(1)}%</span>`;
+  const s = val >= 0 ? '+' : '';
+  return `<span class="${val >= 0 ? 'pnl-pos' : 'pnl-neg'}">${s}${val.toFixed(1)}%</span>`;
 }
 
 function verdictPill(verdict) {
-  const label = verdict.replace(/_/g, ' ');
-  return `<span class="pill pill-${verdict}">${label}</span>`;
+  return `<span class="pill pill-${verdict}">${verdict.replace(/_/g, ' ')}</span>`;
 }
 
-function actionPill(action) {
-  return `<span class="action-pill action-${action}">${action}</span>`;
+function actionTag(action) {
+  return `<span class="tag tag-${action}">${action}</span>`;
 }
 
 function formatTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const mo = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${mo}-${dd} ${hh}:${mm}`;
+  return `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-function escapeHtml(s) {
+function esc(s) {
   if (!s) return '';
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function scoreColor(verdict) {
-  const map = { ignore: '#9ca3af', watch: '#fbbf24', strong_candidate: '#4ade80', probable_runner: '#60a5fa' };
-  return map[verdict] || '#94a3b8';
+function scoreColor(v) {
+  return {ignore:'#64748b', watch:'#fbbf24', strong_candidate:'#4ade80', probable_runner:'#60a5fa'}[v] || '#64748b';
 }
 
-function cautionSpan(text) {
-  if (!text || text === 'None') return '<span class="caution-none">—</span>';
-  return `<span class="caution-text">${escapeHtml(text)}</span>`;
+// ── filter logic (client-side) ──────────────────────────────────
+
+function setFilter(verdict) {
+  activeVerdictFilter = verdict;
+  document.querySelectorAll('#filter-bar [data-filter]').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === verdict);
+  });
+  applyFilters();
 }
 
-// ── render: stats cards ─────────────────────────────────────────
+function toggleFilter(type) {
+  if (type === 'pos') { filterPos = !filterPos; document.getElementById('filter-pos').classList.toggle('active', filterPos); }
+  if (type === 'sc') { filterSc = !filterSc; document.getElementById('filter-sc').classList.toggle('active', filterSc); }
+  applyFilters();
+}
 
-function renderStats(data) {
-  if (!data) return;
-  document.getElementById('stat-total').textContent = data.total_scored ?? '—';
-  document.getElementById('stat-strong').textContent = (data.by_verdict || {}).strong_candidate ?? 0;
-  document.getElementById('stat-runner').textContent = (data.by_verdict || {}).probable_runner ?? 0;
-  document.getElementById('stat-open').textContent = data.open_positions ?? 0;
-  document.getElementById('stat-closed').textContent = data.closed_positions ?? 0;
-  const pnlEl = document.getElementById('stat-pnl');
-  if (data.avg_pnl_closed != null) {
-    const sign = data.avg_pnl_closed >= 0 ? '+' : '';
-    pnlEl.innerHTML = `<span class="${data.avg_pnl_closed >= 0 ? 'pnl-pos' : 'pnl-neg'} stat-value">${sign}${data.avg_pnl_closed.toFixed(1)}%</span>`;
-  } else {
-    pnlEl.textContent = '—';
-    pnlEl.className = 'stat-value text-slate-500';
-  }
+function applyFilters() {
+  let filtered = allScores;
+  if (activeVerdictFilter !== 'all') filtered = filtered.filter(s => s.verdict === activeVerdictFilter);
+  if (filterPos) filtered = filtered.filter(s => s.has_position);
+  if (filterSc) filtered = filtered.filter(s => s.short_circuited);
+  renderScoresRows(filtered);
+}
+
+// ── render: stats ───────────────────────────────────────────────
+
+function renderStats(d) {
+  if (!d) return;
+  document.getElementById('stat-total').textContent = d.total_scored ?? '—';
+  document.getElementById('stat-strong').textContent = (d.by_verdict||{}).strong_candidate ?? 0;
+  document.getElementById('stat-runner').textContent = (d.by_verdict||{}).probable_runner ?? 0;
+  document.getElementById('stat-open').textContent = d.open_positions ?? 0;
+  document.getElementById('stat-closed').textContent = d.closed_positions ?? 0;
+  const el = document.getElementById('stat-pnl');
+  if (d.avg_pnl_closed != null) {
+    const s = d.avg_pnl_closed >= 0 ? '+' : '';
+    el.innerHTML = `<span class="${d.avg_pnl_closed>=0?'pnl-pos':'pnl-neg'} stat-value">${s}${d.avg_pnl_closed.toFixed(1)}%</span>`;
+  } else { el.textContent = '—'; el.className = 'stat-value text-slate-600'; }
 }
 
 // ── render: scores table ────────────────────────────────────────
 
 function renderScores(scores) {
-  const tbody = document.getElementById('scores-table');
-  if (!scores || !scores.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-slate-600 text-center text-xs">No scored candidates yet</td></tr>';
+  allScores = scores || [];
+  applyFilters();
+}
+
+function renderScoresRows(scores) {
+  const tb = document.getElementById('scores-table');
+  if (!scores.length) {
+    tb.innerHTML = '<tr><td colspan="8" class="p-5 text-slate-700 text-center text-xs ui">No scored candidates match filters</td></tr>';
     return;
   }
-  tbody.innerHTML = scores.map(s => `
+  tb.innerHTML = scores.map(s => {
+    const cautionHtml = (!s.top_caution || s.top_caution === 'None')
+      ? '<span class="caution-none">—</span>'
+      : `<span class="caution-inline" title="${esc(s.top_caution)}">${esc(s.top_caution)}</span>`;
+    return `
     <tr class="clickable" onclick="showDetail(${s.id})">
-      <td class="text-slate-500">${formatTime(s.created_at)}</td>
-      <td><code class="text-slate-300">${escapeHtml(s.short_token)}</code></td>
-      <td class="text-right font-bold" style="color:${scoreColor(s.verdict)}">${s.runner_score.toFixed(1)}</td>
+      <td class="text-slate-600 text-[11px]">${formatTime(s.created_at)}</td>
+      <td><code class="text-slate-300 text-[13px]">${esc(s.short_token)}</code></td>
+      <td class="text-right text-[15px] font-bold" style="color:${scoreColor(s.verdict)}">${s.runner_score.toFixed(1)}</td>
       <td>${verdictPill(s.verdict)}</td>
-      <td class="text-slate-400 truncate max-w-[200px]" title="${escapeHtml(s.top_reason)}">${escapeHtml(s.top_reason)}</td>
-      <td>${cautionSpan(s.top_caution)}</td>
-      <td class="text-center">${s.has_position ? '<span class="text-green-400 text-xs">&#9679;</span>' : ''}</td>
-      <td class="text-center">${s.short_circuited ? '<span class="text-red-400 text-xs">&#9679;</span>' : ''}</td>
-    </tr>
-  `).join('');
+      <td class="text-slate-500 text-[11px] truncate max-w-[220px]" title="${esc(s.top_reason)}">${esc(s.top_reason)}</td>
+      <td class="truncate max-w-[170px]">${cautionHtml}</td>
+      <td class="text-center">${s.has_position ? '<span class="text-green-500/60 text-[8px]">&#11044;</span>' : ''}</td>
+      <td class="text-center">${s.short_circuited ? '<span class="text-red-500/50 text-[8px]">&#11044;</span>' : ''}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ── render: positions table ─────────────────────────────────────
 
 function renderPositions(positions) {
-  const tbody = document.getElementById('positions-table');
+  const tb = document.getElementById('positions-table');
   if (!positions || !positions.length) {
-    tbody.innerHTML = '<tr><td colspan="12" class="p-4 text-slate-600 text-center text-xs">No paper positions yet</td></tr>';
+    tb.innerHTML = '<tr><td colspan="12" class="p-4 text-slate-700 text-center text-xs ui">No paper positions yet</td></tr>';
     return;
   }
-  tbody.innerHTML = positions.map(p => {
-    const statusCls = p.status === 'open' ? 'pill-watch' : 'pill-ignore';
-    return `
+  tb.innerHTML = positions.map(p => `
     <tr>
-      <td><code class="text-slate-300">${escapeHtml(p.symbol || p.short_token)}</code></td>
-      <td class="text-slate-500">${formatTime(p.signal_time)}</td>
+      <td><code class="text-slate-400">${esc(p.symbol || p.short_token)}</code></td>
+      <td class="text-slate-600">${formatTime(p.signal_time)}</td>
       <td>${verdictPill(p.verdict)}</td>
-      <td class="text-right text-slate-300">${p.entry_price_usd != null ? '$' + p.entry_price_usd.toPrecision(3) : '—'}</td>
+      <td class="text-right text-slate-400">${p.entry_price_usd != null ? '$'+p.entry_price_usd.toPrecision(3) : '—'}</td>
       <td class="text-right">${formatPnl(p.pnl_5m)}</td>
       <td class="text-right">${formatPnl(p.pnl_30m)}</td>
       <td class="text-right">${formatPnl(p.pnl_1h)}</td>
@@ -123,134 +143,109 @@ function renderPositions(positions) {
       <td class="text-right">${formatPnl(p.pnl_24h)}</td>
       <td class="text-right">${formatPnl(p.mfe)}</td>
       <td class="text-right">${formatPnl(p.mae)}</td>
-      <td class="text-center"><span class="pill ${statusCls}">${p.status}</span></td>
+      <td class="text-center"><span class="pill ${p.status==='open'?'pill-watch':'pill-ignore'}">${p.status}</span></td>
     </tr>
-  `}).join('');
+  `).join('');
 }
 
 // ── detail panel ────────────────────────────────────────────────
 
-async function showDetail(scoreId) {
-  currentDetailId = scoreId;
+async function showDetail(id) {
+  currentDetailId = id;
   const panel = document.getElementById('detail-panel');
   const content = document.getElementById('detail-content');
   const title = document.getElementById('detail-title');
-
   panel.classList.remove('hidden');
-  content.innerHTML = '<p class="text-slate-600 text-xs">Loading...</p>';
+  content.innerHTML = '<p class="text-slate-700 text-xs ui">Loading...</p>';
 
-  const d = await fetchJSON(`/api/scores/${scoreId}`);
-  if (!d) {
-    content.innerHTML = '<p class="text-red-400 text-xs">Failed to load detail</p>';
-    return;
-  }
+  const d = await fetchJSON(`/api/scores/${id}`);
+  if (!d) { content.innerHTML = '<p class="text-red-500/70 text-xs">Failed to load</p>'; return; }
 
-  title.innerHTML = `<code class="text-slate-300 mr-2">${escapeHtml(d.short_token)}</code> ${verdictPill(d.verdict)} <span class="text-slate-500 text-xs ml-2">${d.runner_score.toFixed(1)} pts</span>`;
+  title.innerHTML = `<code class="text-slate-200 mr-2 text-[14px]">${esc(d.short_token)}</code>${verdictPill(d.verdict)}<span class="text-slate-600 text-[11px] ml-2">${d.runner_score.toFixed(1)} pts</span>`;
 
-  let html = '<div class="grid grid-cols-2 gap-6">';
+  let h = '<div class="grid grid-cols-2 gap-8">';
 
-  // Left: score breakdown
-  html += '<div>';
-  html += '<div class="detail-section">';
-  html += '<div class="detail-label">Score Breakdown</div>';
-  const dimOrder = ['wallet_quality', 'cluster_quality', 'entry_quality', 'holder_quality', 'rug_risk', 'follow_through', 'narrative'];
-  for (const key of dimOrder) {
-    const dim = (d.dimensions || {})[key];
-    if (!dim) continue;
-    const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    const pct = Math.max(0, Math.min(100, dim.score));
-    const barColor = dim.score >= 60 ? '#4ade80' : dim.score >= 40 ? '#fbbf24' : '#f87171';
-    html += `
-      <div class="mb-2">
-        <div class="flex justify-between text-[11px] mb-1">
-          <span class="text-slate-400">${label}</span>
-          <span class="text-slate-500">${dim.score.toFixed(0)} <span class="text-slate-600">x${dim.weight.toFixed(2)}</span> = <span class="text-slate-300">${dim.weighted.toFixed(1)}</span></span>
-        </div>
-        <div class="score-track">
-          <div class="score-bar" style="width:${pct}%; background:${barColor}"></div>
-        </div>
+  // Left: dimensions
+  h += '<div>';
+  h += '<div class="detail-section">';
+  h += '<div class="detail-label">Score Breakdown</div>';
+  const dims = ['wallet_quality','cluster_quality','entry_quality','holder_quality','rug_risk','follow_through','narrative'];
+  for (const k of dims) {
+    const dm = (d.dimensions||{})[k]; if (!dm) continue;
+    const lbl = k.replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
+    const pct = Math.max(0, Math.min(100, dm.score));
+    const clr = dm.score >= 60 ? '#4ade80' : dm.score >= 40 ? '#d4a017' : '#f87171';
+    h += `<div class="mb-2.5">
+      <div class="flex justify-between text-[11px] mb-1">
+        <span class="text-slate-400">${lbl}</span>
+        <span><span class="text-slate-200 font-bold">${dm.score.toFixed(0)}</span><span class="text-slate-700 mx-1">x${dm.weight.toFixed(2)}</span><span class="text-slate-500">= ${dm.weighted.toFixed(1)}</span></span>
       </div>
-    `;
-  }
-  html += '</div>'; // detail-section
-
-  // Raw scores
-  html += '<div class="detail-section">';
-  html += '<div class="detail-label">Raw Risk Scores</div>';
-  html += `<div class="flex gap-6 text-[11px]">`;
-  html += `<div><span class="text-slate-500">Rug Risk</span> <span class="text-slate-200 font-bold ml-1">${d.raw_rug_risk ?? '—'}</span></div>`;
-  html += `<div><span class="text-slate-500">Insider Risk</span> <span class="text-slate-200 font-bold ml-1">${d.raw_insider_risk ?? '—'}</span></div>`;
-  html += `</div></div>`;
-
-  html += '</div>'; // left column
-
-  // Right: reasons + cautions + meta
-  html += '<div>';
-
-  // Top 3 reasons
-  html += '<div class="detail-section">';
-  html += '<div class="detail-label">Top Reasons</div>';
-  for (const r of (d.top_reasons || [])) {
-    const barW = Math.min(100, r.weighted / 20 * 100); // normalize to max ~20
-    html += `<div class="flex items-center gap-2 mb-1.5 text-[11px]">
-      <span class="text-slate-300 w-28 shrink-0">${escapeHtml(r.name)}</span>
-      <div class="flex-1 score-track"><div class="score-bar" style="width:${barW}%; background:#4ade80"></div></div>
-      <span class="text-slate-500 w-16 text-right">${r.score.toFixed(0)} (${r.weighted.toFixed(1)})</span>
+      <div class="score-track"><div class="score-bar" style="width:${pct}%;background:${clr}"></div></div>
     </div>`;
   }
-  html += '</div>';
+  h += '</div>';
+  // Raw risk
+  h += '<div class="detail-section">';
+  h += '<div class="detail-label">Raw Risk</div>';
+  h += `<div class="flex gap-8 text-[11px]">
+    <div><span class="text-slate-600">Rug</span> <span class="text-slate-200 font-bold">${d.raw_rug_risk??'—'}</span></div>
+    <div><span class="text-slate-600">Insider</span> <span class="text-slate-200 font-bold">${d.raw_insider_risk??'—'}</span></div>
+  </div></div>`;
+  h += '</div>';
 
-  // Cautions
-  html += '<div class="detail-section">';
-  html += '<div class="detail-label">Cautions</div>';
-  for (const c of (d.cautions || [])) {
-    if (c === 'None') {
-      html += '<div class="text-[11px] text-slate-600">No major cautions</div>';
-    } else {
-      html += `<div class="text-[11px] mb-1"><span class="caution-text">${escapeHtml(c)}</span></div>`;
-    }
+  // Right: reasons, cautions, cluster, position
+  h += '<div>';
+  // Reasons
+  h += '<div class="detail-section">';
+  h += '<div class="detail-label">Top Reasons</div>';
+  for (const r of (d.top_reasons||[])) {
+    const bw = Math.min(100, r.weighted / 18 * 100);
+    h += `<div class="flex items-center gap-2 mb-2 text-[11px]">
+      <span class="text-slate-300 w-28 shrink-0">${esc(r.name)}</span>
+      <div class="flex-1 score-track"><div class="score-bar" style="width:${bw}%;background:#4ade80"></div></div>
+      <span class="text-slate-600 w-14 text-right">${r.weighted.toFixed(1)}</span>
+    </div>`;
   }
-  html += '</div>';
-
+  h += '</div>';
+  // Cautions
+  h += '<div class="detail-section">';
+  h += '<div class="detail-label">Cautions</div>';
+  for (const c of (d.cautions||[])) {
+    if (c === 'None') { h += '<div class="text-[11px] text-slate-700">No major cautions</div>'; }
+    else { h += `<div class="caution-detail">${esc(c)}</div>`; }
+  }
+  h += '</div>';
   // Cluster
-  html += '<div class="detail-section">';
-  html += '<div class="detail-label">Cluster</div>';
-  const cl = d.cluster || {};
-  const tiers = Array.isArray(cl.tier_counts) ? cl.tier_counts.join(', ') : JSON.stringify(cl.tier_counts || {});
-  html += `<div class="text-[11px] text-slate-400">${cl.wallet_count || 0} wallets &middot; ${(cl.convergence_minutes || 0).toFixed(0)} min &middot; tiers: ${tiers}</div>`;
-  html += '</div>';
-
-  // Position milestones
+  h += '<div class="detail-section">';
+  h += '<div class="detail-label">Cluster</div>';
+  const cl = d.cluster||{};
+  const tiers = Array.isArray(cl.tier_counts) ? cl.tier_counts.join(', ') : JSON.stringify(cl.tier_counts||{});
+  h += `<div class="text-[11px] text-slate-500">${cl.wallet_count||0} wallets &middot; ${(cl.convergence_minutes||0).toFixed(0)} min &middot; ${tiers}</div>`;
+  h += '</div>';
+  // Position
   if (d.position) {
     const p = d.position;
-    html += '<div class="detail-section">';
-    html += '<div class="detail-label">Position</div>';
-    html += `<div class="text-[11px] text-slate-400 mb-1">${verdictPill(d.verdict)} &middot; Entry $${(p.entry_price_usd || 0).toPrecision(3)} &middot; ${p.amount_sol} SOL &middot; <span class="pill pill-${p.status === 'open' ? 'watch' : 'ignore'}">${p.status}</span></div>`;
-
-    const milestones = ['5m', '30m', '1h', '4h', '24h'];
-    const captured = milestones.filter(m => p['pnl_' + m] != null);
-    if (captured.length) {
-      html += '<div class="flex gap-3 text-[11px] mt-1">';
-      for (const m of captured) {
-        html += `<div class="text-slate-500">${m}: ${formatPnl(p['pnl_' + m])}</div>`;
-      }
-      html += '</div>';
+    h += '<div class="detail-section">';
+    h += '<div class="detail-label">Position</div>';
+    h += `<div class="text-[11px] text-slate-500 mb-1.5">Entry $${(p.entry_price_usd||0).toPrecision(3)} &middot; ${p.amount_sol} SOL &middot; <span class="pill pill-${p.status==='open'?'watch':'ignore'}">${p.status}</span></div>`;
+    const ms = ['5m','30m','1h','4h','24h'].filter(m => p['pnl_'+m] != null);
+    if (ms.length) {
+      h += '<div class="flex gap-4 text-[11px] mb-1">';
+      for (const m of ms) h += `<div><span class="text-slate-600">${m}</span> ${formatPnl(p['pnl_'+m])}</div>`;
+      h += '</div>';
     }
-    html += `<div class="flex gap-4 text-[11px] mt-1"><div class="text-slate-500">MFE: ${formatPnl(p.mfe)}</div><div class="text-slate-500">MAE: ${formatPnl(p.mae)}</div></div>`;
-    html += '</div>';
+    h += `<div class="flex gap-5 text-[11px]"><div><span class="text-slate-600">MFE</span> ${formatPnl(p.mfe)}</div><div><span class="text-slate-600">MAE</span> ${formatPnl(p.mae)}</div></div>`;
+    h += '</div>';
   }
-
   // Version + links
-  html += '<div class="flex items-center justify-between mt-2">';
-  html += `<span class="text-[10px] text-slate-600">v${escapeHtml(d.scoring_version)} &middot; ${escapeHtml(d.weights_hash)}</span>`;
-  html += '<div class="flex gap-2">';
-  html += `<a href="${d.links?.dexscreener || '#'}" target="_blank" class="ext-link">DexScreener</a>`;
-  html += `<a href="${d.links?.solscan || '#'}" target="_blank" class="ext-link">Solscan</a>`;
-  html += '</div></div>';
-
-  html += '</div>'; // right column
-  html += '</div>'; // grid
-  content.innerHTML = html;
+  h += `<div class="flex items-center justify-between mt-1 pt-3 border-t border-border">
+    <span class="text-[9px] text-slate-700 ui">v${esc(d.scoring_version)} &middot; ${esc(d.weights_hash)}</span>
+    <div class="flex gap-2">
+      <a href="${d.links?.dexscreener||'#'}" target="_blank" class="ext-link">DexScreener</a>
+      <a href="${d.links?.solscan||'#'}" target="_blank" class="ext-link">Solscan</a>
+    </div></div>`;
+  h += '</div></div>';
+  content.innerHTML = h;
 }
 
 function closeDetail() {
@@ -258,28 +253,28 @@ function closeDetail() {
   currentDetailId = null;
 }
 
-// ── render: wallet activity ──────────────────────────────────────
+// ── render: wallet activity ─────────────────────────────────────
 
-function renderWalletActivity(data) {
-  if (!data) return;
-  document.getElementById('wallet-total').textContent = data.total_tracked ?? '—';
-  document.getElementById('wallet-added').textContent = data.added_6h ?? 0;
-  document.getElementById('wallet-deactivated').textContent = data.deactivated_6h ?? 0;
-  document.getElementById('wallet-last-sync').textContent = data.last_event_time ? formatTime(data.last_event_time) : 'no events';
+function renderWalletActivity(d) {
+  if (!d) return;
+  document.getElementById('wallet-total').textContent = d.total_tracked ?? '—';
+  document.getElementById('wallet-added').textContent = d.added_6h ?? 0;
+  document.getElementById('wallet-deactivated').textContent = d.deactivated_6h ?? 0;
+  document.getElementById('wallet-last-sync').textContent = d.last_event_time ? formatTime(d.last_event_time) : '—';
 
-  const tbody = document.getElementById('wallet-events-table');
-  const events = data.events || [];
-  if (!events.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-slate-600 text-center text-xs">No wallet registry events yet</td></tr>';
+  const tb = document.getElementById('wallet-events-table');
+  const ev = d.events || [];
+  if (!ev.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="p-3 text-slate-700 text-center text-xs ui">No wallet events</td></tr>';
     return;
   }
-  tbody.innerHTML = events.map(e => `
+  tb.innerHTML = ev.map(e => `
     <tr>
-      <td class="text-slate-500">${formatTime(e.created_at)}</td>
-      <td><code class="text-slate-400">${escapeHtml(e.short_address)}</code></td>
-      <td>${actionPill(e.action)}</td>
-      <td class="text-slate-500">${escapeHtml(e.source || '—')}</td>
-      <td class="text-slate-500">${escapeHtml(e.label || '—')}</td>
+      <td class="text-slate-600">${formatTime(e.created_at)}</td>
+      <td><code class="text-slate-500">${esc(e.short_address)}</code></td>
+      <td>${actionTag(e.action)}</td>
+      <td class="text-slate-600">${esc(e.source||'—')}</td>
+      <td class="text-slate-600">${esc(e.label||'—')}</td>
     </tr>
   `).join('');
 }
@@ -287,29 +282,28 @@ function renderWalletActivity(data) {
 // ── polling ─────────────────────────────────────────────────────
 
 async function refreshAll() {
-  const indicator = document.getElementById('status-indicator');
+  const ind = document.getElementById('status-indicator');
   const dot = document.getElementById('live-dot');
   try {
     const [stats, scores, positions, wallets] = await Promise.all([
       fetchJSON('/api/stats'),
       fetchJSON('/api/scores?limit=50'),
       fetchJSON('/api/positions?limit=50'),
-      fetchJSON('/api/wallets?limit=30'),
+      fetchJSON('/api/wallets?limit=20'),
     ]);
     renderStats(stats);
     renderScores(scores?.scores);
     renderPositions(positions?.positions);
     renderWalletActivity(wallets);
-    indicator.textContent = new Date().toLocaleTimeString();
-    indicator.className = 'text-[10px] text-slate-600 label-text';
-    dot.className = 'w-2 h-2 rounded-full bg-green-500';
+    ind.textContent = new Date().toLocaleTimeString();
+    ind.className = 'text-[9px] text-slate-700 ui whitespace-nowrap';
+    dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-500 mt-0.5';
   } catch (e) {
-    indicator.textContent = 'error';
-    indicator.className = 'text-[10px] text-red-500 label-text';
-    dot.className = 'w-2 h-2 rounded-full bg-red-500';
+    ind.textContent = 'error';
+    ind.className = 'text-[9px] text-red-500 ui';
+    dot.className = 'w-1.5 h-1.5 rounded-full bg-red-500 mt-0.5';
   }
 }
 
-// Initial load + poll
 refreshAll();
 setInterval(refreshAll, POLL_INTERVAL);

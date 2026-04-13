@@ -10,141 +10,164 @@ tailwind.config = {
   theme: {
     extend: {
       colors: {
-        panel: '#111827',
-        surface: '#1e2533',
-        border: '#2a3346',
+        base: '#080c14',
+        panel: '#0e1420',
+        surface: '#151d2e',
+        raised: '#1c2640',
+        border: '#1e2a3e',
+        'border-lt': '#253350',
       }
     }
   }
 }
 </script>
 <style>
-  body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; background: #0b0f19; }
-  .label-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; background: #080c14; }
+  .ui { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 
   /* verdict pills */
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 9999px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-  .pill-ignore { background: #374151; color: #9ca3af; }
-  .pill-watch { background: #422006; color: #fbbf24; border: 1px solid #92400e; }
-  .pill-strong_candidate { background: #052e16; color: #4ade80; border: 1px solid #166534; }
-  .pill-probable_runner { background: #172554; color: #60a5fa; border: 1px solid #1e40af; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; line-height: 1.4; }
+  .pill-ignore { background: #1e2a3e; color: #64748b; }
+  .pill-watch { background: #422006; color: #fbbf24; }
+  .pill-strong_candidate { background: #052e16; color: #4ade80; }
+  .pill-probable_runner { background: #172554; color: #60a5fa; }
 
-  /* wallet action pills */
-  .action-pill { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
-  .action-added { background: #052e16; color: #4ade80; }
-  .action-deactivated { background: #450a0a; color: #f87171; }
-  .action-reactivated { background: #172554; color: #60a5fa; }
-  .action-updated { background: #422006; color: #fbbf24; }
+  /* action tags */
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .tag-added { background: #052e16; color: #4ade80; }
+  .tag-deactivated { background: #450a0a; color: #f87171; }
+  .tag-reactivated { background: #172554; color: #60a5fa; }
+  .tag-updated { background: #422006; color: #fbbf24; }
 
-  /* P&L coloring */
+  /* P&L */
   .pnl-pos { color: #4ade80; }
   .pnl-neg { color: #f87171; }
-  .pnl-nil { color: #4b5563; }
+  .pnl-nil { color: #2a3346; }
 
-  /* caution styling */
-  .caution-text { color: #fbbf24; background: #422006; padding: 1px 6px; border-radius: 4px; font-size: 10px; }
-  .caution-none { color: #6b7280; }
+  /* caution in table — subtle */
+  .caution-inline { color: #92400e; font-size: 11px; }
+  .caution-none { color: #2a3346; }
+  /* caution in detail — emphasized */
+  .caution-detail { color: #fbbf24; background: #1c1507; padding: 3px 8px; border-radius: 4px; border-left: 2px solid #92400e; font-size: 11px; display: block; margin-bottom: 4px; }
 
-  /* table */
-  .data-table { border-collapse: separate; border-spacing: 0; }
-  .data-table thead th { position: sticky; top: 0; background: #1e2533; z-index: 1; padding: 8px 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; border-bottom: 1px solid #2a3346; }
-  .data-table tbody td { padding: 7px 10px; border-bottom: 1px solid #1a2030; }
-  .data-table tbody tr:hover { background: #1a2236; }
-  tr.clickable { cursor: pointer; }
+  /* primary table (scores) */
+  .table-primary { border-collapse: separate; border-spacing: 0; }
+  .table-primary thead th { position: sticky; top: 0; background: #151d2e; z-index: 1; padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: #475569; border-bottom: 2px solid #253350; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .table-primary tbody td { padding: 8px 12px; border-bottom: 1px solid #111827; }
+  .table-primary tbody tr:hover { background: #111d30; }
+  .table-primary tr.clickable { cursor: pointer; }
+
+  /* secondary table (positions, wallets) */
+  .table-secondary { border-collapse: separate; border-spacing: 0; }
+  .table-secondary thead th { position: sticky; top: 0; background: #0e1420; z-index: 1; padding: 7px 10px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.07em; color: #475569; border-bottom: 1px solid #1e2a3e; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .table-secondary tbody td { padding: 6px 10px; border-bottom: 1px solid #0e1420; font-size: 12px; }
+  .table-secondary tbody tr:hover { background: #111827; }
 
   /* score bar */
-  .score-bar { height: 6px; border-radius: 3px; transition: width 0.2s ease; }
-  .score-track { height: 6px; border-radius: 3px; background: #1e2533; }
+  .score-bar { height: 5px; border-radius: 2px; transition: width 0.15s ease; }
+  .score-track { height: 5px; border-radius: 2px; background: #111827; }
 
   /* detail panel */
-  .detail-section { border-left: 2px solid #2a3346; padding-left: 12px; margin-bottom: 14px; }
-  .detail-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-bottom: 4px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .detail-section { border-left: 2px solid #253350; padding-left: 14px; margin-bottom: 16px; }
+  .detail-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; margin-bottom: 6px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 600; }
 
-  /* card */
-  .stat-card { background: #1e2533; border: 1px solid #2a3346; border-radius: 8px; padding: 14px 16px; }
-  .stat-value { font-size: 1.75rem; font-weight: 700; line-height: 1.1; }
-  .stat-label { font-size: 11px; color: #64748b; margin-bottom: 4px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  /* stat card */
+  .stat-card { background: #0e1420; border: 1px solid #1e2a3e; border-radius: 6px; padding: 10px 14px; }
+  .stat-value { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+  .stat-label { font-size: 10px; color: #475569; margin-bottom: 2px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; letter-spacing: 0.02em; }
 
   /* section */
-  .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 600; margin-bottom: 8px; padding-left: 2px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-  .section-wrap { background: #111827; border: 1px solid #1e2533; border-radius: 8px; overflow: hidden; }
+  .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #334155; font-weight: 700; margin-bottom: 6px; padding-left: 1px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .section-primary { background: #0e1420; border: 1px solid #1e2a3e; border-radius: 8px; overflow: hidden; }
+  .section-secondary { background: #0b0f19; border: 1px solid #151d2e; border-radius: 6px; overflow: hidden; }
 
   /* links */
-  .ext-link { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; background: #1e2533; border: 1px solid #2a3346; color: #94a3b8; font-size: 11px; text-decoration: none; }
-  .ext-link:hover { background: #2a3346; color: #e2e8f0; }
+  .ext-link { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 5px; background: #151d2e; border: 1px solid #253350; color: #64748b; font-size: 11px; text-decoration: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .ext-link:hover { background: #1c2640; color: #94a3b8; border-color: #334155; }
+
+  /* filter bar */
+  .filter-btn { padding: 3px 10px; border-radius: 4px; font-size: 10px; font-weight: 600; border: 1px solid #1e2a3e; background: transparent; color: #475569; cursor: pointer; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; }
+  .filter-btn:hover { border-color: #334155; color: #64748b; }
+  .filter-btn.active { background: #151d2e; border-color: #334155; color: #94a3b8; }
 </style>
 </head>
-<body class="text-slate-300 text-[13px]">
+<body class="text-slate-400 text-[13px]">
 
-<div class="max-w-[1440px] mx-auto px-5 py-5">
+<div class="max-w-[1320px] mx-auto px-5 py-4">
 
-  <!-- Header -->
-  <div class="flex items-center justify-between mb-5">
-    <div class="flex items-center gap-3">
-      <div class="w-2 h-2 rounded-full bg-green-500" id="live-dot"></div>
-      <h1 class="text-base font-bold text-slate-100 label-text tracking-wide">RUNNER INTEL</h1>
+  <!-- Header + Stats inline -->
+  <div class="flex items-start justify-between mb-4">
+    <div class="flex items-center gap-2.5">
+      <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-0.5" id="live-dot"></div>
+      <h1 class="text-[13px] font-bold text-slate-300 ui tracking-widest">RUNNER INTEL</h1>
     </div>
-    <span id="status-indicator" class="text-[10px] text-slate-600 label-text">polling...</span>
-  </div>
-
-  <!-- Summary Cards -->
-  <div class="grid grid-cols-6 gap-3 mb-7">
-    <div class="stat-card">
-      <div class="stat-label">Scored</div>
-      <div class="stat-value text-slate-100" id="stat-total">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Strong Candidates</div>
-      <div class="stat-value text-green-400" id="stat-strong">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Probable Runners</div>
-      <div class="stat-value text-blue-400" id="stat-runner">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Open Positions</div>
-      <div class="stat-value text-amber-400" id="stat-open">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Closed Positions</div>
-      <div class="stat-value text-slate-300" id="stat-closed">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Avg P&L (closed)</div>
-      <div class="stat-value" id="stat-pnl">—</div>
+    <div class="flex items-center gap-5">
+      <div class="grid grid-cols-6 gap-2">
+        <div class="stat-card text-center min-w-[90px]"><div class="stat-label">Scored</div><div class="stat-value text-slate-200" id="stat-total">—</div></div>
+        <div class="stat-card text-center min-w-[90px]"><div class="stat-label">Strong</div><div class="stat-value text-green-400" id="stat-strong">—</div></div>
+        <div class="stat-card text-center min-w-[90px]"><div class="stat-label">Runners</div><div class="stat-value text-blue-400" id="stat-runner">—</div></div>
+        <div class="stat-card text-center min-w-[90px]"><div class="stat-label">Open</div><div class="stat-value text-amber-400" id="stat-open">—</div></div>
+        <div class="stat-card text-center min-w-[90px]"><div class="stat-label">Closed</div><div class="stat-value text-slate-400" id="stat-closed">—</div></div>
+        <div class="stat-card text-center min-w-[90px]"><div class="stat-label">Avg P&L</div><div class="stat-value" id="stat-pnl">—</div></div>
+      </div>
+      <span id="status-indicator" class="text-[9px] text-slate-700 ui whitespace-nowrap">...</span>
     </div>
   </div>
 
-  <!-- Scored Candidates -->
-  <div class="section-title">Scored Candidates</div>
-  <div class="section-wrap mb-7 overflow-x-auto">
-    <table class="data-table w-full">
+  <!-- Filter bar -->
+  <div id="filter-bar" class="flex items-center gap-2 mb-4 pb-3 border-b border-border">
+    <span class="text-[9px] text-slate-600 ui uppercase tracking-wider mr-1">Filter</span>
+    <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
+    <button class="filter-btn" data-filter="strong_candidate" onclick="setFilter('strong_candidate')">Strong</button>
+    <button class="filter-btn" data-filter="probable_runner" onclick="setFilter('probable_runner')">Runner</button>
+    <button class="filter-btn" data-filter="watch" onclick="setFilter('watch')">Watch</button>
+    <button class="filter-btn" data-filter="ignore" onclick="setFilter('ignore')">Ignore</button>
+    <div class="w-px h-4 bg-border mx-1"></div>
+    <button class="filter-btn" id="filter-pos" onclick="toggleFilter('pos')">Has Position</button>
+    <button class="filter-btn" id="filter-sc" onclick="toggleFilter('sc')">Short-circuited</button>
+  </div>
+
+  <!-- Scored Candidates (PRIMARY) -->
+  <div class="section-label">Scored Candidates</div>
+  <div class="section-primary mb-6 overflow-x-auto" style="max-height:520px; overflow-y:auto;">
+    <table class="table-primary w-full">
       <thead>
         <tr>
-          <th class="text-left">Time</th>
-          <th class="text-left">Token</th>
-          <th class="text-right">Score</th>
-          <th class="text-left">Verdict</th>
+          <th class="text-left" style="width:90px">Time</th>
+          <th class="text-left" style="width:100px">Token</th>
+          <th class="text-right" style="width:60px">Score</th>
+          <th class="text-left" style="width:120px">Verdict</th>
           <th class="text-left">Top Reason</th>
-          <th class="text-left">Top Caution</th>
-          <th class="text-center">Pos</th>
-          <th class="text-center">SC</th>
+          <th class="text-left" style="width:180px">Caution</th>
+          <th class="text-center" style="width:30px">P</th>
+          <th class="text-center" style="width:30px">S</th>
         </tr>
       </thead>
       <tbody id="scores-table"></tbody>
     </table>
   </div>
 
-  <!-- Paper Positions -->
-  <div class="section-title">Paper Positions</div>
-  <div class="section-wrap mb-7 overflow-x-auto">
-    <table class="data-table w-full">
+  <!-- Detail Panel (appears between scores and positions when active) -->
+  <div id="detail-panel" class="hidden mb-6">
+    <div class="section-primary" style="border-color:#253350;">
+      <div class="flex justify-between items-center px-5 pt-4 pb-2 border-b border-border">
+        <h3 class="font-bold text-slate-200 text-[13px]" id="detail-title">—</h3>
+        <button onclick="closeDetail()" class="text-slate-600 hover:text-slate-400 text-[10px] ui uppercase tracking-wider">Close</button>
+      </div>
+      <div class="p-5" id="detail-content"></div>
+    </div>
+  </div>
+
+  <!-- Paper Positions (SECONDARY) -->
+  <div class="section-label">Paper Positions</div>
+  <div class="section-secondary mb-5 overflow-x-auto">
+    <table class="table-secondary w-full">
       <thead>
         <tr>
           <th class="text-left">Token</th>
           <th class="text-left">Opened</th>
           <th class="text-left">Verdict</th>
-          <th class="text-right">Entry $</th>
+          <th class="text-right">Entry</th>
           <th class="text-right">5m</th>
           <th class="text-right">30m</th>
           <th class="text-right">1h</th>
@@ -159,16 +182,18 @@ tailwind.config = {
     </table>
   </div>
 
-  <!-- Wallet Registry Activity -->
-  <div class="section-title">Wallet Registry</div>
-  <div class="grid grid-cols-4 gap-3 mb-3">
-    <div class="stat-card"><div class="stat-label">Tracked</div><div class="text-xl font-bold text-slate-100" id="wallet-total">—</div></div>
-    <div class="stat-card"><div class="stat-label">Added (6h)</div><div class="text-xl font-bold text-green-400" id="wallet-added">—</div></div>
-    <div class="stat-card"><div class="stat-label">Deactivated (6h)</div><div class="text-xl font-bold text-red-400" id="wallet-deactivated">—</div></div>
-    <div class="stat-card"><div class="stat-label">Last Event</div><div class="text-sm text-slate-400" id="wallet-last-sync">—</div></div>
+  <!-- Wallet Registry (COMPACT / OPERATIONAL) -->
+  <div class="flex items-center gap-4 mb-2">
+    <div class="section-label mb-0">Wallet Registry</div>
+    <div class="flex items-center gap-3 text-[10px] ui text-slate-600">
+      <span><span class="text-slate-400 font-bold" id="wallet-total">—</span> tracked</span>
+      <span class="text-green-600"><span class="font-bold" id="wallet-added">0</span> added 6h</span>
+      <span class="text-red-700"><span class="font-bold" id="wallet-deactivated">0</span> deactivated 6h</span>
+      <span>last: <span id="wallet-last-sync">—</span></span>
+    </div>
   </div>
-  <div class="section-wrap mb-7 overflow-x-auto">
-    <table class="data-table w-full">
+  <div class="section-secondary mb-5 overflow-x-auto">
+    <table class="table-secondary w-full">
       <thead>
         <tr>
           <th class="text-left">Time</th>
@@ -180,17 +205,6 @@ tailwind.config = {
       </thead>
       <tbody id="wallet-events-table"></tbody>
     </table>
-  </div>
-
-  <!-- Detail Panel -->
-  <div id="detail-panel" class="hidden mb-7">
-    <div class="section-wrap p-5">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-bold text-slate-100 text-sm" id="detail-title">—</h3>
-        <button onclick="closeDetail()" class="text-slate-500 hover:text-slate-300 text-xs label-text px-2 py-1 rounded hover:bg-surface">close</button>
-      </div>
-      <div id="detail-content"></div>
-    </div>
   </div>
 
 </div>
