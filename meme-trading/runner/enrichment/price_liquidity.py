@@ -8,7 +8,7 @@ from runner.utils.logging import get_logger
 logger = get_logger("runner.enrichment.price_liquidity")
 
 DEXSCREENER_BASE = "https://api.dexscreener.com"
-JUPITER_QUOTE = "https://quote-api.jup.ag/v6/quote"
+JUPITER_QUOTE = "https://api.jup.ag/swap/v1/quote"
 SOL_MINT = "So11111111111111111111111111111111111111112"
 
 

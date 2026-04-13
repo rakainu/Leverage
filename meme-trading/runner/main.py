@@ -58,7 +58,7 @@ async def _main() -> None:
 
     per_host_rps: dict[str, float] = {
         "api.dexscreener.com": dexscreener_rps,
-        "quote-api.jup.ag": jupiter_rps,
+        "api.jup.ag": jupiter_rps,
         "api.rugcheck.xyz": rugcheck_rps,
     }
     if helius_host:

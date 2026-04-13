@@ -7,7 +7,7 @@ cluster:
 gates:
   lp_locked_pct_min: 85
   deployer_max_pct: 5
-  top10_max_pct: 70
+  top10_max_pct: 95
   token_age_min_sec: 120
   token_age_max_hr: 72
 

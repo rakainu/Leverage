@@ -26,7 +26,7 @@ async def test_fetch_picks_highest_liquidity_pair_and_assembles_result():
             "https://api.dexscreener.com/tokens/v1/solana/TestMint1111111111111111111111111111111111"
         ).mock(return_value=httpx.Response(200, json=ds["pairs"]))
 
-        mock.get("https://quote-api.jup.ag/v6/quote").mock(
+        mock.get("https://api.jup.ag/swap/v1/quote").mock(
             side_effect=[
                 httpx.Response(200, json=q025),
                 httpx.Response(200, json=q050),
@@ -83,7 +83,7 @@ async def test_fetch_returns_partial_when_jupiter_fails():
         mock.get(
             "https://api.dexscreener.com/tokens/v1/solana/TestMint1111111111111111111111111111111111"
         ).mock(return_value=httpx.Response(200, json=ds["pairs"]))
-        mock.get("https://quote-api.jup.ag/v6/quote").mock(
+        mock.get("https://api.jup.ag/swap/v1/quote").mock(
             return_value=httpx.Response(500, json={})
         )
 

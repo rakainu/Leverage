@@ -70,6 +70,7 @@ class InsiderFilter(BaseFilter):
         if resp.status_code != 200:
             return None
         try:
-            return resp.json()
+            data = resp.json()
         except Exception:
             return None
+        return data if isinstance(data, dict) else None
