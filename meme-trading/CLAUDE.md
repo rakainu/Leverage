@@ -2,6 +2,12 @@
 
 Solana memecoin trading system that detects when multiple profitable wallets converge on the same token and trades accordingly.
 
+## Primary Directive
+
+**Making all trading efforts profitable is the #1 priority.** Be proactive — find opportunities, fixes, edits, and changes that improve profitability across smc-trading AND runner-intel. Don't wait to be asked. Analyze the database (paper_positions, runner_scores, filter_results), flag losing patterns, suggest parameter changes, and optimize for profit first.
+
+**No "cheap" fixes.** Never propose band-aid patches, quick hacks, or minimum-viable shortcuts (e.g. don't suggest "just add one column" when proper instrumentation requires a real schema migration + enrichment work). If something is worth doing, do it properly. Default to the right design, not the smallest diff.
+
 ## How It Works
 
 1. **Scanner** monitors 50-100 curated wallet addresses via Solana WebSocket (Helius RPC)

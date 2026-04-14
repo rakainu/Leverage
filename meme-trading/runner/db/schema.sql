@@ -133,6 +133,30 @@ CREATE TABLE IF NOT EXISTS wallet_registry_events (
 CREATE INDEX IF NOT EXISTS idx_wallet_events_time ON wallet_registry_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_wallet_events_action ON wallet_registry_events(action);
 
+-- Token outcomes — peak FDV / mcap tracking for every scored mint.
+-- Populated by runner.outcomes.tracker on a polling loop.
+CREATE TABLE IF NOT EXISTS token_outcomes (
+    token_mint TEXT PRIMARY KEY,
+    first_scored_at TIMESTAMP NOT NULL,
+    best_verdict TEXT NOT NULL,
+    best_score REAL NOT NULL,
+    entry_price_usd REAL,
+    entry_mcap_usd REAL,
+    current_price_usd REAL,
+    current_mcap_usd REAL,
+    peak_price_usd REAL,
+    peak_mcap_usd REAL,
+    peak_seen_at TIMESTAMP,
+    pair_address TEXT,
+    dex_id TEXT,
+    moonshot_alerted INTEGER DEFAULT 0,
+    last_checked_at TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_token_outcomes_peak ON token_outcomes(peak_mcap_usd DESC);
+CREATE INDEX IF NOT EXISTS idx_token_outcomes_verdict ON token_outcomes(best_verdict);
+
 -- Schema migration marker.
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,

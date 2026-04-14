@@ -1,7 +1,11 @@
 """TelegramAlerter — sends formatted HTML alerts to Telegram."""
 import asyncio
 
-from runner.alerts.formatting import format_close_alert, format_entry_alert
+from runner.alerts.formatting import (
+    format_close_alert,
+    format_entry_alert,
+    format_moonshot_alert,
+)
 from runner.utils.logging import get_logger
 
 logger = get_logger("runner.alerts.telegram")
@@ -34,6 +38,8 @@ class TelegramAlerter:
             html = format_entry_alert(alert)
         elif alert_type == "runner_close":
             html = format_close_alert(alert)
+        elif alert_type == "moonshot":
+            html = format_moonshot_alert(alert)
         else:
             logger.debug("unknown_alert_type", alert_type=alert_type)
             return

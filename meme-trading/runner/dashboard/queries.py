@@ -299,6 +299,74 @@ async def get_score_detail(db: Database, score_id: int) -> dict | None:
     }
 
 
+async def get_outcomes(db: Database, limit: int = 50) -> dict:
+    """Outcome tracking — answers 'did any of our scored coins moon?'
+
+    Returns summary counts (mooners caught vs filter misses) plus the top-N
+    tokens ranked by peak FDV. Includes the verdict we assigned so the operator
+    can see at a glance whether the system caught it or rejected it.
+    """
+    assert db.conn is not None
+
+    async with db.conn.execute("SELECT COUNT(*) FROM token_outcomes") as cur:
+        tracked = (await cur.fetchone())[0]
+
+    async with db.conn.execute(
+        "SELECT COUNT(*) FROM token_outcomes WHERE peak_mcap_usd >= 1000000"
+    ) as cur:
+        mooned = (await cur.fetchone())[0]
+
+    async with db.conn.execute(
+        "SELECT COUNT(*) FROM token_outcomes "
+        "WHERE peak_mcap_usd >= 1000000 AND best_verdict = 'ignore'"
+    ) as cur:
+        filter_misses = (await cur.fetchone())[0]
+
+    async with db.conn.execute(
+        "SELECT COUNT(*) FROM token_outcomes "
+        "WHERE peak_mcap_usd >= 1000000 AND best_verdict != 'ignore'"
+    ) as cur:
+        caught = (await cur.fetchone())[0]
+
+    async with db.conn.execute(
+        """SELECT token_mint, best_verdict, best_score,
+                  entry_mcap_usd, current_mcap_usd, peak_mcap_usd,
+                  peak_seen_at, last_checked_at
+           FROM token_outcomes
+           WHERE peak_mcap_usd IS NOT NULL
+           ORDER BY peak_mcap_usd DESC
+           LIMIT ?""",
+        (limit,),
+    ) as cur:
+        rows = await cur.fetchall()
+
+    leaderboard = []
+    for r in rows:
+        mint, verdict, score, entry_mcap, cur_mcap, peak_mcap, peak_seen, checked = r
+        multiple = (peak_mcap / entry_mcap) if entry_mcap and peak_mcap else None
+        leaderboard.append({
+            "token_mint": mint,
+            "short_token": _short_token(mint),
+            "best_verdict": verdict,
+            "best_score": score,
+            "entry_mcap_usd": entry_mcap,
+            "current_mcap_usd": cur_mcap,
+            "peak_mcap_usd": peak_mcap,
+            "multiple": round(multiple, 2) if multiple else None,
+            "is_filter_miss": verdict == "ignore" and (peak_mcap or 0) >= 1_000_000,
+            "peak_seen_at": peak_seen,
+            "last_checked_at": checked,
+        })
+
+    return {
+        "tracked": tracked,
+        "mooned": mooned,
+        "caught": caught,
+        "filter_misses": filter_misses,
+        "leaderboard": leaderboard,
+    }
+
+
 async def get_wallet_activity(db: Database, limit: int = 30) -> dict:
     """Wallet registry activity: counts, recent events, last sync."""
     assert db.conn is not None

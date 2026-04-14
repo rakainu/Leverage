@@ -56,3 +56,7 @@ scoring:
 executor:
   check_interval_sec: 30
   error_closure_hours: 36
+
+outcomes:
+  poll_interval_sec: 300       # Poll DexScreener for every scored mint every 5 min
+  moonshot_mcap_usd: 1000000   # FDV threshold that triggers a moonshot Telegram alert

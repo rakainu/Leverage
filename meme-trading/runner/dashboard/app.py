@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from runner.dashboard.queries import (
     get_health,
+    get_outcomes,
     get_positions,
     get_score_detail,
     get_scores,
@@ -47,6 +48,10 @@ def create_app(db: Database) -> FastAPI:
     @app.get("/api/wallets")
     async def wallet_activity(limit: int = Query(30, ge=1, le=100)):
         return await get_wallet_activity(db, limit=limit)
+
+    @app.get("/api/outcomes")
+    async def outcomes(limit: int = Query(50, ge=1, le=200)):
+        return await get_outcomes(db, limit=limit)
 
     @app.get("/")
     async def index():

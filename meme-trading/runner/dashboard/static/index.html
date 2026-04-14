@@ -117,9 +117,9 @@ tailwind.config = {
 
   <!-- Scored Candidates -->
   <div class="section-title">Scored Candidates</div>
-  <div class="section-wrap mb-7 overflow-x-auto">
+  <div class="section-wrap mb-7 overflow-x-auto overflow-y-auto" style="max-height: 280px;">
     <table class="data-table w-full">
-      <thead>
+      <thead class="sticky top-0 bg-slate-950 z-10">
         <tr>
           <th class="text-left">Time</th>
           <th class="text-left">Token</th>
@@ -156,6 +156,30 @@ tailwind.config = {
         </tr>
       </thead>
       <tbody id="positions-table"></tbody>
+    </table>
+  </div>
+
+  <!-- Outcome Tracking -->
+  <div class="section-title">Outcomes — Did Our Scored Coins Moon?</div>
+  <div class="grid grid-cols-4 gap-3 mb-3">
+    <div class="stat-card"><div class="stat-label">Tracked</div><div class="stat-value text-slate-300" id="out-tracked">—</div></div>
+    <div class="stat-card"><div class="stat-label">Hit ≥ $1M FDV</div><div class="stat-value text-slate-300" id="out-mooned">—</div></div>
+    <div class="stat-card"><div class="stat-label">Caught (we scored ≥ watch)</div><div class="stat-value text-green-400" id="out-caught">—</div></div>
+    <div class="stat-card"><div class="stat-label">Filter Misses (ignored & mooned)</div><div class="stat-value text-slate-300" id="out-misses">—</div></div>
+  </div>
+  <div class="section-wrap mb-7 overflow-x-auto overflow-y-auto" style="max-height: 320px;">
+    <table class="data-table w-full">
+      <thead class="sticky top-0 bg-slate-950 z-10">
+        <tr>
+          <th class="text-left">Token</th>
+          <th class="text-left">Best Verdict</th>
+          <th class="text-right">Entry Mcap</th>
+          <th class="text-right">Peak Mcap</th>
+          <th class="text-right">Multiple</th>
+          <th class="text-right">Peak Seen</th>
+        </tr>
+      </thead>
+      <tbody id="outcomes-table"></tbody>
     </table>
   </div>
 

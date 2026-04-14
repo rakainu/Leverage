@@ -22,6 +22,7 @@ from runner.ingest.rpc_pool import RpcPool
 from runner.cluster.wallet_tracker import WalletRegistryTracker
 from runner.executor.paper import PaperExecutor
 from runner.executor.snapshotter import MilestoneSnapshotter
+from runner.outcomes.tracker import OutcomeTracker
 from runner.alerts.telegram import TelegramAlerter
 from runner.dashboard.app import create_app
 from runner.scoring.engine import ScoringEngine
@@ -157,6 +158,13 @@ async def _main() -> None:
     telegram = TelegramAlerter(
         alert_bus=alert_bus, bot_token=settings.telegram_bot_token, chat_id=settings.telegram_chat_id,
     )
+    outcome_tracker = OutcomeTracker(
+        db=db,
+        http=http,
+        alert_bus=alert_bus,
+        poll_interval_sec=float(weights.get("outcomes.poll_interval_sec", 300)),
+        moonshot_mcap_usd=float(weights.get("outcomes.moonshot_mcap_usd", 1_000_000)),
+    )
 
     dashboard_app = create_app(db)
 
@@ -188,6 +196,7 @@ async def _main() -> None:
             _supervise(paper_executor.run, "paper_executor", logger),
             _supervise(snapshotter.run, "milestone_snapshotter", logger),
             _supervise(telegram.run, "telegram_alerter", logger),
+            _supervise(outcome_tracker.run, "outcome_tracker", logger),
             _supervise(wallet_tracker.run, "wallet_tracker", logger),
             _supervise(lambda: _run_dashboard(dashboard_app, logger), "dashboard", logger),
             return_exceptions=True,
@@ -195,7 +204,7 @@ async def _main() -> None:
         for name, result in zip(
             ["monitor", "detector", "enricher", "filter_pipeline", "scoring_engine",
              "paper_executor", "milestone_snapshotter", "telegram_alerter",
-             "wallet_tracker", "dashboard"],
+             "outcome_tracker", "wallet_tracker", "dashboard"],
             results,
         ):
             if isinstance(result, Exception):

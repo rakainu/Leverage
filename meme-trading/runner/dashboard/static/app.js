@@ -284,22 +284,69 @@ function renderWalletActivity(data) {
   `).join('');
 }
 
+// ── outcomes ────────────────────────────────────────────────────
+
+function fmtMcap(v) {
+  if (v == null) return '—';
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
+  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}k`;
+  return `$${v.toFixed(0)}`;
+}
+
+function renderOutcomes(data) {
+  if (!data) return;
+  document.getElementById('out-tracked').textContent = data.tracked ?? '—';
+  document.getElementById('out-mooned').textContent = data.mooned ?? '—';
+  document.getElementById('out-caught').textContent = data.caught ?? '—';
+  const missEl = document.getElementById('out-misses');
+  missEl.textContent = data.filter_misses ?? '—';
+  missEl.className = (data.filter_misses || 0) > 0
+    ? 'stat-value text-red-400'
+    : 'stat-value text-slate-300';
+
+  const tbody = document.getElementById('outcomes-table');
+  const rows = data.leaderboard || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-slate-600 text-center text-xs">No outcome data yet — tracker polls every 5 min</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const verdictCell = r.is_filter_miss
+      ? `<span class="pill pill-ignore" style="background:#7f1d1d;color:#fecaca">MISS · ${r.best_verdict}</span>`
+      : verdictPill(r.best_verdict);
+    const peakCell = (r.peak_mcap_usd || 0) >= 1_000_000
+      ? `<span class="pnl-pos">${fmtMcap(r.peak_mcap_usd)}</span>`
+      : fmtMcap(r.peak_mcap_usd);
+    return `
+      <tr>
+        <td><code class="text-slate-200">${escapeHtml(r.short_token)}</code></td>
+        <td>${verdictCell}</td>
+        <td class="text-right text-slate-300">${fmtMcap(r.entry_mcap_usd)}</td>
+        <td class="text-right">${peakCell}</td>
+        <td class="text-right text-slate-300">${r.multiple ? r.multiple.toFixed(1) + 'x' : '—'}</td>
+        <td class="text-right text-slate-400">${formatTime(r.peak_seen_at)}</td>
+      </tr>`;
+  }).join('');
+}
+
 // ── polling ─────────────────────────────────────────────────────
 
 async function refreshAll() {
   const indicator = document.getElementById('status-indicator');
   const dot = document.getElementById('live-dot');
   try {
-    const [stats, scores, positions, wallets] = await Promise.all([
+    const [stats, scores, positions, wallets, outcomes] = await Promise.all([
       fetchJSON('/api/stats'),
       fetchJSON('/api/scores?limit=50'),
       fetchJSON('/api/positions?limit=50'),
       fetchJSON('/api/wallets?limit=30'),
+      fetchJSON('/api/outcomes?limit=50'),
     ]);
     renderStats(stats);
     renderScores(scores?.scores);
     renderPositions(positions?.positions);
     renderWalletActivity(wallets);
+    renderOutcomes(outcomes);
     indicator.textContent = new Date().toLocaleTimeString();
     indicator.className = 'text-[10px] text-slate-600 label-text';
     dot.className = 'w-2 h-2 rounded-full bg-green-500';

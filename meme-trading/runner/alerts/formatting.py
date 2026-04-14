@@ -114,6 +114,39 @@ def format_entry_alert(alert: dict) -> str:
     return "\n".join(lines)
 
 
+def format_moonshot_alert(alert: dict) -> str:
+    """Format a moonshot detection alert. Tags filter misses prominently."""
+    mint = alert["token_mint"]
+    short = mint_short(mint)
+    kind = alert.get("kind", "moonshot_caught")
+    is_miss = kind == "filter_miss"
+    verdict_label = _format_verdict_label(alert.get("best_verdict", "unknown"))
+    score = float(alert.get("best_score", 0))
+    entry_mcap = alert.get("entry_mcap_usd")
+    peak_mcap = alert.get("peak_mcap_usd")
+    multiple = alert.get("multiple")
+    url = alert.get("dexscreener_url", f"https://dexscreener.com/solana/{mint}")
+
+    header = (
+        "<b>FROM: RUNNER • FILTER MISS — IGNORED token mooned</b>"
+        if is_miss
+        else "<b>FROM: RUNNER • MOONSHOT CAUGHT</b>"
+    )
+    lines = [
+        header,
+        "",
+        f"<code>{short}</code> • verdict was <b>{verdict_label}</b> (score {score:.0f})",
+        "",
+        f"Entry mcap: ${entry_mcap:,.0f}" if entry_mcap else "Entry mcap: N/A",
+        f"Peak mcap:  ${peak_mcap:,.0f}" if peak_mcap else "Peak mcap: N/A",
+    ]
+    if multiple:
+        lines.append(f"Multiple:   {multiple:.1f}x")
+    lines.append("")
+    lines.append(f'<a href="{url}">DexScreener</a>')
+    return "\n".join(lines)
+
+
 def format_close_alert(alert: dict) -> str:
     """Format a close alert dict as HTML for Telegram."""
     verdict_label = _format_verdict_label(alert["verdict"])
