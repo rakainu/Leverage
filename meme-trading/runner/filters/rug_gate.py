@@ -1,4 +1,5 @@
 """RugGate filter — RugCheck /report/summary-based hard gates + rug_risk sub-score."""
+import asyncio
 from typing import Any
 
 from runner.enrichment.schemas import EnrichedToken
@@ -9,6 +10,7 @@ from runner.utils.logging import get_logger
 logger = get_logger("runner.filters.rug_gate")
 
 RUGCHECK_BASE = "https://api.rugcheck.xyz"
+RUGCHECK_RETRY_DELAY_SECONDS = 5.0
 
 
 class RugGate(BaseFilter):
@@ -17,12 +19,11 @@ class RugGate(BaseFilter):
     Hard gates (any failure → passed=False):
       1. Mint authority must be revoked (EnrichedToken.mint_authority is None)
       2. Freeze authority must be revoked (EnrichedToken.freeze_authority is None)
-      3. LP locked % must be >= lp_locked_pct_min
+      3. RugCheck data must be available (one retry on indexer lag, then fail closed)
+      4. LP locked % must be >= lp_locked_pct_min
 
     Sub-score: `rug_risk` starts at 100, subtracts RugCheck score_normalised
     directly, subtracts 5 per `warn` risk entry (cap -30 on risks alone).
-    API failures degrade rug_risk to 0 but do NOT hard-fail the gate
-    (operator gets a logged warning).
     """
 
     name = "rug_gate"
@@ -54,15 +55,22 @@ class RugGate(BaseFilter):
                 evidence={"freeze_authority": enriched.freeze_authority},
             )
 
-        # Fetch RugCheck summary
+        # Fetch RugCheck summary — one short retry to absorb indexer lag on fresh mints
         summary = await self._fetch_summary(enriched.token_mint)
         if summary is None:
+            await asyncio.sleep(RUGCHECK_RETRY_DELAY_SECONDS)
+            summary = await self._fetch_summary(enriched.token_mint)
+        if summary is None:
+            # Conservative: no rug data → don't trade. Better than silently passing.
             return FilterResult(
                 filter_name=self.name,
-                passed=True,  # API failure is not a hard fail
-                hard_fail_reason=None,
+                passed=False,
+                hard_fail_reason="rugcheck_unavailable_after_retry",
                 sub_scores={"rug_risk": 0.0},
-                evidence={"errors": ["rugcheck_api_unavailable"]},
+                evidence={
+                    "errors": ["rugcheck_api_unavailable"],
+                    "retry_attempted": True,
+                },
             )
 
         lp_locked_pct = float(summary.get("lpLockedPct") or 0.0)

@@ -121,22 +121,54 @@ async def test_hard_fails_when_mint_authority_still_enabled():
 
 
 @pytest.mark.asyncio
-async def test_passes_with_zero_score_when_rugcheck_fails():
-    """API failure should not hard-fail; gate degrades to low sub-score but passes."""
-    # max_retries=0 skips the 5xx retry loop so this test runs in <1s instead of ~7s
+async def test_hard_fails_when_rugcheck_unavailable_after_retry(monkeypatch):
+    """Fail closed when rugcheck has no data — protects capital from un-vetted tokens."""
+    # max_retries=0 skips the 5xx retry loop so this test runs fast
     client = RateLimitedClient(default_rps=100, max_retries=0)
     gate = RugGate(client, lp_locked_pct_min=85)
+
+    # Avoid the real 5s retry sleep
+    async def _instant(_):
+        return None
+    monkeypatch.setattr("runner.filters.rug_gate.asyncio.sleep", _instant)
 
     with respx.mock(base_url="https://api.rugcheck.xyz") as mock:
         mock.get(
             "/v1/tokens/TestMint1111111111111111111111111111111111/report/summary"
-        ).mock(return_value=httpx.Response(500, json={}))
+        ).mock(return_value=httpx.Response(400, json={"error": "unable to generate report"}))
 
         result = await gate.apply(_enriched())
 
-    # API failure shouldn't hard-fail — operator decides upstream. Mark as
-    # degraded and let the rug_risk sub-score go to 0.
-    assert result.passed is True
-    assert result.sub_scores["rug_risk"] == pytest.approx(0, abs=1)
+    assert result.passed is False
+    assert result.hard_fail_reason == "rugcheck_unavailable_after_retry"
+    assert result.evidence["retry_attempted"] is True
     assert "rugcheck_api_unavailable" in result.evidence.get("errors", [])
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_passes_when_retry_succeeds(monkeypatch):
+    """Retry absorbs indexer lag — first call 400, second call 200 → pass."""
+    client = RateLimitedClient(default_rps=100, max_retries=0)
+    gate = RugGate(client, lp_locked_pct_min=85)
+
+    async def _instant(_):
+        return None
+    monkeypatch.setattr("runner.filters.rug_gate.asyncio.sleep", _instant)
+
+    payload = json.loads(FIX.read_text())
+
+    with respx.mock(base_url="https://api.rugcheck.xyz") as mock:
+        route = mock.get(
+            "/v1/tokens/TestMint1111111111111111111111111111111111/report/summary"
+        )
+        route.side_effect = [
+            httpx.Response(400, json={"error": "unable to generate report"}),
+            httpx.Response(200, json=payload),
+        ]
+
+        result = await gate.apply(_enriched())
+
+    assert result.passed is True
+    assert result.hard_fail_reason is None
     await client.aclose()
