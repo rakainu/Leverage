@@ -57,6 +57,14 @@ class ConvergenceDetector:
         self._window: dict[str, list[BuyEvent]] = defaultdict(list)
         # per-token: set of frozensets of wallet-address combinations we already signaled
         self._signaled: dict[str, set[frozenset[str]]] = defaultdict(set)
+        # per-token: last signal emit time, for the rescore cooldown
+        self._last_signal_at: dict[str, datetime] = {}
+
+    @property
+    def rescore_cooldown_seconds(self) -> int:
+        if self.weights is not None:
+            return int(self.weights.get("cooldowns.rescore_seconds", 1800))
+        return 1800
 
     @property
     def min_wallets(self) -> int:
@@ -100,12 +108,30 @@ class ConvergenceDetector:
         distinct_wallets = {e.wallet_address for e in ab_events}
 
         if len(distinct_wallets) < self.min_wallets:
+            # Near-miss observability: log when we're 1 wallet shy of signal.
+            # Helps decide whether tightening to a lower min_wallets would
+            # multiply signal count without trashing precision.
+            if len(distinct_wallets) == self.min_wallets - 1:
+                logger.info(
+                    "cluster_near_miss",
+                    mint=token,
+                    wallets=len(distinct_wallets),
+                    needed=self.min_wallets,
+                )
             return
 
         cluster_key = frozenset(distinct_wallets)
         if cluster_key in self._signaled[token]:
             return
+        # Per-mint rescore cooldown: don't re-emit a signal for the same mint
+        # within rescore_cooldown_seconds, regardless of which wallets joined.
+        last = self._last_signal_at.get(token)
+        cooldown = self.rescore_cooldown_seconds
+        if last is not None and (event.block_time - last).total_seconds() < cooldown:
+            logger.debug("rescore_cooldown_skip", mint=token, cooldown_sec=cooldown)
+            return
         self._signaled[token].add(cluster_key)
+        self._last_signal_at[token] = event.block_time
 
         wallet_events_by_addr: dict[str, BuyEvent] = {}
         for e in ab_events:

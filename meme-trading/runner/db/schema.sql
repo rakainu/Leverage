@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     max_favorable_pct REAL DEFAULT 0.0,
     max_adverse_pct REAL DEFAULT 0.0,
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
-    close_reason TEXT CHECK (close_reason IN ('completed', 'error')),
+    close_reason TEXT CHECK (close_reason IN ('completed', 'error', 'stopped_out', 'trail_stop', 'time_stop')),
     opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     closed_at TIMESTAMP,
     notes_json TEXT,

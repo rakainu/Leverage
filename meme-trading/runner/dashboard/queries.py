@@ -12,12 +12,21 @@ def _short_token(mint: str) -> str:
 
 
 def _extract_top_reason(explanation_json: str) -> str:
-    """Highest weighted dimension, excluding narrative placeholder."""
+    """Highest weighted dimension, or gate-fail reason for short-circuited rows."""
     try:
         exp = json.loads(explanation_json) if isinstance(explanation_json, str) else explanation_json
         dims = exp.get("dimensions", {})
     except (json.JSONDecodeError, TypeError):
         return "N/A"
+
+    # Short-circuited rows have all dims = 0; show the gate that failed instead.
+    if exp.get("short_circuited"):
+        gate = exp.get("failed_gate") or "unknown"
+        reason = exp.get("failed_reason") or ""
+        if reason:
+            return f"GATE FAILED: {gate} ({reason})"
+        return f"GATE FAILED: {gate}"
+
     candidates = []
     for name, info in dims.items():
         if info.get("detail", {}).get("placeholder"):

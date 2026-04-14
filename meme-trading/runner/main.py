@@ -154,6 +154,11 @@ async def _main() -> None:
         alert_bus=alert_bus, price_fetcher=price_fetcher, db=db,
         check_interval_sec=float(weights.get("executor.check_interval_sec", 30)),
         error_closure_hours=float(weights.get("executor.error_closure_hours", 36)),
+        stop_loss_pct=float(weights.get("executor.stop_loss_pct", 25)),
+        trail_activate_pct=float(weights.get("executor.trail_activate_pct", 30)),
+        trail_distance_pct=float(weights.get("executor.trail_distance_pct", 20)),
+        time_stop_sec=float(weights.get("executor.time_stop_sec", 14400)),
+        time_stop_pnl_max=float(weights.get("executor.time_stop_pnl_max", 0)),
     )
     telegram = TelegramAlerter(
         alert_bus=alert_bus, bot_token=settings.telegram_bot_token, chat_id=settings.telegram_chat_id,

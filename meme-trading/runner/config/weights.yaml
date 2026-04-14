@@ -7,7 +7,7 @@ cluster:
 gates:
   lp_locked_pct_min: 85
   deployer_max_pct: 5
-  top10_max_pct: 95
+  top10_max_pct: 70   # Tightened 2026-04-14 from 95 — real runners rarely have >70% top-10 concentration
   token_age_min_sec: 120
   token_age_max_hr: 72
 
@@ -56,6 +56,23 @@ scoring:
 executor:
   check_interval_sec: 30
   error_closure_hours: 36
+
+  # --- Real exit policy (added 2026-04-14) ---
+  # Hard stop: close immediately if pnl drops below -stop_loss_pct
+  stop_loss_pct: 25.0
+  # Trailing stop: only arms once peak pnl >= trail_activate_pct;
+  # then exits when pnl drops trail_distance_pct below the peak
+  trail_activate_pct: 30.0
+  trail_distance_pct: 20.0
+  # Time stop: close any underwater position after this many seconds
+  # (default 4h — milestone snapshot still records 4h pnl before close)
+  time_stop_sec: 14400
+  time_stop_pnl_max: 0.0  # only time-stops if pnl is below this
+
+cooldowns:
+  # Don't rescore the same mint within this many seconds — prevents 3x rescore
+  # of the same cluster as more wallets join.
+  rescore_seconds: 1800
 
 outcomes:
   poll_interval_sec: 300       # Poll DexScreener for every scored mint every 5 min

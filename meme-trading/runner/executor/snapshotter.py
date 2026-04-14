@@ -18,13 +18,43 @@ MILESTONES = [
 
 
 class MilestoneSnapshotter:
-    def __init__(self, alert_bus, price_fetcher, db: Database,
-                 check_interval_sec: float = 30.0, error_closure_hours: float = 36.0):
+    def __init__(
+        self,
+        alert_bus,
+        price_fetcher,
+        db: Database,
+        check_interval_sec: float = 30.0,
+        error_closure_hours: float = 36.0,
+        stop_loss_pct: float = 25.0,
+        trail_activate_pct: float = 30.0,
+        trail_distance_pct: float = 20.0,
+        time_stop_sec: float = 14400.0,
+        time_stop_pnl_max: float = 0.0,
+    ):
         self.alert_bus = alert_bus
         self.price_fetcher = price_fetcher
         self.db = db
         self.check_interval_sec = check_interval_sec
         self.error_closure_hours = error_closure_hours
+        self.stop_loss_pct = stop_loss_pct
+        self.trail_activate_pct = trail_activate_pct
+        self.trail_distance_pct = trail_distance_pct
+        self.time_stop_sec = time_stop_sec
+        self.time_stop_pnl_max = time_stop_pnl_max
+
+    def _decide_exit(
+        self, peak_pnl_pct: float, current_pnl_pct: float, elapsed_sec: float
+    ) -> str | None:
+        """Pure exit-decision logic. Returns close_reason or None."""
+        if current_pnl_pct <= -abs(self.stop_loss_pct):
+            return "stopped_out"
+        if peak_pnl_pct >= self.trail_activate_pct:
+            give_back = peak_pnl_pct - current_pnl_pct
+            if give_back >= self.trail_distance_pct:
+                return "trail_stop"
+        if elapsed_sec >= self.time_stop_sec and current_pnl_pct < self.time_stop_pnl_max:
+            return "time_stop"
+        return None
 
     async def run(self) -> None:
         logger.info("milestone_snapshotter_start", interval=self.check_interval_sec)
@@ -92,6 +122,13 @@ class MilestoneSnapshotter:
         )
         await self.db.conn.commit()
 
+        # Exit policy: hard SL, trail-stop, time-stop. Runs every 30s.
+        peak_pnl = max(float(pos["max_favorable_pct"] or 0.0), pnl_pct)
+        exit_reason = self._decide_exit(peak_pnl, pnl_pct, elapsed_sec)
+        if exit_reason:
+            await self._exit_close(pos, current_price, pnl_pct, exit_reason)
+            return
+
         wrote_24h = False
         existing = {
             "price_5m_sol": pos["price_5m_sol"], "price_30m_sol": pos["price_30m_sol"],
@@ -140,6 +177,43 @@ class MilestoneSnapshotter:
         }
         await self.alert_bus.put(alert)
         logger.info("paper_position_closed", id=pos["id"], pnl=round(final_pnl, 2))
+
+    async def _exit_close(self, pos, exit_price, final_pnl, close_reason):
+        """Close a position via the new exit policy (SL / trail / time)."""
+        assert self.db.conn is not None
+        now = datetime.now(timezone.utc)
+        await self.db.conn.execute(
+            "UPDATE paper_positions SET status = 'closed', close_reason = ?, "
+            "closed_at = ? WHERE id = ?",
+            (close_reason, now.isoformat(), pos["id"]),
+        )
+        await self.db.conn.commit()
+
+        async with self.db.conn.execute(
+            """SELECT pnl_5m_pct, pnl_30m_pct, pnl_1h_pct, pnl_4h_pct, pnl_24h_pct,
+                      max_favorable_pct, max_adverse_pct FROM paper_positions WHERE id = ?""",
+            (pos["id"],),
+        ) as cur:
+            row = await cur.fetchone()
+
+        alert = {
+            "type": "runner_close",
+            "paper_position_id": pos["id"], "runner_score_id": pos["runner_score_id"],
+            "token_mint": pos["token_mint"], "symbol": pos["symbol"],
+            "verdict": pos["verdict"], "runner_score": pos["runner_score"],
+            "entry_price_sol": pos["entry_price_sol"],
+            "entry_price_usd": pos["entry_price_usd"],
+            "exit_price_sol": exit_price,
+            "close_reason": close_reason,
+            "milestones": {"5m": row[0], "30m": row[1], "1h": row[2],
+                           "4h": row[3], "24h": row[4]},
+            "max_favorable_pct": row[5] or 0.0, "max_adverse_pct": row[6] or 0.0,
+        }
+        await self.alert_bus.put(alert)
+        logger.info(
+            "paper_position_exit",
+            id=pos["id"], reason=close_reason, pnl=round(final_pnl, 2),
+        )
 
     async def _error_close(self, pos):
         assert self.db.conn is not None
