@@ -28,6 +28,7 @@ class MilestoneSnapshotter:
         stop_loss_pct: float = 25.0,
         trail_activate_pct: float = 30.0,
         trail_distance_pct: float = 20.0,
+        trail_breakeven_floor_pct: float = 5.0,
         time_stop_sec: float = 14400.0,
         time_stop_pnl_max: float = 0.0,
     ):
@@ -39,6 +40,7 @@ class MilestoneSnapshotter:
         self.stop_loss_pct = stop_loss_pct
         self.trail_activate_pct = trail_activate_pct
         self.trail_distance_pct = trail_distance_pct
+        self.trail_breakeven_floor_pct = trail_breakeven_floor_pct
         self.time_stop_sec = time_stop_sec
         self.time_stop_pnl_max = time_stop_pnl_max
 
@@ -49,6 +51,10 @@ class MilestoneSnapshotter:
         if current_pnl_pct <= -abs(self.stop_loss_pct):
             return "stopped_out"
         if peak_pnl_pct >= self.trail_activate_pct:
+            # Once trail has armed, never let a winner become a loser:
+            # exit at breakeven floor if pnl falls to/below it.
+            if current_pnl_pct <= self.trail_breakeven_floor_pct:
+                return "trail_breakeven_floor"
             give_back = peak_pnl_pct - current_pnl_pct
             if give_back >= self.trail_distance_pct:
                 return "trail_stop"

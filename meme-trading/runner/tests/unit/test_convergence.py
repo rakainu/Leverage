@@ -198,6 +198,78 @@ async def test_mid_price_is_mean_of_cluster_prices():
 
 
 @pytest.mark.asyncio
+async def test_min2_requires_a_tier_rejects_two_b_tier():
+    """With min_wallets=2 and require_a_tier_when_min=2, two B-tier wallets
+    must NOT fire a signal — guards against low-precision clusters."""
+    tier_cache = _StubTierCache({"B1": Tier.B, "B2": Tier.B})
+    ev_bus: asyncio.Queue = asyncio.Queue()
+    sig_bus: asyncio.Queue = asyncio.Queue()
+
+    det = ConvergenceDetector(
+        event_bus=ev_bus,
+        signal_bus=sig_bus,
+        tier_cache=tier_cache,
+        min_wallets=2,
+        window_minutes=45,
+    )
+
+    base = datetime(2026, 4, 14, 12, 0, tzinfo=timezone.utc)
+    await det._process(_ev("s1", "B1", "TOKEN", base))
+    await det._process(_ev("s2", "B2", "TOKEN", base + timedelta(minutes=10)))
+
+    assert sig_bus.empty()
+
+
+@pytest.mark.asyncio
+async def test_min2_fires_when_one_a_tier_present():
+    """With min_wallets=2, one A-tier + one B-tier should fire a signal."""
+    tier_cache = _StubTierCache({"A1": Tier.A, "B1": Tier.B})
+    ev_bus: asyncio.Queue = asyncio.Queue()
+    sig_bus: asyncio.Queue = asyncio.Queue()
+
+    det = ConvergenceDetector(
+        event_bus=ev_bus,
+        signal_bus=sig_bus,
+        tier_cache=tier_cache,
+        min_wallets=2,
+        window_minutes=45,
+    )
+
+    base = datetime(2026, 4, 14, 12, 0, tzinfo=timezone.utc)
+    await det._process(_ev("s1", "A1", "TOKEN", base))
+    await det._process(_ev("s2", "B1", "TOKEN", base + timedelta(minutes=10)))
+
+    sig = sig_bus.get_nowait()
+    assert sig.wallet_count == 2
+    assert sig.tier_counts == {"A": 1, "B": 1}
+
+
+@pytest.mark.asyncio
+async def test_min3_does_not_enforce_a_tier_rule():
+    """At min_wallets=3 (above the require_a_tier_when_min threshold of 2),
+    a cluster of 3 B-tier wallets is allowed."""
+    tier_cache = _StubTierCache({"B1": Tier.B, "B2": Tier.B, "B3": Tier.B})
+    ev_bus: asyncio.Queue = asyncio.Queue()
+    sig_bus: asyncio.Queue = asyncio.Queue()
+
+    det = ConvergenceDetector(
+        event_bus=ev_bus,
+        signal_bus=sig_bus,
+        tier_cache=tier_cache,
+        min_wallets=3,
+        window_minutes=45,
+    )
+
+    base = datetime(2026, 4, 14, 12, 0, tzinfo=timezone.utc)
+    await det._process(_ev("s1", "B1", "TOKEN", base))
+    await det._process(_ev("s2", "B2", "TOKEN", base + timedelta(minutes=5)))
+    await det._process(_ev("s3", "B3", "TOKEN", base + timedelta(minutes=10)))
+
+    sig = sig_bus.get_nowait()
+    assert sig.wallet_count == 3
+
+
+@pytest.mark.asyncio
 async def test_picks_up_weights_changes_at_runtime(tmp_path):
     """Editing weights.yaml during runtime changes detection thresholds."""
     from runner.config.weights_loader import WeightsLoader

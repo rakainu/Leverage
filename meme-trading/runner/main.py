@@ -158,6 +158,7 @@ async def _main() -> None:
         stop_loss_pct=float(weights.get("executor.stop_loss_pct", 25)),
         trail_activate_pct=float(weights.get("executor.trail_activate_pct", 30)),
         trail_distance_pct=float(weights.get("executor.trail_distance_pct", 20)),
+        trail_breakeven_floor_pct=float(weights.get("executor.trail_breakeven_floor_pct", 5)),
         time_stop_sec=float(weights.get("executor.time_stop_sec", 14400)),
         time_stop_pnl_max=float(weights.get("executor.time_stop_pnl_max", 0)),
     )

@@ -78,6 +78,15 @@ class ConvergenceDetector:
             return int(self.weights.get("cluster.window_minutes", self._static_window_minutes))
         return self._static_window_minutes
 
+    @property
+    def require_a_tier_when_min(self) -> int:
+        """When min_wallets <= this value, require ≥1 A-tier wallet in cluster.
+        Guards precision at low thresholds so two random B-tier wallets don't
+        fire a signal."""
+        if self.weights is not None:
+            return int(self.weights.get("cluster.require_a_tier_when_min", 2))
+        return 2
+
     async def run(self) -> None:
         logger.info(
             "convergence_start",
@@ -119,6 +128,21 @@ class ConvergenceDetector:
                     needed=self.min_wallets,
                 )
             return
+
+        # Precision guard: at low min_wallets thresholds (default ≤2), require
+        # at least one A-tier wallet in the cluster. Prevents two random
+        # B-tier wallets from triggering a signal.
+        if self.min_wallets <= self.require_a_tier_when_min:
+            has_a_tier = any(
+                self.tier_cache.tier_of(w) == Tier.A for w in distinct_wallets
+            )
+            if not has_a_tier:
+                logger.debug(
+                    "cluster_skipped_no_a_tier",
+                    mint=token,
+                    wallets=len(distinct_wallets),
+                )
+                return
 
         cluster_key = frozenset(distinct_wallets)
         if cluster_key in self._signaled[token]:

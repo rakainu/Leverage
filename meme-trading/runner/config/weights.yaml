@@ -1,6 +1,12 @@
 cluster:
-  min_wallets: 3
-  window_minutes: 30
+  # Lowered 2026-04-14 (min 3→2, window 30→45) to fix convergence famine:
+  # after TierRebuilder tiered wallets properly, only 13 A-tier wallets remain
+  # and ≥3 converging inside 30min is near-impossible. `require_a_tier_when_min`
+  # guards precision: when min_wallets <= this threshold, at least 1 A-tier
+  # wallet must be part of the cluster.
+  min_wallets: 2
+  window_minutes: 45
+  require_a_tier_when_min: 2
   speed_bonus_sweet_spot_min: 10
   speed_bonus_sweet_spot_max: 20
 
@@ -21,9 +27,12 @@ weights:
   narrative: 0.05
 
 verdict_thresholds:
-  watch: 40
-  strong_candidate: 60
-  probable_runner: 78
+  # Lowered 2026-04-14 (watch 40→35, strong 60→55, probable 78→72) temporarily
+  # to grow the OutcomeTracker dataset while we're still tuning weights.
+  # Revisit after ≥50 paper positions close.
+  watch: 35
+  strong_candidate: 55
+  probable_runner: 72
 
 position_sizing:
   strong_candidate_sol: 0.25
@@ -64,6 +73,11 @@ executor:
   # then exits when pnl drops trail_distance_pct below the peak
   trail_activate_pct: 30.0
   trail_distance_pct: 20.0
+  # Breakeven floor (2026-04-14, ported from smc): once the trail has armed
+  # (peak >= trail_activate_pct), never let the position become a loser —
+  # exit if pnl drops at or below trail_breakeven_floor_pct regardless of
+  # the giveback rule.
+  trail_breakeven_floor_pct: 5.0
   # Time stop: close any underwater position after this many seconds
   # (default 4h — milestone snapshot still records 4h pnl before close)
   time_stop_sec: 14400
