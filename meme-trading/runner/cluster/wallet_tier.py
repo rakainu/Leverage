@@ -7,6 +7,10 @@ from runner.db.database import Database
 class Tier(Enum):
     A = ("A", 100)
     B = ("B", 60)
+    # S = shadow: GMGN-vetted wallet under observation. Not counted in
+    # convergence clusters (same as C). Promoted to A/B/C by TierRebuilder
+    # after observing enough on-chain trades on our own infra.
+    S = ("S", 0)
     C = ("C", 0)
     U = ("U", 40)
 

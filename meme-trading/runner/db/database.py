@@ -46,13 +46,17 @@ class Database:
             await self.conn.commit()
 
         # Migration 2: expand paper_positions.close_reason CHECK to include
-        # exit-policy values (stopped_out, trail_stop, time_stop).
+        # exit-policy values (stopped_out, trail_stop, trail_breakeven_floor, time_stop).
         async with self.conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='paper_positions'"
         ) as cur:
             row = await cur.fetchone()
         existing_sql = row[0] if row else ""
-        if existing_sql and "stopped_out" not in existing_sql:
+        needs_paper_rebuild = existing_sql and (
+            "stopped_out" not in existing_sql
+            or "trail_breakeven_floor" not in existing_sql
+        )
+        if needs_paper_rebuild:
             await self.conn.executescript(
                 """
                 PRAGMA foreign_keys=OFF;
@@ -79,7 +83,8 @@ class Database:
                     max_adverse_pct REAL DEFAULT 0.0,
                     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
                     close_reason TEXT CHECK (close_reason IN
-                        ('completed', 'error', 'stopped_out', 'trail_stop', 'time_stop')),
+                        ('completed', 'error', 'stopped_out', 'trail_stop',
+                         'trail_breakeven_floor', 'time_stop')),
                     opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     closed_at TIMESTAMP,
                     notes_json TEXT,
@@ -90,6 +95,45 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_paper_positions_mint ON paper_positions(token_mint);
                 CREATE INDEX IF NOT EXISTS idx_paper_positions_status ON paper_positions(status);
                 CREATE INDEX IF NOT EXISTS idx_paper_positions_verdict ON paper_positions(verdict);
+                COMMIT;
+                PRAGMA foreign_keys=ON;
+                """
+            )
+            await self.conn.commit()
+
+        # Migration 3: add `source_stage` column + expand wallet_tiers CHECK
+        # to include 'S' (shadow) tier for GMGN vetting funnel.
+        async with self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='wallet_tiers'"
+        ) as cur:
+            row = await cur.fetchone()
+        wt_sql = row[0] if row else ""
+        needs_wt_rebuild = wt_sql and (
+            "'S'" not in wt_sql or "source_stage" not in wt_sql
+        )
+        if needs_wt_rebuild:
+            await self.conn.executescript(
+                """
+                PRAGMA foreign_keys=OFF;
+                BEGIN;
+                ALTER TABLE wallet_tiers RENAME TO wallet_tiers__old;
+                CREATE TABLE wallet_tiers (
+                    wallet_address TEXT PRIMARY KEY,
+                    tier TEXT NOT NULL CHECK (tier IN ('A', 'B', 'C', 'S', 'U')),
+                    win_rate REAL,
+                    trade_count INTEGER DEFAULT 0,
+                    pnl_sol REAL DEFAULT 0,
+                    source TEXT,
+                    source_stage TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO wallet_tiers
+                    (wallet_address, tier, win_rate, trade_count, pnl_sol, source, updated_at)
+                    SELECT wallet_address, tier, win_rate, trade_count, pnl_sol, source, updated_at
+                    FROM wallet_tiers__old;
+                DROP TABLE wallet_tiers__old;
+                CREATE INDEX IF NOT EXISTS idx_wallet_tiers_tier ON wallet_tiers(tier);
+                CREATE INDEX IF NOT EXISTS idx_wallet_tiers_source_stage ON wallet_tiers(source_stage);
                 COMMIT;
                 PRAGMA foreign_keys=ON;
                 """

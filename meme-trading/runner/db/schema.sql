@@ -15,17 +15,19 @@ CREATE TABLE IF NOT EXISTS buy_events (
 CREATE INDEX IF NOT EXISTS idx_buy_events_mint_time ON buy_events(token_mint, block_time);
 CREATE INDEX IF NOT EXISTS idx_buy_events_wallet_time ON buy_events(wallet_address, block_time);
 
--- Wallet tiers rebuilt nightly.
+-- Wallet tiers rebuilt nightly. 'S' = shadow (GMGN-vetted, under observation).
 CREATE TABLE IF NOT EXISTS wallet_tiers (
     wallet_address TEXT PRIMARY KEY,
-    tier TEXT NOT NULL CHECK (tier IN ('A', 'B', 'C', 'U')),
+    tier TEXT NOT NULL CHECK (tier IN ('A', 'B', 'C', 'S', 'U')),
     win_rate REAL,
     trade_count INTEGER DEFAULT 0,
     pnl_sol REAL DEFAULT 0,
     source TEXT,
+    source_stage TEXT,  -- 'shadow' | 'active' | NULL  (GMGN funnel stage)
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_wallet_tiers_tier ON wallet_tiers(tier);
+CREATE INDEX IF NOT EXISTS idx_wallet_tiers_source_stage ON wallet_tiers(source_stage);
 
 -- Flattened wallet trade history used by tier rebuilder.
 CREATE TABLE IF NOT EXISTS wallet_trades (
@@ -110,7 +112,7 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     max_favorable_pct REAL DEFAULT 0.0,
     max_adverse_pct REAL DEFAULT 0.0,
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
-    close_reason TEXT CHECK (close_reason IN ('completed', 'error', 'stopped_out', 'trail_stop', 'time_stop')),
+    close_reason TEXT CHECK (close_reason IN ('completed', 'error', 'stopped_out', 'trail_stop', 'trail_breakeven_floor', 'time_stop')),
     opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     closed_at TIMESTAMP,
     notes_json TEXT,
@@ -157,9 +159,43 @@ CREATE TABLE IF NOT EXISTS token_outcomes (
 CREATE INDEX IF NOT EXISTS idx_token_outcomes_peak ON token_outcomes(peak_mcap_usd DESC);
 CREATE INDEX IF NOT EXISTS idx_token_outcomes_verdict ON token_outcomes(best_verdict);
 
+-- GMGN candidate funnel — every scraped wallet lands here first and moves
+-- through vetting stages before joining the active pool.
+CREATE TABLE IF NOT EXISTS gmgn_candidates (
+    wallet_address TEXT PRIMARY KEY,
+    raw_json TEXT NOT NULL,                    -- full Apify payload
+    composite_score REAL,                      -- from GMGNRanker
+    source_query TEXT,                         -- which GMGN query surfaced it
+    -- Funnel stages
+    stage TEXT NOT NULL DEFAULT 'raw' CHECK (stage IN (
+        'raw', 'stage2_passed', 'stage3_passed', 'stage4_passed',
+        'shadow', 'approval_pending', 'active', 'rejected'
+    )),
+    stage_reason TEXT,                         -- e.g. "low_winrate_7d_30pct"
+    helius_verified INTEGER DEFAULT 0,
+    helius_closed_trades INTEGER,
+    helius_win_rate REAL,
+    helius_pnl_sol REAL,
+    helius_tier TEXT,                          -- tier we'd compute from on-chain
+    behavioral_pass INTEGER,                   -- 1/0/NULL
+    behavioral_reason TEXT,
+    shadow_started_at TIMESTAMP,
+    shadow_observed_trades INTEGER DEFAULT 0,
+    consensus_buy_mint TEXT,                   -- mint where consensus fired
+    consensus_fired_at TIMESTAMP,
+    approved_by TEXT,                          -- 'rich_manual' | 'auto' | NULL
+    approved_at TIMESTAMP,
+    rejected_at TIMESTAMP,
+    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_gmgn_candidates_stage ON gmgn_candidates(stage);
+CREATE INDEX IF NOT EXISTS idx_gmgn_candidates_seen ON gmgn_candidates(first_seen_at);
+
 -- Schema migration marker.
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,
     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+INSERT OR IGNORE INTO schema_version (version) VALUES (2);  -- gmgn_candidates + S tier

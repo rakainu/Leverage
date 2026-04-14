@@ -91,3 +91,39 @@ cooldowns:
 outcomes:
   poll_interval_sec: 300       # Poll DexScreener for every scored mint every 5 min
   moonshot_mcap_usd: 1000000   # FDV threshold that triggers a moonshot Telegram alert
+
+gmgn_discovery:
+  # Rich's requirement (2026-04-14): every GMGN-discovered wallet must pass
+  # multi-stage vetting before joining the active pool. See
+  # runner/curation/wallet_vetting.py for the funnel.
+  enabled: false               # flip to true after APIFY token verified on VPS
+  interval_hours: 24
+  cap_new_per_run: 20          # max new raw candidates admitted per cycle
+  cap_active_pool: 150         # soft cap on total active wallets
+  require_manual_approval: true  # graduating from shadow → active needs Rich's ack
+  gmgn_filters:
+    min_composite_score: 70.0
+    min_7d_winrate: 0.55
+    min_30d_winrate: 0.50
+    min_7d_pnl_usd: 3000
+    min_trade_count_30d: 20
+    max_trade_count_30d: 500
+    max_avg_hold_minutes: 240
+    max_largest_trade_pct_of_pnl: 0.70
+    min_realized_to_unrealized_ratio: 0.50
+    require_age_days: 30
+  helius_verify:
+    min_closed_trades: 15
+    min_winrate: 0.45
+    min_pnl_sol: 20
+    required_tier: B            # our own tier math must compute to A or B
+  behavioral:
+    max_single_token_pct: 0.80
+    max_hf_burst_pct: 0.50
+    max_top3_pnl_pct: 0.90
+  shadow:
+    enabled: true
+    min_trades: 10
+    min_days: 2
+    max_days: 7
+    require_consensus_buy: true  # shadow wallet must co-buy with A-tier once

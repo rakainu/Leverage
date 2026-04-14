@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     enable_executor: bool = True
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    # GMGN/Apify (optional — only needed when gmgn_discovery.enabled=true)
+    apify_api_token: str = ""
 
 
 _cached: Settings | None = None

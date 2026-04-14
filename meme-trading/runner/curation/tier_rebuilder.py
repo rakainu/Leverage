@@ -117,6 +117,45 @@ class TierRebuilder:
             except Exception as e:  # noqa: BLE001
                 logger.error("tier_rebuilder_failed", error=str(e))
 
+    async def verify_single_wallet(self, wallet: str) -> dict[str, Any]:
+        """Run the same trade-pairing + tier math on one wallet WITHOUT writing
+        it to wallet_tiers. Used by the GMGN vetting funnel (Stage 3) to check
+        a candidate against our own on-chain ground truth before admitting it
+        to the active pool.
+
+        Returns {closed_trades, win_rate, pnl_sol, tier, pairs}.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=int(self.weights.get("wallet_tier.rolling_window_days", 30))
+        )
+        try:
+            pairs = await self._gather_pairs_for_wallet(wallet, cutoff)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("verify_single_wallet_failed", wallet=wallet, error=str(e))
+            return {
+                "closed_trades": 0, "win_rate": 0.0,
+                "pnl_sol": 0.0, "tier": "U", "pairs": [],
+            }
+        n = len(pairs)
+        wins = sum(1 for p in pairs if p.is_win)
+        wr = wins / n if n else 0.0
+        pnl_sum = sum(p.pnl_sol for p in pairs)
+        a_wr = float(self.weights.get("wallet_tier.a_tier_win_rate", 0.60))
+        b_wr = float(self.weights.get("wallet_tier.b_tier_win_rate", 0.35))
+        min_trades = int(self.weights.get("wallet_tier.a_tier_min_trades", 5))
+        if n < min_trades:
+            tier = "U"
+        elif wr >= a_wr:
+            tier = "A"
+        elif wr >= b_wr:
+            tier = "B"
+        else:
+            tier = "C"
+        return {
+            "closed_trades": n, "win_rate": wr,
+            "pnl_sol": pnl_sum, "tier": tier, "pairs": pairs,
+        }
+
     async def rebuild_now(self) -> dict[str, int]:
         wallets = sorted(self.registry.active_addresses())
         cutoff = datetime.now(timezone.utc) - timedelta(

@@ -20,7 +20,9 @@ from runner.filters.pipeline import FilterPipeline
 from runner.filters.rug_gate import RugGate
 from runner.ingest.rpc_pool import RpcPool
 from runner.cluster.wallet_tracker import WalletRegistryTracker
+from runner.curation.gmgn_scheduler import GMGNScheduler
 from runner.curation.tier_rebuilder import TierRebuilder
+from runner.curation.wallet_vetting import WalletVetter
 from runner.executor.paper import PaperExecutor
 from runner.executor.snapshotter import MilestoneSnapshotter
 from runner.outcomes.tracker import OutcomeTracker
@@ -178,6 +180,27 @@ async def _main() -> None:
         moonshot_mcap_usd=float(weights.get("outcomes.moonshot_mcap_usd", 1_000_000)),
     )
 
+    # GMGN discovery + vetting funnel (disabled by default in weights.yaml).
+    # Apify client is optional — only imported if gmgn_discovery.enabled=true
+    # and token is present, so legacy deploys keep booting cleanly.
+    gmgn_scheduler: GMGNScheduler | None = None
+    if bool(weights.get("gmgn_discovery.enabled", False)):
+        apify_token = getattr(settings, "apify_api_token", None) or None
+        if not apify_token:
+            logger.warning("gmgn_discovery_enabled_but_no_apify_token")
+        else:
+            try:
+                from curation.apify_gmgn import ApifyGMGNClient
+                from curation.gmgn_ranker import GMGNRanker
+                apify_client = ApifyGMGNClient(apify_token)
+                vetter = WalletVetter(db=db, tier_rebuilder=tier_rebuilder, weights=weights)
+                gmgn_scheduler = GMGNScheduler(
+                    db=db, weights=weights, vetter=vetter,
+                    apify_client=apify_client, ranker=GMGNRanker(),
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("gmgn_scheduler_init_failed", error=str(e))
+
     dashboard_app = create_app(db)
 
     logger.info(
@@ -199,7 +222,7 @@ async def _main() -> None:
     )
 
     try:
-        results = await asyncio.gather(
+        tasks = [
             _supervise(monitor.run, "wallet_monitor", logger),
             _supervise(detector.run, "convergence_detector", logger),
             _supervise(enricher.run, "enricher", logger),
@@ -212,14 +235,16 @@ async def _main() -> None:
             _supervise(tier_rebuilder.run, "tier_rebuilder", logger),
             _supervise(wallet_tracker.run, "wallet_tracker", logger),
             _supervise(lambda: _run_dashboard(dashboard_app, logger), "dashboard", logger),
-            return_exceptions=True,
-        )
-        for name, result in zip(
-            ["monitor", "detector", "enricher", "filter_pipeline", "scoring_engine",
-             "paper_executor", "milestone_snapshotter", "telegram_alerter",
-             "outcome_tracker", "tier_rebuilder", "wallet_tracker", "dashboard"],
-            results,
-        ):
+        ]
+        names = ["monitor", "detector", "enricher", "filter_pipeline", "scoring_engine",
+                 "paper_executor", "milestone_snapshotter", "telegram_alerter",
+                 "outcome_tracker", "tier_rebuilder", "wallet_tracker", "dashboard"]
+        if gmgn_scheduler is not None:
+            tasks.append(_supervise(gmgn_scheduler.run, "gmgn_scheduler", logger))
+            names.append("gmgn_scheduler")
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for name, result in zip(names, results):
             if isinstance(result, Exception):
                 logger.error("task_exited_with_exception", task=name, error=str(result))
     finally:
