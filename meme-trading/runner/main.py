@@ -20,6 +20,7 @@ from runner.filters.pipeline import FilterPipeline
 from runner.filters.rug_gate import RugGate
 from runner.ingest.rpc_pool import RpcPool
 from runner.cluster.wallet_tracker import WalletRegistryTracker
+from runner.curation.tier_rebuilder import TierRebuilder
 from runner.executor.paper import PaperExecutor
 from runner.executor.snapshotter import MilestoneSnapshotter
 from runner.outcomes.tracker import OutcomeTracker
@@ -163,6 +164,11 @@ async def _main() -> None:
     telegram = TelegramAlerter(
         alert_bus=alert_bus, bot_token=settings.telegram_bot_token, chat_id=settings.telegram_chat_id,
     )
+    tier_rebuilder = TierRebuilder(
+        db=db, http=http, registry=registry, weights=weights,
+        helius_rpc_url=settings.helius_rpc_url, tier_cache=tier_cache,
+        run_on_startup=True,
+    )
     outcome_tracker = OutcomeTracker(
         db=db,
         http=http,
@@ -202,6 +208,7 @@ async def _main() -> None:
             _supervise(snapshotter.run, "milestone_snapshotter", logger),
             _supervise(telegram.run, "telegram_alerter", logger),
             _supervise(outcome_tracker.run, "outcome_tracker", logger),
+            _supervise(tier_rebuilder.run, "tier_rebuilder", logger),
             _supervise(wallet_tracker.run, "wallet_tracker", logger),
             _supervise(lambda: _run_dashboard(dashboard_app, logger), "dashboard", logger),
             return_exceptions=True,
@@ -209,7 +216,7 @@ async def _main() -> None:
         for name, result in zip(
             ["monitor", "detector", "enricher", "filter_pipeline", "scoring_engine",
              "paper_executor", "milestone_snapshotter", "telegram_alerter",
-             "outcome_tracker", "wallet_tracker", "dashboard"],
+             "outcome_tracker", "tier_rebuilder", "wallet_tracker", "dashboard"],
             results,
         ):
             if isinstance(result, Exception):
