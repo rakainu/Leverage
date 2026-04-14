@@ -190,8 +190,8 @@ async def _main() -> None:
             logger.warning("gmgn_discovery_enabled_but_no_apify_token")
         else:
             try:
-                from curation.apify_gmgn import ApifyGMGNClient
-                from curation.gmgn_ranker import GMGNRanker
+                from runner.curation.apify_gmgn import ApifyGMGNClient
+                from runner.curation.gmgn_ranker import GMGNRanker
                 apify_client = ApifyGMGNClient(apify_token)
                 vetter = WalletVetter(db=db, tier_rebuilder=tier_rebuilder, weights=weights)
                 gmgn_scheduler = GMGNScheduler(
