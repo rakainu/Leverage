@@ -133,12 +133,18 @@ class Database:
                     FROM wallet_tiers__old;
                 DROP TABLE wallet_tiers__old;
                 CREATE INDEX IF NOT EXISTS idx_wallet_tiers_tier ON wallet_tiers(tier);
-                CREATE INDEX IF NOT EXISTS idx_wallet_tiers_source_stage ON wallet_tiers(source_stage);
                 COMMIT;
                 PRAGMA foreign_keys=ON;
                 """
             )
             await self.conn.commit()
+        # Always ensure the source_stage index — safe since source_stage
+        # exists after migration or on fresh deploys.
+        await self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_wallet_tiers_source_stage "
+            "ON wallet_tiers(source_stage)"
+        )
+        await self.conn.commit()
 
     async def close(self) -> None:
         if self.conn is not None:

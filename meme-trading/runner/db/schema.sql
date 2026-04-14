@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS wallet_tiers (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_wallet_tiers_tier ON wallet_tiers(tier);
-CREATE INDEX IF NOT EXISTS idx_wallet_tiers_source_stage ON wallet_tiers(source_stage);
+-- idx_wallet_tiers_source_stage is created by migration 3 after source_stage
+-- column is ensured. Creating it here fails on existing deployments where
+-- the table predates the new column.
 
 -- Flattened wallet trade history used by tier rebuilder.
 CREATE TABLE IF NOT EXISTS wallet_trades (
