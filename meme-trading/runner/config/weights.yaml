@@ -97,17 +97,21 @@ gmgn_discovery:
   # multi-stage vetting before joining the active pool. See
   # runner/curation/wallet_vetting.py for the funnel.
   enabled: false               # flip to true after APIFY token verified on VPS
-  interval_hours: 24
+  interval_hours: 2            # aggressive while tuning; move to 12-24 once stable
   cap_new_per_run: 20          # max new raw candidates admitted per cycle
   cap_active_pool: 150         # soft cap on total active wallets
   require_manual_approval: true  # graduating from shadow → active needs Rich's ack
   gmgn_filters:
+    # Calibrated 2026-04-14 after first discovery cycle rejected 20/20 —
+    # memecoin scalpers legitimately do 1k-5k trades/mo; 500 was too tight.
+    # 10k still catches clear bots. Winrate floors loosened slightly so
+    # Helius verification (Stage 3) remains the tighter gate.
     min_composite_score: 70.0
-    min_7d_winrate: 0.55
-    min_30d_winrate: 0.50
+    min_7d_winrate: 0.50
+    min_30d_winrate: 0.45
     min_7d_pnl_usd: 3000
     min_trade_count_30d: 20
-    max_trade_count_30d: 500
+    max_trade_count_30d: 10000
     max_avg_hold_minutes: 240
     max_largest_trade_pct_of_pnl: 0.70
     min_realized_to_unrealized_ratio: 0.50
