@@ -5,10 +5,10 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .blofin_client import BloFinClient, build_ccxt_client
 from .config import Settings, load_config
@@ -25,6 +25,44 @@ from .tg_commander import TelegramCommander
 log = logging.getLogger(__name__)
 
 
+def _parse_tolerant_float(v: Any) -> Optional[float]:
+    """Parse TV-style numeric fields tolerantly:
+      - None / "" / placeholder like "{{close}}" → None
+      - numeric or numeric-looking string → float
+      - anything else → None (logged by caller if desired)
+    """
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        # Unsubstituted TradingView placeholder like "{{close}}"
+        if s.startswith("{{") and s.endswith("}}"):
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_tolerant_str(v: Any) -> Optional[str]:
+    """Null-out empty / placeholder strings."""
+    if v is None:
+        return None
+    if not isinstance(v, str):
+        return str(v)
+    s = v.strip()
+    if not s:
+        return None
+    if s.startswith("{{") and s.endswith("}}"):
+        return None
+    return s
+
+
 class WebhookPayload(BaseModel):
     secret: str
     symbol: str
@@ -33,6 +71,22 @@ class WebhookPayload(BaseModel):
         "reversal_buy", "reversal_sell",
     ]
     source: str = Field(default="pro_v3")
+    # --- optional snapshot fields from TradingView (all tolerant) ---
+    price: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    timeframe: Optional[str] = None
+    timestamp: Optional[str] = None
+
+    @field_validator("price", "high", "low", mode="before")
+    @classmethod
+    def _coerce_numeric(cls, v):
+        return _parse_tolerant_float(v)
+
+    @field_validator("timeframe", "timestamp", mode="before")
+    @classmethod
+    def _coerce_string(cls, v):
+        return _parse_tolerant_str(v)
 
 
 def _build_blofin_client(settings: Settings) -> BloFinClient:
@@ -94,6 +148,13 @@ def create_app() -> FastAPI:
             "trail_distance_usdt": settings.defaults.trail_distance_usdt,
             "tp_limit_margin_pct": settings.defaults.tp_limit_margin_pct,
             "ema_retest_timeout_minutes": settings.defaults.ema_retest_timeout_minutes,
+            # --- snapshot / revalidation config (2026-04-16) ---
+            "ema_retest_period": settings.defaults.ema_retest_period,
+            "ema_retest_timeframe": settings.defaults.ema_retest_timeframe,
+            "atr_length": settings.defaults.atr_length,
+            "ema_slope_lookback": settings.defaults.ema_slope_lookback,
+            "max_signal_age_seconds": settings.defaults.max_signal_age_seconds,
+            "max_signal_bars": settings.defaults.max_signal_bars,
         }
         for name, sc in settings.symbols.items()
     }
@@ -115,6 +176,15 @@ def create_app() -> FastAPI:
         ema_retest_period=settings.defaults.ema_retest_period,
         ema_retest_timeframe=settings.defaults.ema_retest_timeframe,
         ema_retest_max_overshoot_pct=settings.defaults.ema_retest_max_overshoot_pct,
+        max_signal_age_seconds=settings.defaults.max_signal_age_seconds,
+        max_signal_bars=settings.defaults.max_signal_bars,
+        max_price_drift_percent=settings.defaults.max_price_drift_percent,
+        use_atr_drift_filter=settings.defaults.use_atr_drift_filter,
+        max_price_drift_atr=settings.defaults.max_price_drift_atr,
+        require_retest_confirmation_candle=settings.defaults.require_retest_confirmation_candle,
+        cancel_on_slope_flip=settings.defaults.cancel_on_slope_flip,
+        atr_length=settings.defaults.atr_length,
+        ema_slope_lookback=settings.defaults.ema_slope_lookback,
         symbol_configs=symbol_configs,
         gate=gate,
     )
@@ -177,6 +247,10 @@ def create_app() -> FastAPI:
                 action=payload.action, symbol=payload.symbol,
                 store=store, blofin=blofin, symbol_configs=symbol_configs,
                 gate=gate,
+                payload_price=payload.price,
+                payload_high=payload.high,
+                payload_low=payload.low,
+                payload_timeframe=payload.timeframe,
             )
             store.mark_event_handled(event_id, outcome="ok", error_msg=None)
 

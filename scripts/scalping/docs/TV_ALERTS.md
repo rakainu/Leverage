@@ -1,11 +1,12 @@
-# TradingView alert setup for Pro V3 → BloFin bridge
+# TradingView alert setup for Pro V3 → Scalping bridge
 
-Configure 8 alerts on the SOLUSDT.P chart in TradingView, one per Pro V3 condition.
-Each alert uses the same webhook URL and a hard-coded JSON body.
+Configure 5 alerts on the SOLUSDT.P chart in TradingView, one per Pro V3 action.
+Each alert uses the same webhook URL and a JSON message body with TradingView
+placeholders — the bridge parses them tolerantly.
 
 ## Prereqs
 
-- Chart: `BLOFIN:SOLUSDT.P`
+- Chart: `BLOFIN:SOLUSDT.P` (or `BLOFIN:ZECUSDT.P`)
 - Indicator: **Pro V3 [SMRT Algo]** applied to the chart
 - TradingView plan with webhook alerts (Essential or higher)
 - Bridge deployed and healthy at `https://blofin-bridge.srv1370094.hstgr.cloud`
@@ -16,6 +17,20 @@ Each alert uses the same webhook URL and a hard-coded JSON body.
 ```
 https://blofin-bridge.srv1370094.hstgr.cloud/webhook/pro-v3
 ```
+
+## The action names accepted by the router
+
+These are the **only** action names the bridge currently recognizes. Anything else returns 400.
+
+| action           | purpose                            |
+|------------------|------------------------------------|
+| `buy`            | open long (queues for EMA retest)  |
+| `sell`           | open short (queues for EMA retest) |
+| `sl`             | close any open position immediately |
+| `reversal_buy`   | SL current + queue new long         |
+| `reversal_sell`  | SL current + queue new short        |
+
+There is **no `close` action**. Use `sl` to close.
 
 ## Steps per alert
 
@@ -32,59 +47,112 @@ https://blofin-bridge.srv1370094.hstgr.cloud/webhook/pro-v3
    - Replace `<BRIDGE_SECRET>` with your actual secret (the value from `.env` on the `BRIDGE_SECRET=` line)
 7. Click **Create**
 
-## The 8 alerts
+## The 5 alert JSON bodies
 
-Create one alert per row. Every message body is a single JSON line — do not add line breaks.
+The bridge uses the extra `price`, `high`, `low`, `timeframe`, and `timestamp`
+fields to capture a **signal snapshot** so it can later validate whether the
+setup is still intact when price retests EMA(9). These fields are optional —
+if TradingView fails to substitute a placeholder, the bridge will fall back
+to live market data.
 
-| # | Pro V3 condition | Message body (copy verbatim, replace `<BRIDGE_SECRET>`) |
-|---|---|---|
-| 1 | **Buy** | `{"secret":"<BRIDGE_SECRET>","symbol":"SOL-USDT","action":"buy","source":"pro_v3"}` |
-| 2 | **Sell** | `{"secret":"<BRIDGE_SECRET>","symbol":"SOL-USDT","action":"sell","source":"pro_v3"}` |
-| 3 | **TP1** | `{"secret":"<BRIDGE_SECRET>","symbol":"SOL-USDT","action":"tp1","source":"pro_v3"}` |
-| 4 | **TP2** | `{"secret":"<BRIDGE_SECRET>","symbol":"SOL-USDT","action":"tp2","source":"pro_v3"}` |
-| 5 | **TP3** | `{"secret":"<BRIDGE_SECRET>","symbol":"SOL-USDT","action":"tp3","source":"pro_v3"}` |
-| 6 | **SL** | `{"secret":"<BRIDGE_SECRET>","symbol":"SOL-USDT","action":"sl","source":"pro_v3"}` |
-| 7 | **Reversal Buy** | `{"secret":"<BRIDGE_SECRET>","symbol":"SOL-USDT","action":"reversal_buy","source":"pro_v3"}` |
-| 8 | **Reversal Sell** | `{"secret":"<BRIDGE_SECRET>","symbol":"SOL-USDT","action":"reversal_sell","source":"pro_v3"}` |
+### Buy
+```json
+{"secret":"<BRIDGE_SECRET>","action":"buy","symbol":"SOL-USDT","timestamp":"{{timenow}}","price":"{{close}}","high":"{{high}}","low":"{{low}}","timeframe":"{{interval}}","source":"pro_v3"}
+```
 
-**Important:** `symbol` in the message body is `SOL-USDT` (dash, not slash, no `.P` suffix) — that's BloFin's canonical instrument id. TradingView's symbol (`BLOFIN:SOLUSDT.P`) is unrelated to what the bridge uses; the bridge only reads the `symbol` field from the JSON body.
+### Sell
+```json
+{"secret":"<BRIDGE_SECRET>","action":"sell","symbol":"SOL-USDT","timestamp":"{{timenow}}","price":"{{close}}","high":"{{high}}","low":"{{low}}","timeframe":"{{interval}}","source":"pro_v3"}
+```
+
+### SL (close any open position)
+```json
+{"secret":"<BRIDGE_SECRET>","action":"sl","symbol":"SOL-USDT","timestamp":"{{timenow}}","source":"pro_v3"}
+```
+
+### Reversal Buy
+```json
+{"secret":"<BRIDGE_SECRET>","action":"reversal_buy","symbol":"SOL-USDT","timestamp":"{{timenow}}","price":"{{close}}","high":"{{high}}","low":"{{low}}","timeframe":"{{interval}}","source":"pro_v3"}
+```
+
+### Reversal Sell
+```json
+{"secret":"<BRIDGE_SECRET>","action":"reversal_sell","symbol":"SOL-USDT","timestamp":"{{timenow}}","price":"{{close}}","high":"{{high}}","low":"{{low}}","timeframe":"{{interval}}","source":"pro_v3"}
+```
+
+**Important:** `symbol` in the message body is `SOL-USDT` (dash, not slash, no `.P` suffix) — that's BloFin's canonical instrument id. Change to `ZEC-USDT` on the ZEC chart's alerts.
+
+## Updating existing alerts (migration steps)
+
+If you already have the older alerts (without snapshot fields), you just need to **replace the Message field** on each one:
+
+1. Open the chart in TradingView
+2. Click the Alerts panel (top right ⏰ icon)
+3. For each existing `buy`/`sell`/`reversal_*` alert:
+   a. Right-click → **Edit**
+   b. Go to the **Message** tab
+   c. Delete the old JSON body
+   d. Paste the new JSON body from above (with your `BRIDGE_SECRET` substituted)
+   e. Click **Save**
+4. The Webhook URL stays the same — no changes needed there.
+5. For `sl` alerts, the new payload is slightly simpler (no price/high/low needed) but the old payload also works — updating it is optional.
+
+## Signal lifecycle (what the bridge does now)
+
+1. Pro V3 fires `buy` or `sell` → TV POSTs the JSON body to the bridge
+2. Bridge captures a **signal snapshot**: signal price, candle high/low, EMA(9), EMA slope, ATR, bar timestamp — using your payload values or falling back to market data
+3. Signal becomes a **pending candidate** (not yet a trade)
+4. Poller checks every 2s (all of these can cancel the signal before any trade is placed):
+   - `expired_time_limit` — signal older than `max_signal_age_seconds` (default 900s / 15 min)
+   - `expired_bar_limit` — more than `max_signal_bars` bars elapsed since signal (default 3)
+   - `invalidated_structure_break` — any bar closed below (long) or above (short) the signal candle extreme
+   - `invalidated_slope_flip` — EMA slope flipped against the trade direction
+   - `invalidated_price_drift` — price drifted > 0.35% from signal price, or more than 0.5× ATR
+   - `invalidated_position_open` — you already have a position on this symbol
+5. Once price retests EMA(9), the bridge revalidates one more time (slope, structure, drift, confirmation candle)
+6. Only if **everything** still checks out does the bridge fire the entry — logged as `executed_retest_validated`
 
 ## After creating the alerts
 
-1. Tail the bridge logs to watch webhook arrivals in real time:
+1. Tail the bridge logs:
    ```bash
-   ssh root@46.202.146.30 "docker logs -f blofin-bridge"
+   ssh root@46.202.146.30 "docker logs -f scalping"
    ```
-2. Check bridge state anytime:
+2. Check bridge state:
    ```bash
    curl "https://blofin-bridge.srv1370094.hstgr.cloud/status?secret=<BRIDGE_SECRET>"
    ```
-3. Wait for Pro V3 to fire a real signal. First Buy or Sell should:
-   - Appear in the bridge logs within seconds of firing
-   - Open a position on BloFin demo (visible in the BloFin Demo Trading UI → Futures → Positions)
-   - Return an `opened: true` response visible in the logs
+3. Watch for these structured log lines:
+   - `signal_created id=N buy SOL-USDT ...` — webhook received, snapshot captured
+   - `pending_invalidated id=N ... reason=invalidated_*` — signal killed before entry
+   - `pending_expired id=N ... reason=expired_*` — signal timed out
+   - `pending_retest_seen id=N ...` — price touched EMA, revalidating
+   - `pending_revalidation_failed id=N ... reason=retest_failed_*` — retest came but setup has broken
+   - `pending_revalidation_passed id=N ...` — all checks passed
+   - `executed_retest_validated id=N ...` — entry placed
 
 ## Troubleshooting
 
 - **Webhook doesn't arrive at the bridge:** check the TradingView alert is enabled (the bell icon should be lit) and that your TradingView plan supports webhooks. On free plans, webhook alerts are not available.
 - **Bridge returns 401 "invalid secret":** the `<BRIDGE_SECRET>` in the alert's message body doesn't match the `BRIDGE_SECRET` in the bridge's `.env`. Fix the alert, save.
 - **Bridge returns 400 "bad payload":** the JSON body is malformed — probably a stray curly quote from the browser or a line break. Re-paste from this doc.
+- **Bridge returns 422 "unknown action":** the `action` field has a value the router doesn't recognize. Only `buy`, `sell`, `sl`, `reversal_buy`, `reversal_sell` are accepted.
 - **Bridge returns 423 "symbol frozen":** startup reconciliation found drift between SQLite and BloFin positions. SSH to the VPS and run:
   ```bash
-  ssh root@46.202.146.30 "cd /docker/blofin-bridge && docker compose stop && rm -f data/bridge.db && docker compose up -d"
+  ssh root@46.202.146.30 "cd /docker/scalping && docker compose stop && rm -f data/bridge.db && docker compose up -d"
   ```
   This wipes the bridge state and restarts. Only safe if BloFin has zero open positions on the symbol.
-- **Bridge returns 500 with a BloFin error code:** check `docker logs blofin-bridge --tail 100` for the traceback. The most common issue is the BloFin demo account being in hedge mode; set it to one-way mode in the BloFin Futures settings.
+- **Signals being cancelled too aggressively:** check logs for the reason code. If `invalidated_price_drift` fires too often, raise `max_price_drift_percent` in `config/blofin_bridge.yaml`. If `retest_failed_confirmation` blocks too many good trades, set `require_retest_confirmation_candle: false`.
 
 ## Going live
 
-After you've seen at least two complete Pro V3 cycles flow through the bridge cleanly on demo:
+After you've seen at least two complete clean cycles on demo where a long and a short each ran through `signal_created → pending_retest_seen → executed_retest_validated → SL/trail → closed`:
 
-1. On the VPS, edit `/docker/blofin-bridge/.env`:
+1. On the VPS, edit `/docker/scalping/.env`:
    ```
    BLOFIN_ENV=live
    ```
-2. Drop the margin temporarily as a safety net — edit `/docker/blofin-bridge/config/blofin_bridge.yaml`:
+2. Drop the margin temporarily as a safety net — edit `/docker/scalping/config/blofin_bridge.yaml`:
    ```yaml
    symbols:
      SOL-USDT:
@@ -92,7 +160,7 @@ After you've seen at least two complete Pro V3 cycles flow through the bridge cl
    ```
 3. Restart:
    ```bash
-   ssh root@46.202.146.30 "cd /docker/blofin-bridge && docker compose up -d"
+   ssh root@46.202.146.30 "cd /docker/scalping && docker compose up -d"
    ```
-4. Wait for one full live cycle to complete. Verify on the BloFin live UI.
+4. Wait for one full live cycle. Verify on BloFin live UI.
 5. After two clean live cycles at $10 margin, raise back to `margin_usdt: 100` and restart.

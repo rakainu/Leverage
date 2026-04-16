@@ -16,9 +16,19 @@ defaults:
   # --- EMA retest entry ---
   ema_retest_period: 9        # EMA period (9 = EMA 9)
   ema_retest_timeframe: "5m"  # candle timeframe for EMA
-  ema_retest_timeout_minutes: 30  # cancel if no retest within 30 min
+  ema_retest_timeout_minutes: 15   # wall-clock cap (backup; bar limit is primary)
   ema_retest_max_overshoot_pct: 0.2  # skip entry if price overshoots EMA by > 0.2%
   poll_interval_seconds: 2
+  # --- Signal snapshot + revalidation (5m scalping preset) ---
+  max_signal_age_seconds: 900         # 15 min hard cap
+  max_signal_bars: 3                  # primary: invalidate after 3 bars (~15m @ 5m)
+  max_price_drift_percent: 0.35       # % drift from signal price
+  use_atr_drift_filter: true          # also cap drift by ATR
+  max_price_drift_atr: 0.5            # 0.5 × ATR at signal
+  require_retest_confirmation_candle: true  # demand close-above-EMA (long) / below (short)
+  cancel_on_slope_flip: true          # kill signal if EMA slope flips against trade
+  atr_length: 14
+  ema_slope_lookback: 1
 
 symbols:
   SOL-USDT:

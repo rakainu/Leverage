@@ -39,12 +39,38 @@ class PositionRow:
     source: Optional[str]
 
 
+_PENDING_SNAPSHOT_COLUMNS = (
+    ("signal_timeframe", "TEXT"),
+    ("signal_candle_high", "REAL"),
+    ("signal_candle_low", "REAL"),
+    ("signal_ema_value", "REAL"),
+    ("signal_ema_slope", "REAL"),
+    ("signal_atr", "REAL"),
+    ("signal_bar_ts", "INTEGER"),
+    ("max_age_seconds", "INTEGER"),
+    ("max_bars", "INTEGER"),
+    ("cancel_reason", "TEXT"),
+)
+
+
 class Store:
     def __init__(self, db_path: Path) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA_FILE.read_text())
+            self._migrate_pending_snapshot_columns(c)
+
+    @staticmethod
+    def _migrate_pending_snapshot_columns(c: sqlite3.Connection) -> None:
+        """Idempotent ALTER TABLE migration for pre-snapshot DBs."""
+        existing = {
+            row["name"]
+            for row in c.execute("PRAGMA table_info(pending_signals)").fetchall()
+        }
+        for name, sqltype in _PENDING_SNAPSHOT_COLUMNS:
+            if name not in existing:
+                c.execute(f"ALTER TABLE pending_signals ADD COLUMN {name} {sqltype}")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -226,17 +252,37 @@ class Store:
     def create_pending_signal(
         self, *, symbol: str, action: str, signal_price: float,
         timeout_minutes: int = 30,
+        # --- snapshot fields (all optional for backward-compat) ---
+        signal_timeframe: Optional[str] = None,
+        signal_candle_high: Optional[float] = None,
+        signal_candle_low: Optional[float] = None,
+        signal_ema_value: Optional[float] = None,
+        signal_ema_slope: Optional[float] = None,
+        signal_atr: Optional[float] = None,
+        signal_bar_ts: Optional[int] = None,
+        max_age_seconds: Optional[int] = None,
+        max_bars: Optional[int] = None,
     ) -> int:
+        import datetime as _dt
         now = datetime.now(timezone.utc)
-        expires = now + __import__("datetime").timedelta(minutes=timeout_minutes)
+        expires = now + _dt.timedelta(minutes=timeout_minutes)
         with self._conn() as c:
             cur = c.execute(
                 """
                 INSERT INTO pending_signals
-                  (symbol, action, signal_price, created_at, expires_at, status)
-                VALUES (?, ?, ?, ?, ?, 'pending')
+                  (symbol, action, signal_price, created_at, expires_at, status,
+                   signal_timeframe, signal_candle_high, signal_candle_low,
+                   signal_ema_value, signal_ema_slope, signal_atr,
+                   signal_bar_ts, max_age_seconds, max_bars)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (symbol, action, signal_price, now.isoformat(), expires.isoformat()),
+                (
+                    symbol, action, signal_price,
+                    now.isoformat(), expires.isoformat(),
+                    signal_timeframe, signal_candle_high, signal_candle_low,
+                    signal_ema_value, signal_ema_slope, signal_atr,
+                    signal_bar_ts, max_age_seconds, max_bars,
+                ),
             )
             return cur.lastrowid
 
@@ -247,6 +293,24 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_all_signals(self, limit: int = 200) -> list[dict[str, Any]]:
+        """All signals regardless of status — for audit/debugging."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM pending_signals ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def invalidate_pending_signal(self, sig_id: int, *, reason: str) -> None:
+        """Mark a pending signal invalidated with a reason code."""
+        with self._conn() as c:
+            c.execute(
+                "UPDATE pending_signals SET status = 'invalidated', "
+                "cancel_reason = ? WHERE id = ?",
+                (reason, sig_id),
+            )
+
     def fill_pending_signal(self, sig_id: int, fill_price: float) -> None:
         with self._conn() as c:
             c.execute(
@@ -255,11 +319,12 @@ class Store:
                 (_now_iso(), fill_price, sig_id),
             )
 
-    def expire_pending_signal(self, sig_id: int) -> None:
+    def expire_pending_signal(self, sig_id: int, *, reason: str = "expired_time_limit") -> None:
         with self._conn() as c:
             c.execute(
-                "UPDATE pending_signals SET status = 'expired' WHERE id = ?",
-                (sig_id,),
+                "UPDATE pending_signals SET status = 'expired', cancel_reason = ? "
+                "WHERE id = ?",
+                (reason, sig_id),
             )
 
     def cancel_pending_signals_for_symbol(self, symbol: str) -> int:

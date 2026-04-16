@@ -91,6 +91,16 @@ class Defaults(BaseModel):
     ema_retest_timeout_minutes: int = 30
     ema_retest_max_overshoot_pct: float = 0.2
     poll_interval_seconds: int = 10
+    # --- Signal snapshot + revalidation (2026-04-16) ---
+    max_signal_age_seconds: int = 900            # hard wall-clock cap (15 min)
+    max_signal_bars: int = 3                     # invalidate after N bars
+    max_price_drift_percent: float = 0.35        # % drift from signal price
+    use_atr_drift_filter: bool = True
+    max_price_drift_atr: float = 0.5             # multiple of ATR
+    require_retest_confirmation_candle: bool = True
+    cancel_on_slope_flip: bool = True
+    atr_length: int = 14
+    ema_slope_lookback: int = 1                  # bars back for slope calc
 
     @field_validator("sl_loss_usdt", "breakeven_usdt", "lock_profit_activate_usdt", "lock_profit_usdt", "trail_activate_usdt", "trail_start_usdt", "trail_distance_usdt")
     @classmethod

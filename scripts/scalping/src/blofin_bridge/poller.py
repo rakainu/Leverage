@@ -12,15 +12,35 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from .atr import compute_atr
 from .blofin_client import BloFinClient
-from .ema import compute_ema
+from .ema import compute_ema, compute_ema_slope
 from .entry_gate import EntryGate
 from .handlers.entry import handle_entry, _dollar_to_price_distance
 from .notify import (
     Notifier, format_entry, format_trail_activated, format_trail_update,
     format_pending_filled, format_pending_expired,
 )
+from .signal_validator import (
+    MarketContext, SignalSnapshot, ValidationConfig,
+    check_invalidation, check_retest, check_revalidation,
+)
 from .state import Store
+
+
+# Timeframe string → seconds, for bar-based limits.
+_TIMEFRAME_SECONDS = {
+    "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
+    "1h": 3600, "2h": 7200, "4h": 14400, "1d": 86400,
+    # Some TV servers send just a number.
+    "1": 60, "3": 180, "5": 300, "15": 900, "30": 1800, "60": 3600,
+}
+
+
+def _timeframe_to_seconds(tf: str | None, default: int = 300) -> int:
+    if not tf:
+        return default
+    return _TIMEFRAME_SECONDS.get(tf.strip().lower(), default)
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +69,16 @@ class PositionPoller:
         ema_retest_period: int = 9,
         ema_retest_timeframe: str = "5m",
         ema_retest_max_overshoot_pct: float = 0.2,
+        # --- Signal revalidation config (2026-04-16) ---
+        max_signal_age_seconds: int = 900,
+        max_signal_bars: int = 3,
+        max_price_drift_percent: float = 0.35,
+        use_atr_drift_filter: bool = True,
+        max_price_drift_atr: float = 0.5,
+        require_retest_confirmation_candle: bool = True,
+        cancel_on_slope_flip: bool = True,
+        atr_length: int = 14,
+        ema_slope_lookback: int = 1,
         # Symbol configs for executing pending entries
         symbol_configs: Optional[dict[str, dict[str, Any]]] = None,
         # Operator-initiated per-symbol pause
@@ -70,6 +100,17 @@ class PositionPoller:
         self.ema_retest_period = ema_retest_period
         self.ema_retest_timeframe = ema_retest_timeframe
         self.ema_retest_max_overshoot_pct = ema_retest_max_overshoot_pct
+        # Revalidation config — kept as a single immutable ValidationConfig
+        # instance; per-signal bar_seconds is injected when evaluating.
+        self.max_signal_age_seconds = max_signal_age_seconds
+        self.max_signal_bars = max_signal_bars
+        self.max_price_drift_percent = max_price_drift_percent
+        self.use_atr_drift_filter = use_atr_drift_filter
+        self.max_price_drift_atr = max_price_drift_atr
+        self.require_retest_confirmation_candle = require_retest_confirmation_candle
+        self.cancel_on_slope_flip = cancel_on_slope_flip
+        self.atr_length = atr_length
+        self.ema_slope_lookback = ema_slope_lookback
         self.symbol_configs = symbol_configs or {}
         self.gate = gate
         self._task: Optional[asyncio.Task] = None
@@ -114,93 +155,228 @@ class PositionPoller:
                 log.exception("poller failed for position id=%s", pos.id)
 
     def _process_pending_signals(self) -> None:
-        """Check each pending signal for EMA retest or expiry."""
+        """Three-phase signal pipeline: invalidate → retest → revalidate → enter.
+
+        Every phase emits structured log lines keyed on a reason code so ops
+        can grep for `invalidated_*`, `expired_*`, `retest_failed_*`, or
+        `executed_*` events.
+        """
         signals = self.store.list_pending_signals()
         now = datetime.now(timezone.utc)
 
         for sig in signals:
             try:
-                # Check expiry
-                expires_at = datetime.fromisoformat(sig["expires_at"])
-                if now >= expires_at:
-                    self.store.expire_pending_signal(sig["id"])
-                    log.info("Pending signal %d expired for %s", sig["id"], sig["symbol"])
-                    if self.notifier:
-                        self.notifier.send(format_pending_expired(sig["action"], sig["symbol"]))
-                    continue
-
-                # Operator pause: drop the pending signal without firing.
-                if self.gate is not None and self.gate.is_paused(sig["symbol"]):
-                    self.store.expire_pending_signal(sig["id"])
-                    log.info(
-                        "Pending signal %d for %s dropped: entries paused",
-                        sig["id"], sig["symbol"],
-                    )
-                    continue
-
-                # Fetch current price and EMA
-                current_price = self.blofin.fetch_last_price(sig["symbol"])
-                bars = self.blofin.fetch_recent_ohlcv(
-                    sig["symbol"],
-                    timeframe=self.ema_retest_timeframe,
-                    limit=self.ema_retest_period + 10,
-                )
-                closes = [bar[4] for bar in bars]  # index 4 = close
-                ema_value = compute_ema(closes, self.ema_retest_period)
-
-                # Check for retest (with overshoot cap)
-                max_overshoot = ema_value * (self.ema_retest_max_overshoot_pct / 100)
-                retest = False
-                if sig["action"] == "buy" and current_price <= ema_value:
-                    retest = current_price >= ema_value - max_overshoot
-                elif sig["action"] == "sell" and current_price >= ema_value:
-                    retest = current_price <= ema_value + max_overshoot
-
-                if not retest:
-                    continue
-
-                log.info(
-                    "EMA(%d) retest confirmed for %s %s: price=%.2f, ema=%.2f",
-                    self.ema_retest_period, sig["action"], sig["symbol"],
-                    current_price, ema_value,
-                )
-
-                # Execute the entry
-                sym_cfg = self.symbol_configs.get(sig["symbol"])
-                if sym_cfg is None:
-                    log.warning("No config for %s, skipping pending signal", sig["symbol"])
-                    continue
-
-                result = handle_entry(
-                    action=sig["action"], symbol=sig["symbol"],
-                    store=self.store, blofin=self.blofin,
-                    margin_usdt=sym_cfg["margin_usdt"],
-                    leverage=sym_cfg["leverage"],
-                    margin_mode=sym_cfg["margin_mode"],
-                    sl_policy_name=sym_cfg["sl_policy"],
-                    sl_loss_usdt=sym_cfg["sl_loss_usdt"],
-                    trail_activate_usdt=sym_cfg["trail_activate_usdt"],
-                    trail_distance_usdt=sym_cfg["trail_distance_usdt"],
-                    tp_limit_margin_pct=sym_cfg["tp_limit_margin_pct"],
-                )
-
-                if result.get("opened"):
-                    self.store.fill_pending_signal(sig["id"], current_price)
-                    if self.notifier:
-                        self.notifier.send(format_pending_filled(
-                            sig["action"], sig["symbol"],
-                            result["entry_price"], sig["signal_price"],
-                        ))
-                        # Also send the full entry notification
-                        result["symbol"] = sig["symbol"]
-                        self.notifier.send(format_entry(result))
-                else:
-                    log.warning(
-                        "Pending signal %d: entry failed: %s",
-                        sig["id"], result.get("reason"),
-                    )
+                self._process_single_pending_signal(sig, now)
             except Exception:
-                log.exception("Failed processing pending signal %d", sig["id"])
+                log.exception("Failed processing pending signal %s", sig.get("id"))
+
+    def _process_single_pending_signal(self, sig: dict[str, Any], now: datetime) -> None:
+        sig_id = sig["id"]
+        symbol = sig["symbol"]
+        action = sig["action"]
+
+        # --- PRE-PHASE: honor stored expires_at (hard wall-clock backup) ---
+        # This is evaluated BEFORE any market-data fetch so a single broken
+        # exchange call can't keep a zombie signal alive past its timeout.
+        try:
+            expires_at = datetime.fromisoformat(sig["expires_at"])
+            if now >= expires_at:
+                self.store.expire_pending_signal(sig_id, reason="expired_time_limit")
+                log.info(
+                    "pending_expired id=%d %s %s reason=expired_time_limit",
+                    sig_id, action, symbol,
+                )
+                if self.notifier:
+                    try:
+                        self.notifier.send(format_pending_expired(action, symbol))
+                    except Exception:
+                        log.exception("notifier send failed")
+                return
+        except (ValueError, KeyError):
+            pass  # malformed expires_at — let the main pipeline handle
+
+        # Operator pause: drop without firing.
+        if self.gate is not None and self.gate.is_paused(symbol):
+            self.store.invalidate_pending_signal(sig_id, reason="invalidated_operator_pause")
+            log.info("pending_invalidated id=%d %s %s reason=invalidated_operator_pause",
+                     sig_id, action, symbol)
+            return
+
+        sym_cfg = self.symbol_configs.get(symbol) or {}
+        timeframe = sig.get("signal_timeframe") or sym_cfg.get(
+            "ema_retest_timeframe", self.ema_retest_timeframe,
+        )
+        bar_seconds = _timeframe_to_seconds(timeframe, default=300)
+
+        # --- fetch market context ---
+        try:
+            last_price = self.blofin.fetch_last_price(symbol)
+        except Exception as exc:
+            log.warning("pending_skip id=%d %s fetch_last_price failed: %s",
+                        sig_id, symbol, exc)
+            return
+
+        try:
+            needed = max(self.ema_retest_period + self.ema_slope_lookback + 2,
+                         self.atr_length + 2, 30)
+            bars = self.blofin.fetch_recent_ohlcv(
+                symbol, timeframe=timeframe, limit=needed,
+            )
+        except Exception as exc:
+            log.warning("pending_skip id=%d %s fetch_recent_ohlcv failed: %s",
+                        sig_id, symbol, exc)
+            return
+
+        if not bars:
+            log.warning("pending_skip id=%d %s no bars returned", sig_id, symbol)
+            return
+
+        closes = [float(b[4]) for b in bars]
+        try:
+            current_ema = compute_ema(closes, self.ema_retest_period)
+            current_ema_slope = compute_ema_slope(
+                closes, period=self.ema_retest_period,
+                lookback=self.ema_slope_lookback,
+            )
+        except ValueError:
+            log.warning("pending_skip id=%d %s insufficient bars for EMA/slope",
+                        sig_id, symbol)
+            return
+
+        latest_bar_ts = int(bars[-1][0])
+        last_closed_bar_close = float(bars[-1][4])
+
+        signal_bar_ts = sig.get("signal_bar_ts")
+        if signal_bar_ts is None:
+            # Legacy signal without snapshot — fall back to received_at as the anchor.
+            signal_bar_ts = latest_bar_ts  # effectively disables bar-limit
+        closes_since_signal = [
+            float(b[4]) for b in bars if int(b[0]) > int(signal_bar_ts)
+        ]
+
+        position_open = self.store.get_open_position(symbol) is not None
+
+        # --- build snapshot from stored row (fill in sane defaults for legacy rows) ---
+        snap = SignalSnapshot(
+            symbol=symbol,
+            action=action,
+            signal_price=float(sig.get("signal_price") or last_price),
+            signal_candle_high=float(sig.get("signal_candle_high") or float("inf")),
+            signal_candle_low=float(sig.get("signal_candle_low") or float("-inf")),
+            signal_ema_value=float(sig.get("signal_ema_value") or current_ema),
+            signal_ema_slope=float(sig.get("signal_ema_slope") or 0.0),
+            signal_atr=sig.get("signal_atr"),
+            signal_bar_ts=int(signal_bar_ts),
+            signal_timeframe=timeframe,
+            received_at=datetime.fromisoformat(sig["created_at"]),
+            max_age_seconds=int(sig.get("max_age_seconds") or self.max_signal_age_seconds),
+            max_bars=int(sig.get("max_bars") or self.max_signal_bars),
+        )
+
+        cfg = ValidationConfig(
+            ema_length=self.ema_retest_period,
+            max_signal_age_seconds=snap.max_age_seconds,
+            max_signal_bars=snap.max_bars,
+            max_price_drift_percent=self.max_price_drift_percent,
+            use_atr_drift_filter=self.use_atr_drift_filter,
+            max_price_drift_atr=self.max_price_drift_atr,
+            require_retest_confirmation_candle=self.require_retest_confirmation_candle,
+            cancel_on_slope_flip=self.cancel_on_slope_flip,
+            bar_seconds=bar_seconds,
+            ema_retest_max_overshoot_pct=self.ema_retest_max_overshoot_pct,
+        )
+
+        ctx = MarketContext(
+            now=now,
+            last_price=last_price,
+            current_ema=current_ema,
+            current_ema_slope=current_ema_slope,
+            latest_bar_ts=latest_bar_ts,
+            last_closed_bar_close=last_closed_bar_close,
+            closes_since_signal=closes_since_signal,
+            position_open=position_open,
+        )
+
+        # ---- PHASE 1: invalidation ----
+        reason = check_invalidation(snap, ctx, cfg)
+        if reason is not None:
+            if reason.startswith("expired_"):
+                self.store.expire_pending_signal(sig_id, reason=reason)
+            else:
+                self.store.invalidate_pending_signal(sig_id, reason=reason)
+            log.info(
+                "pending_invalidated id=%d %s %s reason=%s price=%.6f ema=%.6f slope=%.6f",
+                sig_id, action, symbol, reason, last_price, current_ema, current_ema_slope,
+            )
+            if self.notifier and reason.startswith("expired_"):
+                try:
+                    self.notifier.send(format_pending_expired(action, symbol))
+                except Exception:
+                    log.exception("notifier send failed")
+            return
+
+        # ---- PHASE 2: retest detection ----
+        if not check_retest(snap, ctx, cfg):
+            # No retest yet — keep waiting silently (next tick).
+            return
+
+        log.info(
+            "pending_retest_seen id=%d %s %s price=%.6f ema=%.6f",
+            sig_id, action, symbol, last_price, current_ema,
+        )
+
+        # ---- PHASE 3: revalidation ----
+        revalidation_reason = check_revalidation(snap, ctx, cfg)
+        if revalidation_reason is not None:
+            log.info(
+                "pending_revalidation_failed id=%d %s %s reason=%s close=%.6f ema=%.6f slope=%.6f",
+                sig_id, action, symbol, revalidation_reason,
+                last_closed_bar_close, current_ema, current_ema_slope,
+            )
+            # Stay pending — a later bar might satisfy the confirmation.
+            # But hard failures (structure/slope) will reappear in phase 1 next tick.
+            return
+
+        log.info(
+            "pending_revalidation_passed id=%d %s %s price=%.6f ema=%.6f slope=%.6f",
+            sig_id, action, symbol, last_price, current_ema, current_ema_slope,
+        )
+
+        # ---- EXECUTE ----
+        if sym_cfg is None or not sym_cfg:
+            log.warning("pending_skip id=%d %s no sym_cfg", sig_id, symbol)
+            return
+
+        result = handle_entry(
+            action=action, symbol=symbol,
+            store=self.store, blofin=self.blofin,
+            margin_usdt=sym_cfg["margin_usdt"],
+            leverage=sym_cfg["leverage"],
+            margin_mode=sym_cfg["margin_mode"],
+            sl_policy_name=sym_cfg["sl_policy"],
+            sl_loss_usdt=sym_cfg["sl_loss_usdt"],
+            trail_activate_usdt=sym_cfg["trail_activate_usdt"],
+            trail_distance_usdt=sym_cfg["trail_distance_usdt"],
+            tp_limit_margin_pct=sym_cfg["tp_limit_margin_pct"],
+        )
+
+        if result.get("opened"):
+            self.store.fill_pending_signal(sig_id, last_price)
+            log.info(
+                "executed_retest_validated id=%d %s %s entry=%.6f size=%s",
+                sig_id, action, symbol, result["entry_price"], result.get("size"),
+            )
+            if self.notifier:
+                self.notifier.send(format_pending_filled(
+                    action, symbol, result["entry_price"], snap.signal_price,
+                ))
+                result["symbol"] = symbol
+                self.notifier.send(format_entry(result))
+        else:
+            log.warning(
+                "pending_entry_failed id=%d %s %s reason=%s",
+                sig_id, action, symbol, result.get("reason"),
+            )
 
     def _archive_stale_position(self, pos) -> None:
         """Position is gone from BloFin. Cancel leftover orders, archive row."""
