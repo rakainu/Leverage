@@ -36,8 +36,6 @@ def _cfg(**over):
         max_signal_age_seconds=900,
         max_signal_bars=3,
         max_price_drift_percent=0.35,
-        use_atr_drift_filter=True,
-        max_price_drift_atr=0.5,
         require_retest_confirmation_candle=True,
         cancel_on_slope_flip=True,
         bar_seconds=300,
@@ -162,32 +160,57 @@ def test_trough_buy_not_invalidated_while_ema_still_falling():
     assert check_invalidation(snap, ctx, _cfg(cancel_on_slope_flip=True)) is None
 
 
-# ----------------------- invalidation: price drift -----------------------
+# ----------------------- invalidation: price drift (directional) -----------------------
+#
+# Drift fires when price has moved PAST the EMA in the thesis direction by
+# more than threshold — "we missed the entry window, price is running." It
+# does NOT fire when price moves away from the EMA (thesis not yet developing)
+# because retest just won't trigger and the bar/time limit handles staleness.
 
-def test_price_drift_percent():
-    snap = _snap(signal_price=100.0)
-    ctx = _ctx(last_price=100.5)  # 0.5% — over 0.35% threshold
-    assert check_invalidation(snap, ctx, _cfg(
-        max_price_drift_percent=0.35, use_atr_drift_filter=False,
-    )) == "invalidated_price_drift"
+def test_long_drift_fires_when_price_passed_above_ema():
+    """Long: signal below EMA, price later rallies through EMA and beyond
+    — the retest opportunity is gone."""
+    snap = _snap(action="buy", signal_price=100.0)
+    # EMA=100, price=100.5 → passed EMA by 0.5% > 0.35% threshold
+    ctx = _ctx(last_price=100.5, current_ema=100.0)
+    assert check_invalidation(snap, ctx, _cfg(max_price_drift_percent=0.35)) \
+        == "invalidated_price_drift"
 
 
-def test_price_drift_percent_within_threshold():
-    snap = _snap(signal_price=100.0)
-    ctx = _ctx(last_price=100.2)  # 0.2%
-    assert check_invalidation(snap, ctx, _cfg(
-        max_price_drift_percent=0.35, use_atr_drift_filter=False,
-    )) is None
+def test_long_drift_does_not_fire_when_price_at_or_below_ema():
+    """Long: price still at or below EMA (retest hasn't happened or is in
+    progress) must NOT invalidate on drift."""
+    snap = _snap(action="buy", signal_price=100.0)
+    # Price dropped below signal and further from EMA (thesis not developing)
+    # — old symmetric check killed this; new directional check does not.
+    ctx = _ctx(last_price=99.0, current_ema=100.0)
+    assert check_invalidation(snap, ctx, _cfg(max_price_drift_percent=0.35)) is None
 
 
-def test_atr_drift_filter():
-    # signal_atr=1.0, threshold=0.5 ATR → max drift $0.50
-    snap = _snap(signal_price=100.0, signal_atr=1.0)
-    ctx = _ctx(last_price=100.6)  # 0.6 > 0.5 ATR
-    assert check_invalidation(snap, ctx, _cfg(
-        max_price_drift_percent=10.0,  # pct filter not tripping
-        use_atr_drift_filter=True, max_price_drift_atr=0.5,
-    )) == "invalidated_price_drift"
+def test_long_drift_at_retest_not_invalidated():
+    """Price exactly at EMA (retest point) must not drift-invalidate."""
+    snap = _snap(action="buy", signal_price=100.0)
+    ctx = _ctx(last_price=100.0, current_ema=100.0)
+    assert check_invalidation(snap, ctx, _cfg(max_price_drift_percent=0.35)) is None
+
+
+def test_short_drift_fires_when_price_passed_below_ema():
+    """Short: signal above EMA, price later drops through EMA and beyond —
+    entry missed."""
+    snap = _snap(action="sell", signal_price=100.0, signal_ema_slope=-0.1)
+    # EMA=100, price=99.5 → passed below EMA by 0.5% > 0.35%
+    ctx = _ctx(last_price=99.5, current_ema=100.0, current_ema_slope=-0.1)
+    assert check_invalidation(snap, ctx, _cfg(max_price_drift_percent=0.35)) \
+        == "invalidated_price_drift"
+
+
+def test_short_drift_does_not_fire_when_price_rises_away_from_ema():
+    """Short: price moved UP away from EMA (wrong way for thesis). Retest
+    won't trigger; we just wait. Must not drift-invalidate."""
+    snap = _snap(action="sell", signal_price=100.0, signal_ema_slope=-0.1)
+    ctx = _ctx(last_price=101.0, current_ema=100.0,
+               current_ema_slope=-0.1, closes_since_signal=[100.0])
+    assert check_invalidation(snap, ctx, _cfg(max_price_drift_percent=0.35)) is None
 
 
 # ----------------------- retest detection -----------------------

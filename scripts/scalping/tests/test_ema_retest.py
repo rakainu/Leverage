@@ -112,8 +112,6 @@ def _make_poller(store, blofin, **overrides):
         max_signal_age_seconds=86400,
         max_signal_bars=1000,
         max_price_drift_percent=100.0,
-        use_atr_drift_filter=False,
-        max_price_drift_atr=0.5,
         require_retest_confirmation_candle=False,
         cancel_on_slope_flip=False,
         atr_length=14,
@@ -316,18 +314,18 @@ async def test_pending_invalidated_by_slope_flip(store, blofin):
 
 
 @pytest.mark.asyncio
-async def test_pending_invalidated_by_price_drift_percent(store, blofin):
-    """Price drifts >0.35% from signal price → kill."""
+async def test_pending_invalidated_when_price_passed_past_ema(store, blofin):
+    """Directional drift: long signal, price has rallied past EMA by more
+    than threshold → entry opportunity gone → kill."""
     _snap_buy(store, signal_price=100.0)
 
-    bars = _bars_with_ema_at(100.4, num_bars=30)
-    blofin.fetch_last_price.return_value = 100.5  # 0.5% drift
+    bars = _bars_with_ema_at(100.0, num_bars=30)   # EMA = 100.0
+    blofin.fetch_last_price.return_value = 100.5    # 0.5% past EMA (> 0.35%)
     blofin.fetch_recent_ohlcv.return_value = bars
 
     poller = _make_poller(
         store, blofin,
         max_price_drift_percent=0.35,
-        use_atr_drift_filter=False,
         cancel_on_slope_flip=False,
     )
     await poller.poll_once()

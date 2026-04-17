@@ -185,8 +185,6 @@ def create_app() -> FastAPI:
         max_signal_age_seconds=settings.defaults.max_signal_age_seconds,
         max_signal_bars=settings.defaults.max_signal_bars,
         max_price_drift_percent=settings.defaults.max_price_drift_percent,
-        use_atr_drift_filter=settings.defaults.use_atr_drift_filter,
-        max_price_drift_atr=settings.defaults.max_price_drift_atr,
         require_retest_confirmation_candle=settings.defaults.require_retest_confirmation_candle,
         cancel_on_slope_flip=settings.defaults.cancel_on_slope_flip,
         atr_length=settings.defaults.atr_length,
@@ -268,7 +266,7 @@ def create_app() -> FastAPI:
                 return
 
             result["symbol"] = payload.symbol
-            if result.get("pending"):
+            if result.get("pending") and not result.get("duplicate"):
                 notifier.send(format_pending(
                     result.get("action", payload.action),
                     payload.symbol,

@@ -52,8 +52,6 @@ class ValidationConfig:
     max_signal_age_seconds: int
     max_signal_bars: int
     max_price_drift_percent: float    # e.g. 0.35 → 0.35%
-    use_atr_drift_filter: bool
-    max_price_drift_atr: float        # e.g. 0.5 → 0.5 × ATR
     require_retest_confirmation_candle: bool
     cancel_on_slope_flip: bool
     bar_seconds: int                  # duration of one bar on the signal timeframe
@@ -75,10 +73,22 @@ class MarketContext:
 
 # ------------------------------ helpers ------------------------------
 
-def _price_drift_pct(signal_price: float, current: float) -> float:
-    if signal_price <= 0:
+def _passed_ema_pct(snap: "SignalSnapshot", ctx: "MarketContext") -> float:
+    """Percent price is past the EMA in the thesis direction.
+
+    Long: positive when last_price > current_ema (price above EMA = past
+    the retest point going up). Negative when price still at or below EMA.
+    Short: positive when last_price < current_ema (price below EMA = past
+    the retest point going down). Negative when price still at or above EMA.
+
+    Returns 0.0 (never fires) when EMA is unavailable.
+    """
+    if ctx.current_ema <= 0:
         return 0.0
-    return abs(current - signal_price) / signal_price * 100.0
+    delta = ctx.last_price - ctx.current_ema
+    if snap.action != "buy":
+        delta = -delta
+    return delta / ctx.current_ema * 100.0
 
 
 def _bars_elapsed(signal_bar_ts: int, latest_bar_ts: int, bar_seconds: int) -> int:
@@ -130,16 +140,13 @@ def check_invalidation(
         if not _is_long(snap) and snap.signal_ema_slope < 0 and ctx.current_ema_slope > 0:
             return "invalidated_slope_flip"
 
-    # Price drift (percent)
-    drift_pct = _price_drift_pct(snap.signal_price, ctx.last_price)
-    if drift_pct > cfg.max_price_drift_percent:
+    # Price drift — directional. Fires when price has moved PAST the EMA
+    # in the thesis direction by more than threshold: we missed the entry
+    # window and price is running. Motion toward the EMA or away from it
+    # in the non-thesis direction does NOT invalidate — the retest check
+    # won't trigger in that case and the bar/time limit handles staleness.
+    if _passed_ema_pct(snap, ctx) > cfg.max_price_drift_percent:
         return "invalidated_price_drift"
-
-    # Price drift (ATR)
-    if cfg.use_atr_drift_filter and snap.signal_atr and snap.signal_atr > 0:
-        threshold = cfg.max_price_drift_atr * snap.signal_atr
-        if abs(ctx.last_price - snap.signal_price) > threshold:
-            return "invalidated_price_drift"
 
     return None
 
@@ -184,14 +191,11 @@ def check_revalidation(
         if not _is_long(snap) and ctx.current_ema_slope > 0:
             return "retest_failed_slope"
 
-    # Drift recheck
-    drift_pct = _price_drift_pct(snap.signal_price, ctx.last_price)
-    if drift_pct > cfg.max_price_drift_percent:
+    # Drift recheck — directional, same semantics as check_invalidation.
+    # Effectively a no-op at retest (price is at EMA by definition), kept
+    # for symmetry so either phase catches a late overshoot identically.
+    if _passed_ema_pct(snap, ctx) > cfg.max_price_drift_percent:
         return "retest_failed_drift"
-    if cfg.use_atr_drift_filter and snap.signal_atr and snap.signal_atr > 0:
-        threshold = cfg.max_price_drift_atr * snap.signal_atr
-        if abs(ctx.last_price - snap.signal_price) > threshold:
-            return "retest_failed_drift"
 
     # Confirmation candle: last CLOSED bar must close in our favor relative to EMA.
     if cfg.require_retest_confirmation_candle:

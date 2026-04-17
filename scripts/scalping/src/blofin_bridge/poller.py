@@ -73,8 +73,6 @@ class PositionPoller:
         max_signal_age_seconds: int = 1800,
         max_signal_bars: int = 6,
         max_price_drift_percent: float = 0.35,
-        use_atr_drift_filter: bool = True,
-        max_price_drift_atr: float = 0.5,
         require_retest_confirmation_candle: bool = True,
         cancel_on_slope_flip: bool = True,
         atr_length: int = 14,
@@ -105,8 +103,6 @@ class PositionPoller:
         self.max_signal_age_seconds = max_signal_age_seconds
         self.max_signal_bars = max_signal_bars
         self.max_price_drift_percent = max_price_drift_percent
-        self.use_atr_drift_filter = use_atr_drift_filter
-        self.max_price_drift_atr = max_price_drift_atr
         self.require_retest_confirmation_candle = require_retest_confirmation_candle
         self.cancel_on_slope_flip = cancel_on_slope_flip
         self.atr_length = atr_length
@@ -278,8 +274,6 @@ class PositionPoller:
             max_signal_age_seconds=snap.max_age_seconds,
             max_signal_bars=snap.max_bars,
             max_price_drift_percent=self.max_price_drift_percent,
-            use_atr_drift_filter=self.use_atr_drift_filter,
-            max_price_drift_atr=self.max_price_drift_atr,
             require_retest_confirmation_candle=self.require_retest_confirmation_candle,
             cancel_on_slope_flip=self.cancel_on_slope_flip,
             bar_seconds=bar_seconds,
