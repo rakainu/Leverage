@@ -65,9 +65,22 @@ def test_payload_rejects_totally_bogus_numeric_as_none():
 
 # ----------------------- timeframe + timestamp -----------------------
 
-def test_payload_keeps_timeframe_as_string():
+def test_payload_normalizes_tv_interval_digits():
+    """TV's {{interval}} placeholder returns bare digits like "5" on a 5m chart;
+    the payload model must normalize this to ccxt-format ("5m") before it
+    reaches the OHLCV fetch — otherwise BloFin rejects with 152002."""
     p = WebhookPayload(**_base(timeframe="5"))
-    assert p.timeframe == "5"
+    assert p.timeframe == "5m"
+
+
+def test_payload_normalizes_tv_interval_daily():
+    p = WebhookPayload(**_base(timeframe="D"))
+    assert p.timeframe == "1d"
+
+
+def test_payload_timeframe_passes_ccxt_format_through():
+    p = WebhookPayload(**_base(timeframe="5m"))
+    assert p.timeframe == "5m"
 
 
 def test_payload_keeps_timestamp_as_string():
