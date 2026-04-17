@@ -146,13 +146,43 @@ def dispatch(
         }
 
     if action in ("buy", "sell"):
+        # Supersession rules: per the signal-lifecycle spec, a new buy/sell
+        # only cancels an existing pending when direction OPPOSES it
+        # ("opposite signal arrives" invalidation). Same-direction resignals
+        # (Pro V3 reaffirming the trend every few bars) keep the first setup
+        # intact — otherwise each reaffirmation would reset the retest clock
+        # and nothing ever enters in a trending market.
+        existing = next(
+            (s for s in store.list_pending_signals() if s["symbol"] == symbol),
+            None,
+        )
+        if existing is not None:
+            if existing["action"] == action:
+                log.info(
+                    "signal_duplicate_ignored id=%d %s %s (pending since %s)",
+                    existing["id"], action, symbol, existing.get("created_at"),
+                )
+                return {
+                    "pending": True,
+                    "duplicate": True,
+                    "signal_id": existing["id"],
+                    "action": action,
+                    "signal_price": existing.get("signal_price"),
+                    "reason": "same-direction signal already pending",
+                }
+            store.invalidate_pending_signal(
+                existing["id"], reason="invalidated_opposite_signal",
+            )
+            log.info(
+                "pending_invalidated id=%d %s %s reason=invalidated_opposite_signal",
+                existing["id"], existing["action"], symbol,
+            )
+
         snap = _capture_snapshot(
             symbol=symbol, sym_cfg=sym_cfg, blofin=blofin,
             payload_price=payload_price, payload_high=payload_high,
             payload_low=payload_low, payload_timeframe=payload_timeframe,
         )
-        # Cancel any existing pending signals for this symbol (new signal supersedes).
-        store.cancel_pending_signals_for_symbol(symbol)
 
         max_age = int(sym_cfg.get("max_signal_age_seconds", 1800))
         max_bars = int(sym_cfg.get("max_signal_bars", 6))

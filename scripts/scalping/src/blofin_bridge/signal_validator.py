@@ -118,11 +118,16 @@ def check_invalidation(
         if any(c > snap.signal_candle_high for c in ctx.closes_since_signal):
             return "invalidated_structure_break"
 
-    # Slope flip
+    # Slope flip — only a REAL flip kills the pending. Pro V3 often fires
+    # buy at troughs / sell at peaks, when the EMA has not yet turned; an
+    # absolute slope check would kill every peak-sell before retest. We
+    # require that the slope was in our favor at signal time and has since
+    # flipped against the trade. The stricter absolute-slope check still runs
+    # at revalidation (check_revalidation) per the signal-lifecycle spec.
     if cfg.cancel_on_slope_flip:
-        if _is_long(snap) and ctx.current_ema_slope < 0:
+        if _is_long(snap) and snap.signal_ema_slope > 0 and ctx.current_ema_slope < 0:
             return "invalidated_slope_flip"
-        if not _is_long(snap) and ctx.current_ema_slope > 0:
+        if not _is_long(snap) and snap.signal_ema_slope < 0 and ctx.current_ema_slope > 0:
             return "invalidated_slope_flip"
 
     # Price drift (percent)

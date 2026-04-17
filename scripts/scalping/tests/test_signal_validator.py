@@ -144,6 +144,24 @@ def test_short_slope_flip():
         == "invalidated_slope_flip"
 
 
+def test_peak_sell_not_invalidated_while_ema_still_rising():
+    """Pro V3 SELL signals typically fire at a peak — when the EMA is STILL
+    rising (no flip has occurred yet). The invalidation-phase slope check must
+    not kill these setups just because the absolute slope is still positive.
+    Invalidate only on a REAL flip (slope was in our favor, now against)."""
+    snap = _snap(action="sell", signal_ema_slope=0.8)  # still rising at signal
+    ctx = _ctx(current_ema_slope=0.6, closes_since_signal=[100.0])
+    assert check_invalidation(snap, ctx, _cfg(cancel_on_slope_flip=True)) is None
+
+
+def test_trough_buy_not_invalidated_while_ema_still_falling():
+    """Mirror: BUY signals fired at a trough while EMA is still declining
+    must not instantly invalidate during pending phase."""
+    snap = _snap(action="buy", signal_ema_slope=-0.8)  # still falling at signal
+    ctx = _ctx(current_ema_slope=-0.6)
+    assert check_invalidation(snap, ctx, _cfg(cancel_on_slope_flip=True)) is None
+
+
 # ----------------------- invalidation: price drift -----------------------
 
 def test_price_drift_percent():

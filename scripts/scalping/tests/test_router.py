@@ -66,6 +66,47 @@ def test_dispatch_buy_creates_pending_signal(store, blofin, cfg):
     assert signals[0]["symbol"] == "SOL-USDT"
 
 
+def test_same_direction_resignal_keeps_original_pending(store, blofin, cfg):
+    """Pro V3 reaffirms direction every few bars in a trend — resignaling sell
+    while a sell is already pending must NOT cancel the original. The
+    first-fired setup is authoritative until it invalidates, expires, or the
+    direction flips."""
+    first = dispatch(action="sell", symbol="SOL-USDT",
+                     store=store, blofin=blofin, symbol_configs=cfg)
+    original_id = first["signal_id"]
+
+    second = dispatch(action="sell", symbol="SOL-USDT",
+                      store=store, blofin=blofin, symbol_configs=cfg)
+
+    assert second["pending"] is True
+    assert second.get("duplicate") is True
+    assert second["signal_id"] == original_id
+    pending = store.list_pending_signals()
+    assert len(pending) == 1
+    assert pending[0]["id"] == original_id
+
+
+def test_opposite_direction_signal_invalidates_existing(store, blofin, cfg):
+    """A legit reversal (sell arriving while a buy is pending) must cancel
+    the old one with reason=invalidated_opposite_signal and open a fresh
+    pending for the new direction."""
+    first = dispatch(action="buy", symbol="SOL-USDT",
+                     store=store, blofin=blofin, symbol_configs=cfg)
+    old_id = first["signal_id"]
+
+    second = dispatch(action="sell", symbol="SOL-USDT",
+                      store=store, blofin=blofin, symbol_configs=cfg)
+
+    assert second["pending"] is True
+    assert second.get("duplicate") is not True
+    assert second["signal_id"] != old_id
+
+    all_signals = store.list_all_signals(limit=10)
+    old = next(r for r in all_signals if r["id"] == old_id)
+    assert old["status"] == "invalidated"
+    assert old["cancel_reason"] == "invalidated_opposite_signal"
+
+
 def test_dispatch_unknown_action_raises(store, blofin, cfg):
     with pytest.raises(UnknownAction):
         dispatch(
