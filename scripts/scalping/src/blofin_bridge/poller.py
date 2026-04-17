@@ -70,8 +70,8 @@ class PositionPoller:
         ema_retest_timeframe: str = "5m",
         ema_retest_max_overshoot_pct: float = 0.2,
         # --- Signal revalidation config (2026-04-16) ---
-        max_signal_age_seconds: int = 900,
-        max_signal_bars: int = 3,
+        max_signal_age_seconds: int = 1800,
+        max_signal_bars: int = 6,
         max_price_drift_percent: float = 0.35,
         use_atr_drift_filter: bool = True,
         max_price_drift_atr: float = 0.5,

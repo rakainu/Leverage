@@ -154,8 +154,8 @@ def dispatch(
         # Cancel any existing pending signals for this symbol (new signal supersedes).
         store.cancel_pending_signals_for_symbol(symbol)
 
-        max_age = int(sym_cfg.get("max_signal_age_seconds", 900))
-        max_bars = int(sym_cfg.get("max_signal_bars", 3))
+        max_age = int(sym_cfg.get("max_signal_age_seconds", 1800))
+        max_bars = int(sym_cfg.get("max_signal_bars", 6))
         timeout_minutes = max(1, (max_age + 59) // 60)  # ceil to minutes for expires_at
 
         sig_id = store.create_pending_signal(
@@ -207,8 +207,8 @@ def dispatch(
             payload_price=payload_price, payload_high=payload_high,
             payload_low=payload_low, payload_timeframe=payload_timeframe,
         )
-        max_age = int(sym_cfg.get("max_signal_age_seconds", 900))
-        max_bars = int(sym_cfg.get("max_signal_bars", 3))
+        max_age = int(sym_cfg.get("max_signal_age_seconds", 1800))
+        max_bars = int(sym_cfg.get("max_signal_bars", 6))
         timeout_minutes = max(1, (max_age + 59) // 60)
         sig_id = store.create_pending_signal(
             symbol=symbol, action=new_action,

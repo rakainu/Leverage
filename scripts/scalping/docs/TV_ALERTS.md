@@ -103,8 +103,8 @@ If you already have the older alerts (without snapshot fields), you just need to
 2. Bridge captures a **signal snapshot**: signal price, candle high/low, EMA(9), EMA slope, ATR, bar timestamp — using your payload values or falling back to market data
 3. Signal becomes a **pending candidate** (not yet a trade)
 4. Poller checks every 2s (all of these can cancel the signal before any trade is placed):
-   - `expired_time_limit` — signal older than `max_signal_age_seconds` (default 900s / 15 min)
-   - `expired_bar_limit` — more than `max_signal_bars` bars elapsed since signal (default 3)
+   - `expired_time_limit` — signal older than `max_signal_age_seconds` (default 1800s / 30 min)
+   - `expired_bar_limit` — more than `max_signal_bars` bars elapsed since signal (default 6)
    - `invalidated_structure_break` — any bar closed below (long) or above (short) the signal candle extreme
    - `invalidated_slope_flip` — EMA slope flipped against the trade direction
    - `invalidated_price_drift` — price drifted > 0.35% from signal price, or more than 0.5× ATR

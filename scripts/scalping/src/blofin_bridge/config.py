@@ -92,8 +92,8 @@ class Defaults(BaseModel):
     ema_retest_max_overshoot_pct: float = 0.2
     poll_interval_seconds: int = 10
     # --- Signal snapshot + revalidation (2026-04-16) ---
-    max_signal_age_seconds: int = 900            # hard wall-clock cap (15 min)
-    max_signal_bars: int = 3                     # invalidate after N bars
+    max_signal_age_seconds: int = 1800           # hard wall-clock cap (30 min)
+    max_signal_bars: int = 6                     # invalidate after N bars (6 × 5m = 30 min)
     max_price_drift_percent: float = 0.35        # % drift from signal price
     use_atr_drift_filter: bool = True
     max_price_drift_atr: float = 0.5             # multiple of ATR
