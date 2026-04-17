@@ -4,6 +4,8 @@ from typing import Any, Optional, TypedDict
 
 import ccxt
 
+from .tv_timeframe import CCXT_TIMEFRAMES
+
 
 class Instrument(TypedDict):
     instId: str
@@ -296,6 +298,14 @@ class BloFinClient:
         """Return the last `limit` OHLCV bars for the instrument.
 
         Each bar is [timestamp, open, high, low, close, volume].
+        Rejects non-ccxt timeframes upfront — BloFin's own error for a bad
+        `bar` parameter is cryptic (code 152002 "Parameter bar error") and
+        took 24 dropped signals to diagnose the first time.
         """
+        if timeframe not in CCXT_TIMEFRAMES:
+            raise ValueError(
+                f"fetch_recent_ohlcv: unsupported timeframe {timeframe!r}; "
+                f"expected ccxt format like '5m', '1h', '1d'"
+            )
         ccxt_sym = _instid_to_ccxt(inst_id)
         return self._ccxt.fetch_ohlcv(ccxt_sym, timeframe=timeframe, limit=limit)

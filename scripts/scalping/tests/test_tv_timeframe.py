@@ -13,7 +13,7 @@ ccxt / BloFin accept "1m","3m","5m","15m","30m","1h","2h","4h","1d","1w","1M".
 """
 import pytest
 
-from blofin_bridge.main import normalize_tv_timeframe
+from blofin_bridge.tv_timeframe import normalize_tv_timeframe
 
 
 # ---------- minute bars (bare digits < 60) ----------

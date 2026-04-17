@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from .blofin_client import BloFinClient, build_ccxt_client
 from .config import Settings, load_config
 from .entry_gate import EntryGate
+from .tv_timeframe import normalize_tv_timeframe
 from .notify import (
     Notifier, format_entry, format_sl_close, format_sl_no_position,
     format_reversal, format_error, format_pending,
@@ -61,67 +62,6 @@ def _parse_tolerant_str(v: Any) -> Optional[str]:
     if s.startswith("{{") and s.endswith("}}"):
         return None
     return s
-
-
-# Minutes → hours map for TV {{interval}} values TradingView substitutes as
-# pure minute counts (e.g. "60" means 1h, "240" means 4h).
-_TV_MINUTES_TO_CCXT_HOURS = {
-    60: "1h", 120: "2h", 180: "3h", 240: "4h",
-    360: "6h", 480: "8h", 720: "12h",
-}
-
-_CCXT_TIMEFRAME_SET = {
-    "1m", "3m", "5m", "15m", "30m", "45m",
-    "1h", "2h", "3h", "4h", "6h", "8h", "12h",
-    "1d", "3d", "1w", "1M",
-}
-
-
-def normalize_tv_timeframe(v: Any) -> Optional[str]:
-    """Map a TradingView {{interval}} value to a ccxt timeframe string.
-
-    TV substitutes {{interval}} as bare digits for intraday ("5" = 5m,
-    "240" = 4h) and single letters for daily/weekly/monthly ("D"/"W"/"M").
-    ccxt/BloFin expect "5m", "4h", "1d", "1w", "1M".
-
-    Returns None for empty / unsubstituted placeholder / unrecognized junk —
-    the snapshot layer then falls back to the configured default timeframe.
-    """
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        v = str(int(v))
-    if not isinstance(v, str):
-        return None
-    s = v.strip()
-    if not s:
-        return None
-    if s.startswith("{{") and s.endswith("}}"):
-        return None
-
-    # Already ccxt-shaped — pass through.
-    if s in _CCXT_TIMEFRAME_SET:
-        return s
-
-    # Daily / weekly / monthly single-letter codes (case-insensitive).
-    upper = s.upper()
-    if upper in ("D", "1D"):
-        return "1d"
-    if upper in ("W", "1W"):
-        return "1w"
-    if upper in ("M", "1M"):
-        return "1M"
-
-    # Pure-digit minute count.
-    if s.isdigit():
-        n = int(s)
-        if n in _TV_MINUTES_TO_CCXT_HOURS:
-            return _TV_MINUTES_TO_CCXT_HOURS[n]
-        candidate = f"{n}m"
-        if candidate in _CCXT_TIMEFRAME_SET:
-            return candidate
-
-    return None
 
 
 class WebhookPayload(BaseModel):
