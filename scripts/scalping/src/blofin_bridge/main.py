@@ -14,8 +14,8 @@ from .blofin_client import BloFinClient, build_ccxt_client
 from .config import Settings, load_config
 from .entry_gate import EntryGate
 from .notify import (
-    Notifier, format_entry, format_sl_close, format_reversal,
-    format_error, format_pending,
+    Notifier, format_entry, format_sl_close, format_sl_no_position,
+    format_reversal, format_error, format_pending,
 )
 from .poller import PositionPoller
 from .router import dispatch, UnknownAction
@@ -271,7 +271,10 @@ def create_app() -> FastAPI:
             elif payload.action in ("buy", "sell") and result.get("opened"):
                 notifier.send(format_entry(result))
             elif payload.action == "sl":
-                notifier.send(format_sl_close(result, payload.symbol))
+                if result.get("closed"):
+                    notifier.send(format_sl_close(result, payload.symbol))
+                elif result.get("pending_cancelled", 0) > 0:
+                    notifier.send(format_sl_no_position(payload.symbol))
             elif payload.action.startswith("reversal_"):
                 if result.get("pending_new"):
                     notifier.send(format_pending(

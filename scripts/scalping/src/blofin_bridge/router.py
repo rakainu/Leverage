@@ -189,11 +189,13 @@ def dispatch(
         }
 
     if action == "sl":
-        store.cancel_pending_signals_for_symbol(symbol)
-        return handle_sl(
+        pending_cancelled = store.cancel_pending_signals_for_symbol(symbol)
+        sl_result = handle_sl(
             symbol=symbol, store=store, blofin=blofin,
             margin_usdt=sym_cfg["margin_usdt"], leverage=sym_cfg["leverage"],
         )
+        sl_result["pending_cancelled"] = pending_cancelled
+        return sl_result
 
     if action.startswith("reversal_"):
         new_action = action.split("_", 1)[1]
