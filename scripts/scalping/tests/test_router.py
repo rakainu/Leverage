@@ -164,52 +164,6 @@ def test_dispatch_returns_paused_when_gate_is_paused(store, blofin, cfg):
     assert store.list_pending_signals() == []
 
 
-def test_dispatch_sl_not_blocked_by_gate(store, blofin, cfg):
-    """SL close actions are never blocked — operator safety."""
-    gate = EntryGate(symbols=["SOL-USDT"])
-    asyncio.new_event_loop().run_until_complete(gate.pause("SOL-USDT"))
-
-    result = dispatch(
-        action="sl", symbol="SOL-USDT",
-        store=store, blofin=blofin, symbol_configs=cfg, gate=gate,
-    )
-    # With no open position, handle_sl returns {closed: False, reason: ...}
-    # The key point: the response must NOT carry a "paused" flag.
-    assert "paused" not in result
-
-
-def test_dispatch_sl_reports_pending_cancelled_count(store, blofin, cfg):
-    """SL result must carry pending_cancelled so the notifier can tell
-    a real position-close apart from a pending-signal-only cancellation."""
-    # Arrange: a pending signal exists but no open position
-    dispatch(
-        action="sell", symbol="SOL-USDT",
-        store=store, blofin=blofin, symbol_configs=cfg,
-    )
-    assert len(store.list_pending_signals()) == 1
-
-    # Act: sl arrives
-    result = dispatch(
-        action="sl", symbol="SOL-USDT",
-        store=store, blofin=blofin, symbol_configs=cfg,
-    )
-
-    # Assert: nothing was closed, but one pending signal was cancelled
-    assert result["closed"] is False
-    assert result["pending_cancelled"] == 1
-
-
-def test_dispatch_sl_reports_zero_pending_when_none_to_cancel(store, blofin, cfg):
-    """If no pending signal AND no open position, pending_cancelled = 0 —
-    lets the notifier stay silent instead of sending a misleading message."""
-    result = dispatch(
-        action="sl", symbol="SOL-USDT",
-        store=store, blofin=blofin, symbol_configs=cfg,
-    )
-    assert result["closed"] is False
-    assert result["pending_cancelled"] == 0
-
-
 # --------------- snapshot capture ---------------
 
 def _bars(num: int = 30, *, close: float = 100.0, high: float = 101.0, low: float = 99.0):

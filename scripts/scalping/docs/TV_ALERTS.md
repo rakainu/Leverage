@@ -1,6 +1,6 @@
 # TradingView alert setup for Pro V3 → Scalping bridge
 
-Configure 5 alerts on the SOLUSDT.P chart in TradingView, one per Pro V3 action.
+Configure 4 alerts on the SOLUSDT.P chart in TradingView, one per Pro V3 action.
 Each alert uses the same webhook URL and a JSON message body with TradingView
 placeholders — the bridge parses them tolerantly.
 
@@ -26,11 +26,13 @@ These are the **only** action names the bridge currently recognizes. Anything el
 |------------------|------------------------------------|
 | `buy`            | open long (queues for EMA retest)  |
 | `sell`           | open short (queues for EMA retest) |
-| `sl`             | close any open position immediately |
-| `reversal_buy`   | SL current + queue new long         |
-| `reversal_sell`  | SL current + queue new short        |
+| `reversal_buy`   | close current + queue new long     |
+| `reversal_sell`  | close current + queue new short    |
 
-There is **no `close` action**. Use `sl` to close.
+There is **no `close` or `sl` action**. Exits are handled entirely by the
+bridge's native BloFin stop order (hard $13 SL on entry, promoted to
+breakeven / lock / trail as profit grows). Do **not** wire Pro V3's SL
+alert — the bridge will reject `{"action":"sl"}` with HTTP 422.
 
 ## Steps per alert
 
@@ -47,7 +49,7 @@ There is **no `close` action**. Use `sl` to close.
    - Replace `<BRIDGE_SECRET>` with your actual secret (the value from `.env` on the `BRIDGE_SECRET=` line)
 7. Click **Create**
 
-## The 5 alert JSON bodies
+## The 4 alert JSON bodies
 
 The bridge uses the extra `price`, `high`, `low`, `timeframe`, and `timestamp`
 fields to capture a **signal snapshot** so it can later validate whether the
@@ -63,11 +65,6 @@ to live market data.
 ### Sell
 ```json
 {"secret":"<BRIDGE_SECRET>","action":"sell","symbol":"SOL-USDT","timestamp":"{{timenow}}","price":"{{close}}","high":"{{high}}","low":"{{low}}","timeframe":"{{interval}}","source":"pro_v3"}
-```
-
-### SL (close any open position)
-```json
-{"secret":"<BRIDGE_SECRET>","action":"sl","symbol":"SOL-USDT","timestamp":"{{timenow}}","source":"pro_v3"}
 ```
 
 ### Reversal Buy
@@ -95,7 +92,7 @@ If you already have the older alerts (without snapshot fields), you just need to
    d. Paste the new JSON body from above (with your `BRIDGE_SECRET` substituted)
    e. Click **Save**
 4. The Webhook URL stays the same — no changes needed there.
-5. For `sl` alerts, the new payload is slightly simpler (no price/high/low needed) but the old payload also works — updating it is optional.
+5. **Delete** any existing `sl` alerts for both SOL and ZEC charts — Pro V3's SL is no longer acted on and the bridge will 422 those payloads. Exits are bridge-managed.
 
 ## Signal lifecycle (what the bridge does now)
 

@@ -31,22 +31,6 @@ def format_entry(result: dict[str, Any]) -> str:
     )
 
 
-def format_sl_close(result: dict[str, Any], symbol: str) -> str:
-    return (
-        f"🔴 SL CLOSED {symbol}\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"Position closed by stop loss"
-    )
-
-
-def format_sl_no_position(symbol: str) -> str:
-    return (
-        f"⚪ SL signal {symbol}\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"No open position — pending signal cancelled"
-    )
-
-
 def format_reversal(result: dict[str, Any], symbol: str) -> str:
     open_result = result.get("open_result", {})
     side = open_result.get("side", "?")

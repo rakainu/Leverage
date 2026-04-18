@@ -105,7 +105,14 @@ def test_payload_rejects_unknown_action():
         WebhookPayload(**_base(action="liquidate"))
 
 
+def test_payload_rejects_sl_action():
+    """`sl` was the Pro V3 indicator-driven close — removed so Pro V3 can't
+    close positions we're managing (hard $13 SL + trail handle exits)."""
+    with pytest.raises(ValidationError):
+        WebhookPayload(**_base(action="sl"))
+
+
 def test_payload_accepts_all_router_actions():
-    for a in ("buy", "sell", "sl", "reversal_buy", "reversal_sell"):
+    for a in ("buy", "sell", "reversal_buy", "reversal_sell"):
         p = WebhookPayload(**_base(action=a))
         assert p.action == a

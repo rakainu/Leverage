@@ -15,8 +15,7 @@ from .config import Settings, load_config
 from .entry_gate import EntryGate
 from .tv_timeframe import normalize_tv_timeframe
 from .notify import (
-    Notifier, format_entry, format_sl_close, format_sl_no_position,
-    format_reversal, format_error, format_pending,
+    Notifier, format_entry, format_reversal, format_error, format_pending,
 )
 from .poller import PositionPoller
 from .router import dispatch, UnknownAction
@@ -68,7 +67,7 @@ class WebhookPayload(BaseModel):
     secret: str
     symbol: str
     action: Literal[
-        "buy", "sell", "sl",
+        "buy", "sell",
         "reversal_buy", "reversal_sell",
     ]
     source: str = Field(default="pro_v3")
@@ -274,11 +273,6 @@ def create_app() -> FastAPI:
                 ))
             elif payload.action in ("buy", "sell") and result.get("opened"):
                 notifier.send(format_entry(result))
-            elif payload.action == "sl":
-                if result.get("closed"):
-                    notifier.send(format_sl_close(result, payload.symbol))
-                elif result.get("pending_cancelled", 0) > 0:
-                    notifier.send(format_sl_no_position(payload.symbol))
             elif payload.action.startswith("reversal_"):
                 if result.get("pending_new"):
                     notifier.send(format_pending(
