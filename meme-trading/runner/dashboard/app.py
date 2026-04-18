@@ -1,8 +1,9 @@
 """FastAPI dashboard — read-only API routes + static file serve."""
+import hashlib
 from pathlib import Path
 
 from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from runner.dashboard.queries import (
@@ -17,6 +18,14 @@ from runner.dashboard.queries import (
 from runner.db.database import Database
 
 _STATIC = Path(__file__).parent / "static"
+
+
+def _asset_version() -> str:
+    """Short hash of app.js — changes on every rebuild, busts browser cache."""
+    try:
+        return hashlib.md5(( _STATIC / "app.js").read_bytes()).hexdigest()[:10]
+    except OSError:
+        return "dev"
 
 
 def create_app(db: Database) -> FastAPI:
@@ -55,7 +64,12 @@ def create_app(db: Database) -> FastAPI:
 
     @app.get("/")
     async def index():
-        return FileResponse(_STATIC / "index.html")
+        html = (_STATIC / "index.html").read_text(encoding="utf-8")
+        html = html.replace("{{VERSION}}", _asset_version())
+        return HTMLResponse(
+            html,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 
