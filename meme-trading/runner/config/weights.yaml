@@ -96,7 +96,7 @@ gmgn_discovery:
   # Rich's requirement (2026-04-14): every GMGN-discovered wallet must pass
   # multi-stage vetting before joining the active pool. See
   # runner/curation/wallet_vetting.py for the funnel.
-  enabled: false               # flip to true after APIFY token verified on VPS
+  enabled: true                # APIFY token verified on VPS 2026-04-14
   interval_hours: 2            # aggressive while tuning; move to 12-24 once stable
   cap_new_per_run: 20          # max new raw candidates admitted per cycle
   cap_active_pool: 150         # soft cap on total active wallets
