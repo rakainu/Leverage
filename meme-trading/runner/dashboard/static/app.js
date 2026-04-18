@@ -59,6 +59,12 @@ function cautionSpan(text) {
   return `<span class="caution-text">${escapeHtml(text)}</span>`;
 }
 
+function dexLink(mint, label) {
+  if (!mint) return `<code class="text-slate-300">${escapeHtml(label || '')}</code>`;
+  const href = `https://dexscreener.com/solana/${encodeURIComponent(mint)}`;
+  return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="token-link" title="Open ${escapeHtml(mint)} on DexScreener" onclick="event.stopPropagation()">${escapeHtml(label || mint)}</a>`;
+}
+
 // ── render: stats cards ─────────────────────────────────────────
 
 function renderStats(data) {
@@ -89,7 +95,7 @@ function renderScores(scores) {
   tbody.innerHTML = scores.map(s => `
     <tr class="clickable" onclick="showDetail(${s.id})">
       <td class="text-slate-300">${formatTime(s.created_at)}</td>
-      <td><code class="text-slate-300">${escapeHtml(s.short_token)}</code></td>
+      <td>${dexLink(s.token_mint, s.short_token)}</td>
       <td class="text-right font-bold" style="color:${scoreColor(s.verdict)}">${s.runner_score.toFixed(1)}</td>
       <td>${verdictPill(s.verdict)}</td>
       <td class="text-slate-200 truncate max-w-[200px]" title="${escapeHtml(s.top_reason)}">${escapeHtml(s.top_reason)}</td>
@@ -112,7 +118,7 @@ function renderPositions(positions) {
     const statusCls = p.status === 'open' ? 'pill-watch' : 'pill-ignore';
     return `
     <tr>
-      <td><code class="text-slate-300">${escapeHtml(p.symbol || p.short_token)}</code></td>
+      <td>${dexLink(p.token_mint, p.symbol || p.short_token)}</td>
       <td class="text-slate-300">${formatTime(p.signal_time)}</td>
       <td>${verdictPill(p.verdict)}</td>
       <td class="text-right text-slate-300">${p.entry_price_usd != null ? '$' + p.entry_price_usd.toPrecision(3) : '—'}</td>
@@ -145,7 +151,7 @@ async function showDetail(scoreId) {
     return;
   }
 
-  title.innerHTML = `<code class="text-slate-300 mr-2">${escapeHtml(d.short_token)}</code> ${verdictPill(d.verdict)} <span class="text-slate-300 text-xs ml-2">${d.runner_score.toFixed(1)} pts</span>`;
+  title.innerHTML = `<span class="mr-2">${dexLink(d.token_mint, d.short_token)}</span> ${verdictPill(d.verdict)} <span class="text-slate-300 text-xs ml-2">${d.runner_score.toFixed(1)} pts</span>`;
 
   let html = '<div class="grid grid-cols-2 gap-6">';
 
@@ -319,7 +325,7 @@ function renderOutcomes(data) {
       : fmtMcap(r.peak_mcap_usd);
     return `
       <tr>
-        <td><code class="text-slate-200">${escapeHtml(r.short_token)}</code></td>
+        <td>${dexLink(r.token_mint, r.short_token)}</td>
         <td>${verdictCell}</td>
         <td class="text-right text-slate-300">${fmtMcap(r.entry_mcap_usd)}</td>
         <td class="text-right">${peakCell}</td>
