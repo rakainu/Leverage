@@ -14,9 +14,7 @@ from .blofin_client import BloFinClient, build_ccxt_client
 from .config import Settings, load_config
 from .entry_gate import EntryGate
 from .tv_timeframe import normalize_tv_timeframe
-from .notify import (
-    Notifier, format_entry, format_reversal, format_error, format_pending,
-)
+from .notify import Notifier, format_entry, format_error, format_pending
 from .poller import PositionPoller
 from .router import dispatch, UnknownAction
 from .state import Store
@@ -66,10 +64,7 @@ def _parse_tolerant_str(v: Any) -> Optional[str]:
 class WebhookPayload(BaseModel):
     secret: str
     symbol: str
-    action: Literal[
-        "buy", "sell",
-        "reversal_buy", "reversal_sell",
-    ]
+    action: Literal["buy", "sell"]
     source: str = Field(default="pro_v3")
     # --- optional snapshot fields from TradingView (all tolerant) ---
     price: Optional[float] = None
@@ -273,17 +268,6 @@ def create_app() -> FastAPI:
                 ))
             elif payload.action in ("buy", "sell") and result.get("opened"):
                 notifier.send(format_entry(result))
-            elif payload.action.startswith("reversal_"):
-                if result.get("pending_new"):
-                    notifier.send(format_pending(
-                        result.get("action", "buy"),
-                        payload.symbol,
-                        result.get("signal_price", 0),
-                    ))
-                elif result.get("opened_new"):
-                    notifier.send(format_reversal(result, payload.symbol))
-            else:
-                notifier.send(f"ℹ️ {payload.action.upper()} {payload.symbol}: done")
         except UnknownAction as exc:
             store.mark_event_handled(event_id, outcome="error",
                                      error_msg=f"unknown action {exc}")

@@ -1,6 +1,6 @@
 # TradingView alert setup for Pro V3 → Scalping bridge
 
-Configure 4 alerts on the SOLUSDT.P chart in TradingView, one per Pro V3 action.
+Configure 2 alerts on the SOLUSDT.P chart in TradingView, one per Pro V3 action.
 Each alert uses the same webhook URL and a JSON message body with TradingView
 placeholders — the bridge parses them tolerantly.
 
@@ -22,17 +22,16 @@ https://blofin-bridge.srv1370094.hstgr.cloud/webhook/pro-v3
 
 These are the **only** action names the bridge currently recognizes. Anything else returns 400.
 
-| action           | purpose                            |
-|------------------|------------------------------------|
-| `buy`            | open long (queues for EMA retest)  |
-| `sell`           | open short (queues for EMA retest) |
-| `reversal_buy`   | close current + queue new long     |
-| `reversal_sell`  | close current + queue new short    |
+| action   | purpose                            |
+|----------|------------------------------------|
+| `buy`    | open long (queues for EMA retest)  |
+| `sell`   | open short (queues for EMA retest) |
 
-There is **no `close` or `sl` action**. Exits are handled entirely by the
-bridge's native BloFin stop order (hard $13 SL on entry, promoted to
-breakeven / lock / trail as profit grows). Do **not** wire Pro V3's SL
-alert — the bridge will reject `{"action":"sl"}` with HTTP 422.
+There is **no `close`, `sl`, `reversal_buy`, or `reversal_sell` action**.
+Exits are handled entirely by the bridge's native BloFin stop order (hard
+$13 SL on entry, promoted to breakeven / lock / trail as profit grows).
+Pro V3 signals only open new setups; Pro V3 cannot close us. Any webhook
+with a removed action is rejected with HTTP 400.
 
 ## Steps per alert
 
@@ -49,7 +48,7 @@ alert — the bridge will reject `{"action":"sl"}` with HTTP 422.
    - Replace `<BRIDGE_SECRET>` with your actual secret (the value from `.env` on the `BRIDGE_SECRET=` line)
 7. Click **Create**
 
-## The 4 alert JSON bodies
+## The 2 alert JSON bodies
 
 The bridge uses the extra `price`, `high`, `low`, `timeframe`, and `timestamp`
 fields to capture a **signal snapshot** so it can later validate whether the
@@ -67,16 +66,6 @@ to live market data.
 {"secret":"<BRIDGE_SECRET>","action":"sell","symbol":"SOL-USDT","timestamp":"{{timenow}}","price":"{{close}}","high":"{{high}}","low":"{{low}}","timeframe":"{{interval}}","source":"pro_v3"}
 ```
 
-### Reversal Buy
-```json
-{"secret":"<BRIDGE_SECRET>","action":"reversal_buy","symbol":"SOL-USDT","timestamp":"{{timenow}}","price":"{{close}}","high":"{{high}}","low":"{{low}}","timeframe":"{{interval}}","source":"pro_v3"}
-```
-
-### Reversal Sell
-```json
-{"secret":"<BRIDGE_SECRET>","action":"reversal_sell","symbol":"SOL-USDT","timestamp":"{{timenow}}","price":"{{close}}","high":"{{high}}","low":"{{low}}","timeframe":"{{interval}}","source":"pro_v3"}
-```
-
 **Important:** `symbol` in the message body is `SOL-USDT` (dash, not slash, no `.P` suffix) — that's BloFin's canonical instrument id. Change to `ZEC-USDT` on the ZEC chart's alerts.
 
 ## Updating existing alerts (migration steps)
@@ -85,14 +74,14 @@ If you already have the older alerts (without snapshot fields), you just need to
 
 1. Open the chart in TradingView
 2. Click the Alerts panel (top right ⏰ icon)
-3. For each existing `buy`/`sell`/`reversal_*` alert:
+3. For each existing `buy`/`sell` alert:
    a. Right-click → **Edit**
    b. Go to the **Message** tab
    c. Delete the old JSON body
    d. Paste the new JSON body from above (with your `BRIDGE_SECRET` substituted)
    e. Click **Save**
 4. The Webhook URL stays the same — no changes needed there.
-5. **Delete** any existing `sl` alerts for both SOL and ZEC charts — Pro V3's SL is no longer acted on and the bridge will 422 those payloads. Exits are bridge-managed.
+5. **Delete** every `sl`, `reversal_buy`, and `reversal_sell` alert on both SOL and ZEC charts. Pro V3 no longer has any way to close our positions — the bridge's native SL + trail owns all exits. The webhook will reject those actions with HTTP 400.
 
 ## Signal lifecycle (what the bridge does now)
 

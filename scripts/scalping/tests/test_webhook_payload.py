@@ -112,7 +112,15 @@ def test_payload_rejects_sl_action():
         WebhookPayload(**_base(action="sl"))
 
 
+def test_payload_rejects_reversal_actions():
+    """Reversal actions also had Pro V3 closing our positions before flipping.
+    Same rule as `sl`: bridge owns all exits."""
+    for a in ("reversal_buy", "reversal_sell"):
+        with pytest.raises(ValidationError):
+            WebhookPayload(**_base(action=a))
+
+
 def test_payload_accepts_all_router_actions():
-    for a in ("buy", "sell", "reversal_buy", "reversal_sell"):
+    for a in ("buy", "sell"):
         p = WebhookPayload(**_base(action=a))
         assert p.action == a

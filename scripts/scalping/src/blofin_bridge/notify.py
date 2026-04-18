@@ -31,25 +31,6 @@ def format_entry(result: dict[str, Any]) -> str:
     )
 
 
-def format_reversal(result: dict[str, Any], symbol: str) -> str:
-    open_result = result.get("open_result", {})
-    side = open_result.get("side", "?")
-    entry = open_result.get("entry_price", 0)
-    sl = open_result.get("sl_trigger", 0)
-
-    icon = "🟢" if side == "long" else "🔴"
-    direction = "LONG" if side == "long" else "SHORT"
-    closed_prev = "✅" if result.get("closed_previous") else "⚠️ no prior"
-
-    return (
-        f"🔄 REVERSAL → {icon} {direction} {symbol}\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"Previous: {closed_prev}\n"
-        f"📍 New Entry: ${entry:,.2f}\n"
-        f"🛑 SL: ${sl:,.2f}"
-    )
-
-
 def format_trail_activated(symbol: str, pnl: float, sl_price: float) -> str:
     return (
         f"📈 TRAIL ACTIVE {symbol}\n"

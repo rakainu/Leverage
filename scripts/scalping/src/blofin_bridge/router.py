@@ -12,8 +12,6 @@ from .atr import compute_atr
 from .blofin_client import BloFinClient
 from .ema import compute_ema, compute_ema_slope
 from .handlers.entry import handle_entry
-from .handlers.reversal import handle_reversal
-from .handlers.sl import handle_sl
 from .state import Store
 
 if TYPE_CHECKING:
@@ -26,10 +24,7 @@ class UnknownAction(ValueError):
     pass
 
 
-VALID_ACTIONS = {
-    "buy", "sell",
-    "reversal_buy", "reversal_sell",
-}
+VALID_ACTIONS = {"buy", "sell"}
 
 
 def _capture_snapshot(
@@ -216,48 +211,6 @@ def dispatch(
             "action": action,
             "signal_price": snap["signal_price"],
             "reason": "waiting for EMA retest",
-        }
-
-    if action.startswith("reversal_"):
-        new_action = action.split("_", 1)[1]
-        store.cancel_pending_signals_for_symbol(symbol)
-        closed = handle_sl(
-            symbol=symbol, store=store, blofin=blofin,
-            margin_usdt=sym_cfg["margin_usdt"], leverage=sym_cfg["leverage"],
-        )
-        snap = _capture_snapshot(
-            symbol=symbol, sym_cfg=sym_cfg, blofin=blofin,
-            payload_price=payload_price, payload_high=payload_high,
-            payload_low=payload_low, payload_timeframe=payload_timeframe,
-        )
-        max_age = int(sym_cfg.get("max_signal_age_seconds", 1800))
-        max_bars = int(sym_cfg.get("max_signal_bars", 6))
-        timeout_minutes = max(1, (max_age + 59) // 60)
-        sig_id = store.create_pending_signal(
-            symbol=symbol, action=new_action,
-            signal_price=snap["signal_price"] or 0.0,
-            timeout_minutes=timeout_minutes,
-            signal_timeframe=snap["signal_timeframe"],
-            signal_candle_high=snap["signal_candle_high"],
-            signal_candle_low=snap["signal_candle_low"],
-            signal_ema_value=snap["signal_ema_value"],
-            signal_ema_slope=snap["signal_ema_slope"],
-            signal_atr=snap["signal_atr"],
-            signal_bar_ts=snap["signal_bar_ts"],
-            max_age_seconds=max_age,
-            max_bars=max_bars,
-        )
-        log.info(
-            "signal_created_reversal id=%d %s %s price=%s",
-            sig_id, new_action, symbol, snap["signal_price"],
-        )
-        return {
-            "closed_previous": closed.get("closed", False),
-            "pending_new": True,
-            "signal_id": sig_id,
-            "action": new_action,
-            "signal_price": snap["signal_price"],
-            "close_result": closed,
         }
 
     raise UnknownAction(action)  # unreachable
