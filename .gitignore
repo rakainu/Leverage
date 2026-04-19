@@ -25,6 +25,10 @@ node_modules/
 # Logs
 *.log
 
+# Tool caches
+.playwright-mcp/
+.claude/scheduled_tasks.lock
+
 # blofin-bridge runtime
 scripts/blofin-bridge/data/
 scripts/blofin-bridge/*.db
