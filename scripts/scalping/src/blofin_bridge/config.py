@@ -97,6 +97,8 @@ class Defaults(BaseModel):
     max_price_drift_percent: float = 0.35        # directional drift past EMA
     require_retest_confirmation_candle: bool = True
     cancel_on_slope_flip: bool = True
+    # consecutive against-slope poll ticks required before killing signal
+    slope_flip_required_consecutive: int = 1
     atr_length: int = 14
     ema_slope_lookback: int = 1                  # bars back for slope calc
 

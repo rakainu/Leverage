@@ -160,6 +160,64 @@ def test_trough_buy_not_invalidated_while_ema_still_falling():
     assert check_invalidation(snap, ctx, _cfg(cancel_on_slope_flip=True)) is None
 
 
+def test_slope_flip_persistence_first_tick_does_not_kill_when_threshold_is_2():
+    """With slope_flip_required_consecutive=2, a single-tick flip (prior count
+    0 + this tick 1) must NOT kill the signal. Protects retest pullbacks."""
+    snap = _snap(action="buy", signal_ema_slope=0.1)
+    ctx = _ctx(current_ema_slope=-0.05, prior_slope_flip_count=0)
+    assert check_invalidation(
+        snap, ctx, _cfg(cancel_on_slope_flip=True,
+                        slope_flip_required_consecutive=2),
+    ) is None
+
+
+def test_slope_flip_persistence_second_tick_kills_when_threshold_is_2():
+    """With threshold=2 and a prior flip observation, this tick's flip pushes
+    the count to 2 and invalidates."""
+    snap = _snap(action="buy", signal_ema_slope=0.1)
+    ctx = _ctx(current_ema_slope=-0.05, prior_slope_flip_count=1)
+    assert check_invalidation(
+        snap, ctx, _cfg(cancel_on_slope_flip=True,
+                        slope_flip_required_consecutive=2),
+    ) == "invalidated_slope_flip"
+
+
+def test_slope_flip_default_threshold_is_1_backwards_compatible():
+    """Default slope_flip_required_consecutive=1 preserves legacy behavior:
+    a single-tick flip kills the signal immediately."""
+    snap = _snap(action="buy", signal_ema_slope=0.1)
+    ctx = _ctx(current_ema_slope=-0.05, prior_slope_flip_count=0)
+    # _cfg() defaults omit slope_flip_required_consecutive → 1
+    assert check_invalidation(snap, ctx, _cfg(cancel_on_slope_flip=True)) \
+        == "invalidated_slope_flip"
+
+
+def test_is_slope_flipped_against_helper():
+    """Helper mirrors the invalidation branch exactly and is what the poller
+    calls to drive its per-signal counter."""
+    from blofin_bridge.signal_validator import is_slope_flipped_against
+    # long: rising at signal, falling now → flipped
+    assert is_slope_flipped_against(
+        _snap(action="buy", signal_ema_slope=0.1),
+        _ctx(current_ema_slope=-0.05),
+    ) is True
+    # long: rising at signal, still rising now → not flipped
+    assert is_slope_flipped_against(
+        _snap(action="buy", signal_ema_slope=0.1),
+        _ctx(current_ema_slope=0.05),
+    ) is False
+    # long: falling at signal (trough-buy) → never "flipped" this direction
+    assert is_slope_flipped_against(
+        _snap(action="buy", signal_ema_slope=-0.1),
+        _ctx(current_ema_slope=-0.2),
+    ) is False
+    # short: falling at signal, rising now → flipped
+    assert is_slope_flipped_against(
+        _snap(action="sell", signal_ema_slope=-0.1),
+        _ctx(current_ema_slope=0.05),
+    ) is True
+
+
 # ----------------------- invalidation: price drift (directional) -----------------------
 #
 # Drift fires when price has moved PAST the EMA in the thesis direction by

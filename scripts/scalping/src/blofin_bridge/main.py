@@ -181,6 +181,7 @@ def create_app() -> FastAPI:
         max_price_drift_percent=settings.defaults.max_price_drift_percent,
         require_retest_confirmation_candle=settings.defaults.require_retest_confirmation_candle,
         cancel_on_slope_flip=settings.defaults.cancel_on_slope_flip,
+        slope_flip_required_consecutive=settings.defaults.slope_flip_required_consecutive,
         atr_length=settings.defaults.atr_length,
         ema_slope_lookback=settings.defaults.ema_slope_lookback,
         symbol_configs=symbol_configs,

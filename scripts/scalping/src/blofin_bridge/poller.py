@@ -24,6 +24,7 @@ from .notify import (
 from .signal_validator import (
     MarketContext, SignalSnapshot, ValidationConfig,
     check_invalidation, check_retest, check_revalidation,
+    is_slope_flipped_against,
 )
 from .state import Store
 
@@ -75,6 +76,7 @@ class PositionPoller:
         max_price_drift_percent: float = 0.35,
         require_retest_confirmation_candle: bool = True,
         cancel_on_slope_flip: bool = True,
+        slope_flip_required_consecutive: int = 1,
         atr_length: int = 14,
         ema_slope_lookback: int = 1,
         # Symbol configs for executing pending entries
@@ -105,12 +107,16 @@ class PositionPoller:
         self.max_price_drift_percent = max_price_drift_percent
         self.require_retest_confirmation_candle = require_retest_confirmation_candle
         self.cancel_on_slope_flip = cancel_on_slope_flip
+        self.slope_flip_required_consecutive = slope_flip_required_consecutive
         self.atr_length = atr_length
         self.ema_slope_lookback = ema_slope_lookback
         self.symbol_configs = symbol_configs or {}
         self.gate = gate
         self._task: Optional[asyncio.Task] = None
         self._stop_event: Optional[asyncio.Event] = None
+        # Per-pending-signal consecutive against-slope counter. Cleared when
+        # the signal leaves pending state (filled/invalidated/expired).
+        self._slope_flip_counts: dict[int, int] = {}
 
     async def poll_once(self) -> None:
         # --- Check pending signals for EMA retest ---
@@ -178,6 +184,7 @@ class PositionPoller:
             expires_at = datetime.fromisoformat(sig["expires_at"])
             if now >= expires_at:
                 self.store.expire_pending_signal(sig_id, reason="expired_time_limit")
+                self._slope_flip_counts.pop(sig_id, None)
                 log.info(
                     "pending_expired id=%d %s %s reason=expired_time_limit",
                     sig_id, action, symbol,
@@ -194,6 +201,7 @@ class PositionPoller:
         # Operator pause: drop without firing.
         if self.gate is not None and self.gate.is_paused(symbol):
             self.store.invalidate_pending_signal(sig_id, reason="invalidated_operator_pause")
+            self._slope_flip_counts.pop(sig_id, None)
             log.info("pending_invalidated id=%d %s %s reason=invalidated_operator_pause",
                      sig_id, action, symbol)
             return
@@ -278,8 +286,10 @@ class PositionPoller:
             cancel_on_slope_flip=self.cancel_on_slope_flip,
             bar_seconds=bar_seconds,
             ema_retest_max_overshoot_pct=self.ema_retest_max_overshoot_pct,
+            slope_flip_required_consecutive=self.slope_flip_required_consecutive,
         )
 
+        prior_flip_count = self._slope_flip_counts.get(sig_id, 0)
         ctx = MarketContext(
             now=now,
             last_price=last_price,
@@ -289,6 +299,7 @@ class PositionPoller:
             last_closed_bar_close=last_closed_bar_close,
             closes_since_signal=closes_since_signal,
             position_open=position_open,
+            prior_slope_flip_count=prior_flip_count,
         )
 
         # ---- PHASE 1: invalidation ----
@@ -298,6 +309,7 @@ class PositionPoller:
                 self.store.expire_pending_signal(sig_id, reason=reason)
             else:
                 self.store.invalidate_pending_signal(sig_id, reason=reason)
+            self._slope_flip_counts.pop(sig_id, None)
             log.info(
                 "pending_invalidated id=%d %s %s reason=%s price=%.6f ema=%.6f slope=%.6f",
                 sig_id, action, symbol, reason, last_price, current_ema, current_ema_slope,
@@ -308,6 +320,18 @@ class PositionPoller:
                 except Exception:
                     log.exception("notifier send failed")
             return
+
+        # Signal still pending — update the consecutive-flip counter.
+        if cfg.cancel_on_slope_flip and is_slope_flipped_against(snap, ctx):
+            self._slope_flip_counts[sig_id] = prior_flip_count + 1
+            log.info(
+                "pending_slope_flip_observed id=%d %s %s count=%d/%d slope=%.6f",
+                sig_id, action, symbol,
+                self._slope_flip_counts[sig_id],
+                cfg.slope_flip_required_consecutive, current_ema_slope,
+            )
+        else:
+            self._slope_flip_counts.pop(sig_id, None)
 
         # ---- PHASE 2: retest detection ----
         if not check_retest(snap, ctx, cfg):
@@ -356,6 +380,7 @@ class PositionPoller:
 
         if result.get("opened"):
             self.store.fill_pending_signal(sig_id, last_price)
+            self._slope_flip_counts.pop(sig_id, None)
             log.info(
                 "executed_retest_validated id=%d %s %s entry=%.6f size=%s",
                 sig_id, action, symbol, result["entry_price"], result.get("size"),

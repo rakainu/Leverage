@@ -314,6 +314,103 @@ async def test_pending_invalidated_by_slope_flip(store, blofin):
 
 
 @pytest.mark.asyncio
+async def test_slope_flip_persistence_first_tick_does_not_kill(store, blofin):
+    """With slope_flip_required_consecutive=2, one flipped tick is not enough
+    to kill the signal — it must stay pending and the counter must be tracked."""
+    _snap_buy(store, signal_slope=0.1)
+
+    # Declining bars → slope currently negative, flipped vs signal_slope=+0.1.
+    closes = [100.0] * 8 + [99.8, 99.5, 99.2, 98.9, 98.6]
+    bars = [[1_700_000_000_000 - (len(closes) - 1 - i) * 300_000,
+             c, c + 0.1, c - 0.1, c, 1000.0] for i, c in enumerate(closes)]
+    # Price near EMA but NOT retesting (above), so Phase 2 doesn't fire.
+    blofin.fetch_last_price.return_value = 102.0
+    blofin.fetch_recent_ohlcv.return_value = bars
+
+    poller = _make_poller(
+        store, blofin,
+        cancel_on_slope_flip=True,
+        slope_flip_required_consecutive=2,
+        max_price_drift_percent=100.0,  # disable drift kill for this test
+    )
+    await poller.poll_once()
+
+    # Still pending, counter at 1.
+    assert len(store.list_pending_signals()) == 1
+    sig_id = store.list_pending_signals()[0]["id"]
+    assert poller._slope_flip_counts.get(sig_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_slope_flip_persistence_second_tick_kills(store, blofin):
+    """With threshold=2, a second consecutive flipped tick promotes the
+    counter to 2 and invalidates the signal."""
+    _snap_buy(store, signal_slope=0.1)
+
+    closes = [100.0] * 8 + [99.8, 99.5, 99.2, 98.9, 98.6]
+    bars = [[1_700_000_000_000 - (len(closes) - 1 - i) * 300_000,
+             c, c + 0.1, c - 0.1, c, 1000.0] for i, c in enumerate(closes)]
+    blofin.fetch_last_price.return_value = 102.0
+    blofin.fetch_recent_ohlcv.return_value = bars
+
+    poller = _make_poller(
+        store, blofin,
+        cancel_on_slope_flip=True,
+        slope_flip_required_consecutive=2,
+        max_price_drift_percent=100.0,
+    )
+
+    await poller.poll_once()   # tick 1 — counter goes to 1
+    await poller.poll_once()   # tick 2 — counter hits 2 → invalidated
+
+    assert store.list_pending_signals() == []
+    assert store.list_all_signals()[0]["cancel_reason"] == "invalidated_slope_flip"
+    # Counter cleared after terminal state.
+    assert poller._slope_flip_counts == {}
+
+
+@pytest.mark.asyncio
+async def test_slope_flip_counter_resets_when_slope_recovers(store, blofin):
+    """If the slope comes back into favor, the counter resets so the next
+    flip has to start over. Protects the retest scenario where the pullback's
+    slope briefly flips then recovers."""
+    _snap_buy(store, signal_slope=0.1)
+
+    # Tick 1: declining → slope flipped
+    declining_closes = [100.0] * 8 + [99.8, 99.5, 99.2, 98.9, 98.6]
+    declining_bars = [[1_700_000_000_000 - (len(declining_closes) - 1 - i) * 300_000,
+                       c, c + 0.1, c - 0.1, c, 1000.0]
+                      for i, c in enumerate(declining_closes)]
+
+    # Tick 2: recovering → slope positive again
+    recovering_closes = [99.0] * 8 + [99.2, 99.5, 99.8, 100.1, 100.4]
+    recovering_bars = [[1_700_000_000_000 - (len(recovering_closes) - 1 - i) * 300_000,
+                        c, c + 0.1, c - 0.1, c, 1000.0]
+                       for i, c in enumerate(recovering_closes)]
+
+    blofin.fetch_last_price.return_value = 102.0
+    poller = _make_poller(
+        store, blofin,
+        cancel_on_slope_flip=True,
+        slope_flip_required_consecutive=2,
+        max_price_drift_percent=100.0,
+    )
+
+    blofin.fetch_recent_ohlcv.return_value = declining_bars
+    await poller.poll_once()
+    sig_id = store.list_pending_signals()[0]["id"]
+    assert poller._slope_flip_counts.get(sig_id) == 1
+
+    blofin.fetch_recent_ohlcv.return_value = recovering_bars
+    await poller.poll_once()
+
+    # Counter reset because slope no longer flipped.
+    assert sig_id not in poller._slope_flip_counts
+    # Signal still pending.
+    assert len(store.list_pending_signals()) == 1
+
+
+@pytest.mark.asyncio
 async def test_pending_invalidated_when_price_passed_past_ema(store, blofin):
     """Directional drift: long signal, price has rallied past EMA by more
     than threshold → entry opportunity gone → kill."""

@@ -56,6 +56,10 @@ class ValidationConfig:
     cancel_on_slope_flip: bool
     bar_seconds: int                  # duration of one bar on the signal timeframe
     ema_retest_max_overshoot_pct: float   # overshoot band around EMA, %
+    # Number of consecutive polls the slope must be against the trade before
+    # the pending signal is killed. 1 = current tick flip is enough (legacy).
+    # >=2 smooths over transient pullback-induced slope flattening.
+    slope_flip_required_consecutive: int = 1
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,9 @@ class MarketContext:
     last_closed_bar_close: float      # close of the most recently closed bar
     closes_since_signal: Sequence[float]  # list of closed-bar closes AFTER the signal bar
     position_open: bool
+    # Count of consecutive prior poller ticks that observed a real slope flip
+    # against this signal. Poller owns the counter; 0 = first observation.
+    prior_slope_flip_count: int = 0
 
 
 # ------------------------------ helpers ------------------------------
@@ -100,6 +107,17 @@ def _bars_elapsed(signal_bar_ts: int, latest_bar_ts: int, bar_seconds: int) -> i
 
 def _is_long(snap: SignalSnapshot) -> bool:
     return snap.action == "buy"
+
+
+def is_slope_flipped_against(snap: SignalSnapshot, ctx: MarketContext) -> bool:
+    """True iff signal-time slope was in our favor and current slope has flipped
+    against the trade. Single-tick observation (no persistence applied).
+    Used by the poller to drive the consecutive-flip counter."""
+    if _is_long(snap) and snap.signal_ema_slope > 0 and ctx.current_ema_slope < 0:
+        return True
+    if not _is_long(snap) and snap.signal_ema_slope < 0 and ctx.current_ema_slope > 0:
+        return True
+    return False
 
 
 # ------------------------------ phase 1: invalidation ------------------------------
@@ -134,10 +152,13 @@ def check_invalidation(
     # require that the slope was in our favor at signal time and has since
     # flipped against the trade. The stricter absolute-slope check still runs
     # at revalidation (check_revalidation) per the signal-lifecycle spec.
-    if cfg.cancel_on_slope_flip:
-        if _is_long(snap) and snap.signal_ema_slope > 0 and ctx.current_ema_slope < 0:
-            return "invalidated_slope_flip"
-        if not _is_long(snap) and snap.signal_ema_slope < 0 and ctx.current_ema_slope > 0:
+    #
+    # Persistence: a healthy pullback to EMA on a trending move naturally
+    # flattens/flips the short-term slope for one or two ticks. Require
+    # `slope_flip_required_consecutive` observations (inclusive of this tick)
+    # before invalidating. Poller tracks the count via ctx.prior_slope_flip_count.
+    if cfg.cancel_on_slope_flip and is_slope_flipped_against(snap, ctx):
+        if ctx.prior_slope_flip_count + 1 >= cfg.slope_flip_required_consecutive:
             return "invalidated_slope_flip"
 
     # Price drift — directional. Fires when price has moved PAST the EMA
@@ -214,4 +235,5 @@ def check_revalidation(
 __all__ = [
     "SignalSnapshot", "ValidationConfig", "MarketContext",
     "check_invalidation", "check_retest", "check_revalidation",
+    "is_slope_flipped_against",
 ]
