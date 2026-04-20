@@ -169,3 +169,4 @@ def test_sl_adjusts_with_margin_size(store, blofin, sol_instrument):
     assert result["sl_trigger"] == pytest.approx(299.0, rel=1e-3)
 
 
+# SL and reversal handlers removed — bridge owns all exits.

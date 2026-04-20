@@ -47,28 +47,6 @@ def test_get_unknown_instrument_raises(mock_ccxt):
         client.get_instrument("DOGE-USDT")
 
 
-def test_fetch_recent_ohlcv_rejects_non_ccxt_timeframe_with_clear_error(mock_ccxt):
-    """Early-fail guard: catch bad timeframe values at our boundary with a
-    clear ValueError instead of letting BloFin return opaque 152002
-    'Parameter bar error'. Covers the bug where TV's bare-digit {{interval}}
-    ("5" instead of "5m") reached this fetch and killed the whole pipeline.
-    """
-    client = BloFinClient(ccxt_client=mock_ccxt)
-    client.load_instruments()
-    with pytest.raises(ValueError, match="timeframe"):
-        client.fetch_recent_ohlcv("SOL-USDT", timeframe="5", limit=20)
-    # ccxt.fetch_ohlcv must not be reached — we fail before the network call.
-    mock_ccxt.fetch_ohlcv.assert_not_called()
-
-
-def test_fetch_recent_ohlcv_accepts_valid_ccxt_timeframe(mock_ccxt):
-    mock_ccxt.fetch_ohlcv.return_value = [[1, 2, 3, 4, 5, 6]]
-    client = BloFinClient(ccxt_client=mock_ccxt)
-    client.load_instruments()
-    client.fetch_recent_ohlcv("SOL-USDT", timeframe="5m", limit=20)
-    mock_ccxt.fetch_ohlcv.assert_called_once()
-
-
 def test_place_market_entry_with_attached_sl(mock_ccxt):
     mock_ccxt.create_order.return_value = {
         "id": "ord-1", "average": 80.12, "filled": 12,

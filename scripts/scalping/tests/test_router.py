@@ -25,11 +25,6 @@ def blofin():
         "orderId": "o1", "fill_price": 80.0, "filled": 12,
     }
     m.place_limit_reduce_only.return_value = "tp-ceiling-id"
-    # 30 bars: enough for EMA(9) + slope + ATR(14)
-    m.fetch_recent_ohlcv.return_value = [
-        [1_700_000_000_000 + i * 300_000, 80.0, 81.0, 79.0, 80.0, 1000.0]
-        for i in range(30)
-    ]
     return m
 
 
@@ -41,14 +36,6 @@ def cfg():
             "margin_mode": "isolated", "sl_policy": "p2_step_stop",
             "sl_loss_usdt": 15, "trail_activate_usdt": 25,
             "trail_distance_usdt": 10, "tp_limit_margin_pct": 2.0,
-            # --- snapshot config (flattened from Defaults in production) ---
-            "ema_retest_period": 9,
-            "ema_retest_timeframe": "5m",
-            "ema_retest_timeout_minutes": 15,
-            "atr_length": 14,
-            "ema_slope_lookback": 1,
-            "max_signal_age_seconds": 900,
-            "max_signal_bars": 3,
         },
     }
 
@@ -64,47 +51,6 @@ def test_dispatch_buy_creates_pending_signal(store, blofin, cfg):
     signals = store.list_pending_signals()
     assert len(signals) == 1
     assert signals[0]["symbol"] == "SOL-USDT"
-
-
-def test_same_direction_resignal_keeps_original_pending(store, blofin, cfg):
-    """Pro V3 reaffirms direction every few bars in a trend — resignaling sell
-    while a sell is already pending must NOT cancel the original. The
-    first-fired setup is authoritative until it invalidates, expires, or the
-    direction flips."""
-    first = dispatch(action="sell", symbol="SOL-USDT",
-                     store=store, blofin=blofin, symbol_configs=cfg)
-    original_id = first["signal_id"]
-
-    second = dispatch(action="sell", symbol="SOL-USDT",
-                      store=store, blofin=blofin, symbol_configs=cfg)
-
-    assert second["pending"] is True
-    assert second.get("duplicate") is True
-    assert second["signal_id"] == original_id
-    pending = store.list_pending_signals()
-    assert len(pending) == 1
-    assert pending[0]["id"] == original_id
-
-
-def test_opposite_direction_signal_invalidates_existing(store, blofin, cfg):
-    """A legit reversal (sell arriving while a buy is pending) must cancel
-    the old one with reason=invalidated_opposite_signal and open a fresh
-    pending for the new direction."""
-    first = dispatch(action="buy", symbol="SOL-USDT",
-                     store=store, blofin=blofin, symbol_configs=cfg)
-    old_id = first["signal_id"]
-
-    second = dispatch(action="sell", symbol="SOL-USDT",
-                      store=store, blofin=blofin, symbol_configs=cfg)
-
-    assert second["pending"] is True
-    assert second.get("duplicate") is not True
-    assert second["signal_id"] != old_id
-
-    all_signals = store.list_all_signals(limit=10)
-    old = next(r for r in all_signals if r["id"] == old_id)
-    assert old["status"] == "invalidated"
-    assert old["cancel_reason"] == "invalidated_opposite_signal"
 
 
 def test_dispatch_unknown_action_raises(store, blofin, cfg):
@@ -164,69 +110,4 @@ def test_dispatch_returns_paused_when_gate_is_paused(store, blofin, cfg):
     assert store.list_pending_signals() == []
 
 
-# --------------- snapshot capture ---------------
-
-def _bars(num: int = 30, *, close: float = 100.0, high: float = 101.0, low: float = 99.0):
-    return [[1_700_000_000_000 + i * 300_000, close, high, low, close, 1000.0]
-            for i in range(num)]
-
-
-def test_dispatch_buy_captures_snapshot_from_market(store, blofin, cfg):
-    """When the webhook omits price/high/low, dispatch fetches them from market."""
-    blofin.fetch_last_price.return_value = 100.0
-    blofin.fetch_recent_ohlcv.return_value = _bars(30, close=100.0, high=101.0, low=99.0)
-
-    result = dispatch(
-        action="buy", symbol="SOL-USDT",
-        store=store, blofin=blofin, symbol_configs=cfg,
-    )
-    assert result["pending"] is True
-
-    signals = store.list_pending_signals()
-    assert len(signals) == 1
-    s = signals[0]
-    assert s["signal_price"] == 100.0
-    assert s["signal_candle_high"] == 101.0
-    assert s["signal_candle_low"] == 99.0
-    assert s["signal_ema_value"] is not None
-    assert s["signal_ema_slope"] is not None
-    assert s["signal_bar_ts"] is not None
-    assert s["signal_timeframe"] == "5m"  # config default
-    assert s["max_bars"] == 3
-    assert s["max_age_seconds"] == 900
-
-
-def test_dispatch_buy_uses_provided_payload_snapshot(store, blofin, cfg):
-    """When the webhook includes price/high/low, dispatch uses those directly
-    (does not overwrite from market ticker)."""
-    blofin.fetch_last_price.return_value = 100.0
-    blofin.fetch_recent_ohlcv.return_value = _bars(30, close=100.0, high=101.0, low=99.0)
-
-    result = dispatch(
-        action="buy", symbol="SOL-USDT",
-        store=store, blofin=blofin, symbol_configs=cfg,
-        payload_price=104.25,
-        payload_high=105.0,
-        payload_low=103.5,
-        payload_timeframe="5",
-    )
-    assert result["pending"] is True
-
-    s = store.list_pending_signals()[0]
-    assert s["signal_price"] == 104.25
-    assert s["signal_candle_high"] == 105.0
-    assert s["signal_candle_low"] == 103.5
-    assert s["signal_timeframe"] == "5"
-
-
-def test_dispatch_buy_snapshot_has_atr_when_bars_available(store, blofin, cfg):
-    blofin.fetch_last_price.return_value = 100.0
-    bars = [[1_700_000_000_000 + i * 300_000, 100.0, 100 + i * 0.1,
-             99 - i * 0.1, 100.0, 1000.0] for i in range(30)]
-    blofin.fetch_recent_ohlcv.return_value = bars
-
-    dispatch(action="buy", symbol="SOL-USDT",
-             store=store, blofin=blofin, symbol_configs=cfg)
-    s = store.list_pending_signals()[0]
-    assert s["signal_atr"] is not None
-    assert s["signal_atr"] > 0
+# sl / reversal action dispatch tests removed — bridge owns all exits.
