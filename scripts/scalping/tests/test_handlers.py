@@ -29,6 +29,8 @@ def blofin(sol_instrument):
     }
     m.place_sl_order.return_value = "tpsl-1"
     m.place_limit_reduce_only.return_value = "tp-ceiling-id"
+    # Default: no attached tpsl captured (tests that need the capture override).
+    m.list_pending_tpsl.return_value = []
     return m
 
 
@@ -170,3 +172,56 @@ def test_sl_adjusts_with_margin_size(store, blofin, sol_instrument):
 
 
 # SL and reversal handlers removed — bridge owns all exits.
+
+
+# === Attached SL tpslId capture ===
+
+
+def test_entry_captures_attached_sl_tpsl_id(store, blofin, sol_instrument):
+    """handle_entry must record the tpslId of the SL that BloFin attaches to
+    the market entry, so subsequent trail promotions can cancel+replace by id."""
+    blofin.get_instrument.return_value = sol_instrument
+    blofin.fetch_last_price.return_value = 300.0
+    blofin.place_market_entry.return_value = {
+        "orderId": "e-1", "fill_price": 300.0, "filled": 10,
+    }
+    # Simulate BloFin's listing of pending tpsl post-entry. The handler picks
+    # the one whose slTriggerPrice is closest to the computed sl_trigger.
+    # $100 margin × 30x = $3000 notional; $15 loss at $300 → distance 1.5
+    # Long side sl_trigger = 300 - 1.5 = 298.5
+    blofin.list_pending_tpsl.return_value = [
+        {"tpslId": "algo-captured", "slTriggerPrice": "298.5"},
+    ]
+
+    result = handle_entry(
+        action="buy", symbol="SOL-USDT",
+        store=store, blofin=blofin,
+        **_entry_kwargs(),
+    )
+    assert result["opened"] is True
+    assert result["sl_order_id"] == "algo-captured"
+
+    row = store.get_open_position("SOL-USDT")
+    assert row.sl_order_id == "algo-captured"
+
+
+def test_entry_handles_missing_attached_tpsl_gracefully(store, blofin, sol_instrument):
+    """If BloFin's pending-tpsl listing returns empty (API blip, timing), the
+    entry must still succeed. The SL is still live on the exchange — the only
+    cost is we can't cancel it by id later (cancel_all_tpsl sweeps by symbol)."""
+    blofin.get_instrument.return_value = sol_instrument
+    blofin.fetch_last_price.return_value = 300.0
+    blofin.place_market_entry.return_value = {
+        "orderId": "e-2", "fill_price": 300.0, "filled": 10,
+    }
+    blofin.list_pending_tpsl.return_value = []
+
+    result = handle_entry(
+        action="buy", symbol="SOL-USDT",
+        store=store, blofin=blofin,
+        **_entry_kwargs(),
+    )
+    assert result["opened"] is True
+    assert result["sl_order_id"] is None
+    row = store.get_open_position("SOL-USDT")
+    assert row.sl_order_id is None

@@ -111,6 +111,30 @@ def handle_entry(
         initial_size=contracts, sl_policy=sl_policy_name, source="pro_v3",
     )
 
+    # --- Capture the tpslId of the SL that BloFin attached to the entry ---
+    # create_order does not return the tpslId, so we fetch pending algos and
+    # pick the one matching our trigger price. Record it so later cancel/replace
+    # on trail promotions knows which order to sweep.
+    sl_order_id: Optional[str] = None
+    try:
+        pending = blofin.list_pending_tpsl(symbol)
+        best: Optional[dict[str, Any]] = None
+        best_diff = float("inf")
+        for algo in pending:
+            tp_price = algo.get("slTriggerPrice")
+            if not tp_price:
+                continue
+            diff = abs(float(tp_price) - sl_trigger)
+            if diff < best_diff:
+                best_diff = diff
+                best = algo
+        if best is not None:
+            sl_order_id = best.get("tpslId") or None
+            if sl_order_id:
+                store.record_sl_order_id(pid, sl_order_id)
+    except Exception:
+        log.exception("capture attached sl tpslId failed")
+
     # --- Place hard TP ceiling as reduce-only limit ---
     tp_order_id: Optional[str] = None
     close_side = "sell" if side == "long" else "buy"
@@ -136,6 +160,7 @@ def handle_entry(
         "entry_price": entry_price,
         "size": contracts,
         "sl_trigger": sl_trigger,
+        "sl_order_id": sl_order_id,
         "sl_loss_usdt": sl_loss_usdt,
         "tp_ceiling_price": tp_ceiling_price,
         "tp_order_id": tp_order_id,

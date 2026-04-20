@@ -202,6 +202,20 @@ class BloFinClient:
         if resp.get("code") not in ("0", 0):
             raise RuntimeError(f"cancel_tpsl failed: {resp}")
 
+    def list_pending_tpsl(self, inst_id: str) -> list[dict[str, Any]]:
+        """Return raw pending TP/SL algo orders for the instrument.
+
+        Used after a market entry with attached SL to capture the tpslId that
+        BloFin creates implicitly (the create_order response does not expose it).
+        """
+        try:
+            listing = self._ccxt.private_get_trade_orders_tpsl_pending(
+                {"instId": inst_id}
+            )
+        except Exception:
+            return []
+        return listing.get("data") or []
+
     def cancel_all_tpsl(self, inst_id: str) -> int:
         """Cancel every pending TP/SL order on the given instrument.
 
