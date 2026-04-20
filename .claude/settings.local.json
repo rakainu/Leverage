@@ -93,7 +93,8 @@
       "Bash(venv/Scripts/python -m pytest tests/test_router.py -q -k \"snapshot\")",
       "Bash(venv/Scripts/python -m pytest tests/test_router.py -q)",
       "Bash(venv/Scripts/python -m pytest -q)",
-      "Bash(venv/Scripts/python -c \"from blofin_bridge.main import create_app; import os; os.environ.setdefault\\('BLOFIN_DEMO_API_KEY','k'\\); os.environ.setdefault\\('BLOFIN_DEMO_API_SECRET','s'\\); os.environ.setdefault\\('BLOFIN_DEMO_PASSPHRASE','p'\\); os.environ.setdefault\\('BRIDGE_SECRET','xxxxxxxxxxxxxxxxxxxx'\\); print\\('import ok'\\)\")"
+      "Bash(venv/Scripts/python -c \"from blofin_bridge.main import create_app; import os; os.environ.setdefault\\('BLOFIN_DEMO_API_KEY','k'\\); os.environ.setdefault\\('BLOFIN_DEMO_API_SECRET','s'\\); os.environ.setdefault\\('BLOFIN_DEMO_PASSPHRASE','p'\\); os.environ.setdefault\\('BRIDGE_SECRET','xxxxxxxxxxxxxxxxxxxx'\\); print\\('import ok'\\)\")",
+      "Read(//c/Users/rakai/**)"
     ]
   }
 }
