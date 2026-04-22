@@ -1,0 +1,49 @@
+{
+  "binance": {
+    "base_url": "https://fapi.binance.com",
+    "timeout_seconds": 10,
+    "max_retries": 3,
+    "pace_ms": 80
+  },
+  "scanner": {
+    "ban_list": [],
+    "top_n_digest": 15
+  },
+  "scoring": {
+    "weights": {
+      "flatness":   0.30,
+      "funding":    0.20,
+      "oi_growth":  0.25,
+      "non_pumped": 0.15,
+      "liquidity":  0.10
+    },
+    "liquidity": {
+      "floor_quote_volume_24h": 1000000,
+      "full_quote_volume_24h": 5000000
+    }
+  },
+  "bias": {
+    "major_multiplier": 0.9,
+    "majors": [
+      "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+      "ADAUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT", "MATICUSDT",
+      "TRXUSDT", "LTCUSDT", "BCHUSDT", "ETCUSDT", "ATOMUSDT",
+      "FILUSDT", "NEARUSDT", "APTUSDT", "ARBUSDT", "OPUSDT",
+      "TONUSDT", "ICPUSDT", "HBARUSDT", "RNDRUSDT", "STXUSDT"
+    ]
+  },
+  "alerts": {
+    "new_entries_min_score_100": 60,
+    "risers_min_score_100": 50,
+    "risers_min_delta_100": 20,
+    "graduations_min_return_7d": 0.15,
+    "combo_funding_drop_threshold": 0.00005,
+    "combo_oi_growth_7d_min": 0.05,
+    "combo_contained_return_7d_max": 0.10
+  },
+  "paths": {
+    "snapshots_dir": "data/snapshots",
+    "history_csv":   "data/history/scores.csv",
+    "outputs_dir":   "outputs/daily"
+  }
+}
