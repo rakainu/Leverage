@@ -80,6 +80,47 @@ Keep these in `src/sources/` as drop-in modules so the core scanner doesn't care
 
 ---
 
-## After the build
+## Nightly cron (deployed 2026-04-22)
 
-Ship a daily cron (on the existing VPS — `46.202.146.30`) that runs the scanner, writes the snapshot, and posts the digest to Telegram. That's Phase 3. Not now.
+The scanner runs automatically every day on the VPS.
+
+| | |
+|---|---|
+| **Schedule** | `30 6 * * *` — 06:30 UTC daily |
+| **Crontab entry** | `30 6 * * * /root/SqueezeWatch/scripts/run_daily_scan.sh >> /var/log/squeezewatch.log 2>&1` |
+| **Wrapper script** | `/root/SqueezeWatch/scripts/run_daily_scan.sh` (tracked at `SqueezeWatch/scripts/run_daily_scan.sh`) |
+| **Log file** | `/var/log/squeezewatch.log` — rotated monthly, keeps 12, compressed (`/etc/logrotate.d/squeezewatch`) |
+| **Snapshot output** | `/root/SqueezeWatch/data/snapshots/YYYY-MM-DD.json` |
+| **History CSV** | `/root/SqueezeWatch/data/history/scores.csv` (append-only) |
+| **Digest output** | `/root/SqueezeWatch/outputs/daily/YYYY-MM-DD.md` |
+| **VPS timezone** | UTC (`Etc/UTC`) — cron uses system time, so `06:30` = 06:30 UTC natively |
+
+### Verify the cron ran (next morning)
+
+```bash
+ssh root@46.202.146.30 'tail -30 /var/log/squeezewatch.log'
+ssh root@46.202.146.30 'ls -la /root/SqueezeWatch/outputs/daily/ /root/SqueezeWatch/data/snapshots/ | tail -5'
+```
+
+If the `YYYY-MM-DD.md` digest exists and the log shows `Done in XXs. NNN scored...`,
+the cron ran successfully.
+
+### Manually trigger the same cron command right now (no wait)
+
+```bash
+ssh root@46.202.146.30 '/root/SqueezeWatch/scripts/run_daily_scan.sh >> /var/log/squeezewatch.log 2>&1'
+```
+
+This runs the identical invocation cron will run — same env, same paths, same log
+destination — so it's the exact reproduction test.
+
+### Next build phase
+
+Day-over-day comparison now has something to chew on after 2 consecutive scans.
+After ~5–7 days of accumulated snapshots, good follow-ups are:
+
+1. Add the four positioning endpoints from the skills hub (long-short-ratio, etc).
+2. Add Telegram push for the triggered-alert section of the digest.
+3. Hit-rate evaluation (did today's top 15 actually squeeze in the next 7/14/30d?).
+
+None of these should block the cron — it just runs.
