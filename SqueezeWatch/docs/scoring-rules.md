@@ -81,23 +81,29 @@ Rationale: OI up while price flat = new positioning, not shake-out.
 
 ### 4. Non-Pumped (weight: 0.15)
 
-Penalize coins that already moved.
+Penalize coins that already made a big move in **either direction**.
 
 ```
 return_30d = (closes_30d[-1] - closes_30d[0]) / closes_30d[0]
 return_7d  = (closes_30d[-1] - closes_30d[-8]) / closes_30d[-8]
 
-max_return = max(return_30d, return_7d)
+max_abs_ret = max(abs(return_7d), abs(return_30d))
 
 non_pumped_score =
-  100 if max_return <= 0.05        # essentially flat or down
-  80  if 0.05 < max_return <= 0.15
-  50  if 0.15 < max_return <= 0.30
-  20  if 0.30 < max_return <= 0.60
-  0   if max_return > 0.60         # already ran
+  100 if max_abs_ret <= 0.05        # essentially flat
+  80  if 0.05 < max_abs_ret <= 0.15
+  50  if 0.15 < max_abs_ret <= 0.30
+  20  if 0.30 < max_abs_ret <= 0.60
+  0   if max_abs_ret > 0.60         # already ran OR already crashed
 ```
 
-Rationale: we want pre-move, not post-move.
+Rationale: we want **pre-move**, not post-move — and not a falling knife. The
+theory says "flat / sideways price over 14–30 days." A −40% crash violates that
+just as much as a +40% pump; shorts piling in on a crashing asset are not the
+same as shorts piling in on coiled price. The symmetric-absolute form was
+adopted 2026-04-22 after the first full-universe run surfaced several capitulating
+coins (SAGAUSDT −40%, IPUSDT −20%, DYMUSDT −38%) at high ranks — see
+`notes/scoring-changelog.md`.
 
 ### 5. Liquidity Gate (weight: 0.10, but acts as a floor)
 

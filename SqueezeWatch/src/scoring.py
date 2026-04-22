@@ -88,9 +88,15 @@ def oi_growth_score(
 
 
 def non_pumped_score(return_7d: float, return_30d: float) -> int:
-    """Penalize coins that already moved. Uses max of 7d/30d returns."""
-    max_ret = max(return_7d, return_30d)
-    return int(_band(max_ret, [
+    """Penalize coins that already made a big move in EITHER direction.
+
+    We score on the max absolute return over 7d or 30d so a -40% crash is
+    treated the same as a +40% pump — both violate the "flat / sideways price"
+    requirement of the squeeze thesis. See docs/scoring-rules.md and
+    notes/scoring-changelog.md (2026-04-22 falling-knife fix).
+    """
+    max_abs_ret = max(abs(return_7d), abs(return_30d))
+    return int(_band(max_abs_ret, [
         (0.05, 100),
         (0.15,  80),
         (0.30,  50),

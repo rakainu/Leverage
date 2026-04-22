@@ -104,9 +104,32 @@ def test_non_pumped_already_ran_scores_zero():
     assert scoring.non_pumped_score(0.5, 0.8) == 0
 
 
-def test_non_pumped_uses_max_of_returns():
-    # 7d weak but 30d big => penalize on 30d
+def test_non_pumped_uses_max_of_absolute_returns():
+    # 7d weak but 30d big (up) => penalize on 30d
     assert scoring.non_pumped_score(0.0, 0.40) == 20
+
+
+def test_non_pumped_penalizes_big_drawdown():
+    # The SAGAUSDT case from the 2026-04-22 full-universe run: -40% 30d.
+    # Pre-fix this returned 100 ("pre-move"); post-fix it must reject it.
+    assert scoring.non_pumped_score(-0.32, -0.40) == 20
+
+
+def test_non_pumped_symmetric_for_pump_and_crash():
+    # A +40% pump and a -40% crash violate the "flat price" thesis equally.
+    up = scoring.non_pumped_score(0.0, 0.40)
+    down = scoring.non_pumped_score(0.0, -0.40)
+    assert up == down == 20
+
+
+def test_non_pumped_mixed_direction_uses_largest_magnitude():
+    # Small positive 7d (+3%) with a big negative 30d (-25%) => band uses |30d|
+    assert scoring.non_pumped_score(0.03, -0.25) == 50
+
+
+def test_non_pumped_tiny_drift_still_scores_100():
+    # Staying within +/- 5% either way is still "flat enough"
+    assert scoring.non_pumped_score(-0.04, 0.03) == 100
 
 
 # ---------- liquidity_score ----------
