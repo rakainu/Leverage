@@ -117,6 +117,20 @@ def test_trigger_new_top_15():
     assert len(new_top) >= 14  # all the S1..S15 are new vs yesterday's OLDUSDT
 
 
+def test_trigger_new_top_15_not_fired_for_rank_shuffle_within_top_n():
+    # A symbol already in yesterday's top-N must NOT fire new_top_15, even if
+    # it jumps ranks wildly inside the top-N. The 2026-04-23 eval initially
+    # suspected this was broken for RUNEUSDT — the real cause was a stale
+    # local snapshot; the logic was correct. This pins the behavior.
+    today = [_make_scored_row(f"S{i}USDT", i, 90 - i) for i in range(1, 16)]
+    # Yesterday's top 15 is the same symbol set in reverse: S15 at rank 1, S1 at rank 15.
+    yesterday_rows = [_make_scored_row(f"S{i}USDT", 16 - i, 90 - (16 - i)) for i in range(1, 16)]
+    yesterday = {"symbols": yesterday_rows}
+    triggered = compare.check_triggers(today, yesterday, CONFIG)
+    offenders = [t["symbol"] for t in triggered if "new_top_15" in t["triggers"]]
+    assert offenders == [], f"symbols in yesterday's top 15 wrongly flagged: {offenders}"
+
+
 def test_trigger_combo_coil_tightening():
     today = [_make_scored_row(
         "AUSDT", 1, 60,
