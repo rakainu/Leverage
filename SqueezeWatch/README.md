@@ -35,7 +35,14 @@ No API keys required for Phase 1 — Binance public futures endpoints only.
 
 ## Status
 
-Phase 0: scaffolding (this commit). See `docs/implementation-plan.md` and `docs/next-steps.md` for build order.
+**Phase 1 deployed.** Nightly cron runs at `30 6 * * *` UTC on the VPS
+(`/root/SqueezeWatch/scripts/run_daily_scan.sh`). Snapshots, history CSV,
+and a daily digest are written to `/root/SqueezeWatch/`. See
+`docs/next-steps.md` for the cron details and verify commands.
+
+**Observation mode through 2026-04-30.** No scoring / Telegram / positioning-
+endpoint changes during the window. Daily evaluations are logged to
+`docs/observation-2026-04-23.md`. Decision review on 2026-04-30.
 
 ## Quick links
 

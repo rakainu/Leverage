@@ -9,6 +9,39 @@ them. Don't tune before.
 
 ---
 
+## How to run the daily eval (runbook)
+
+Trigger: Rich says "daily eval" (or similar) after 06:30 UTC. Don't append
+entries unprompted.
+
+```bash
+# 1. Confirm today's cron ran cleanly (replace YYYY-MM-DD with today UTC)
+ssh root@46.202.146.30 "ls -la /root/SqueezeWatch/outputs/daily/ /root/SqueezeWatch/data/snapshots/ | tail -5"
+ssh root@46.202.146.30 "grep -n 'SqueezeWatch scan @ YYYY-MM-DD' /var/log/squeezewatch.log; tail -5 /var/log/squeezewatch.log"
+
+# 2. Pull TODAY + YESTERDAY snapshots fresh from VPS (never trust stale local files)
+scp root@46.202.146.30:/root/SqueezeWatch/data/snapshots/YYYY-MM-DD.json     SqueezeWatch/data/snapshots/
+scp root@46.202.146.30:/root/SqueezeWatch/data/snapshots/YESTERDAY.json       SqueezeWatch/data/snapshots/
+scp root@46.202.146.30:/root/SqueezeWatch/outputs/daily/YYYY-MM-DD.md          SqueezeWatch/outputs/daily/
+scp root@46.202.146.30:/root/SqueezeWatch/data/history/scores.csv              SqueezeWatch/data/history/
+
+# 3. Compute day-over-day and append an entry below following the existing format.
+#    Required fields per entry: universe size, top 15, top 8, max score,
+#    top-15 churn (in/out), biggest risers (Δ ≥ +1.0), biggest fallers (Δ ≤ -1.5),
+#    8.0+ crosses, alert volume by type, silent liquidity dropouts,
+#    status of prior high-conviction names, compare-logic sanity check if anything surprises.
+```
+
+**Do not** commit snapshots or outputs — `data/` and `outputs/` are gitignored.
+Commit the updated doc only.
+
+If the cron header is missing, the "Done in XXs." closing line is absent, or
+the digest file is missing: **stop and report to Rich immediately**. That's a
+cron/data integrity issue and is the only reason to break observation-mode
+rules before 2026-04-30.
+
+---
+
 ## What we're watching
 
 1. **Top-15 stability** — how much of the top 15 turns over day-over-day once
