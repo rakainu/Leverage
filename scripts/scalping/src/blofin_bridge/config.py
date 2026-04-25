@@ -90,6 +90,10 @@ class Defaults(BaseModel):
     ema_retest_timeframe: str = "5m"
     ema_retest_timeout_minutes: int = 30
     ema_retest_max_overshoot_pct: float = 0.2
+    # Minimum |EMA(9) slope-over-3-bars| in % for a fill to release.
+    # 0 disables the gate. Defaults to 0.03 — historical 14-day analysis
+    # showed every trade with |slope| < 0.03% lost (0/14 WR, -$197).
+    min_5m_slope_pct: float = 0.03
     poll_interval_seconds: int = 10
 
     @field_validator("sl_loss_usdt", "breakeven_usdt", "lock_profit_activate_usdt", "lock_profit_usdt", "trail_activate_usdt", "trail_start_usdt", "trail_distance_usdt")
@@ -111,6 +115,13 @@ class Defaults(BaseModel):
     def _poll_at_least_one(cls, v: int) -> int:
         if v < 1:
             raise ValueError(f"poll_interval_seconds must be >= 1, got {v}")
+        return v
+
+    @field_validator("min_5m_slope_pct")
+    @classmethod
+    def _slope_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError(f"min_5m_slope_pct must be >= 0, got {v}")
         return v
 
 

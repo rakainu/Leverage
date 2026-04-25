@@ -18,6 +18,7 @@ defaults:
   ema_retest_timeframe: "5m"  # candle timeframe for EMA
   ema_retest_timeout_minutes: 30  # cancel if no retest within 30 min
   ema_retest_max_overshoot_pct: 0.2  # skip entry if price overshoots EMA by > 0.2%
+  min_5m_slope_pct: 0.03      # block fill if |EMA(9) 3-bar slope %| < this; 0 disables
   poll_interval_seconds: 2
 
 symbols:

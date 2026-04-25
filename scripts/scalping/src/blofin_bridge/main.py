@@ -112,6 +112,7 @@ def create_app() -> FastAPI:
         ema_retest_period=settings.defaults.ema_retest_period,
         ema_retest_timeframe=settings.defaults.ema_retest_timeframe,
         ema_retest_max_overshoot_pct=settings.defaults.ema_retest_max_overshoot_pct,
+        min_5m_slope_pct=settings.defaults.min_5m_slope_pct,
         symbol_configs=symbol_configs,
         gate=gate,
     )

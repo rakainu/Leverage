@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .blofin_client import BloFinClient
-from .ema import compute_ema
+from .ema import compute_ema_series
 from .entry_gate import EntryGate
 from .handlers.entry import handle_entry, _dollar_to_price_distance
 from .notify import (
@@ -49,6 +49,7 @@ class PositionPoller:
         ema_retest_period: int = 9,
         ema_retest_timeframe: str = "5m",
         ema_retest_max_overshoot_pct: float = 0.2,
+        min_5m_slope_pct: float = 0.0,
         # Symbol configs for executing pending entries
         symbol_configs: Optional[dict[str, dict[str, Any]]] = None,
         # Operator-initiated per-symbol pause
@@ -70,6 +71,7 @@ class PositionPoller:
         self.ema_retest_period = ema_retest_period
         self.ema_retest_timeframe = ema_retest_timeframe
         self.ema_retest_max_overshoot_pct = ema_retest_max_overshoot_pct
+        self.min_5m_slope_pct = min_5m_slope_pct
         self.symbol_configs = symbol_configs or {}
         self.gate = gate
         self._task: Optional[asyncio.Task] = None
@@ -138,7 +140,7 @@ class PositionPoller:
                     )
                     continue
 
-                # Fetch current price and EMA
+                # Fetch current price and EMA series
                 current_price = self.blofin.fetch_last_price(sig["symbol"])
                 bars = self.blofin.fetch_recent_ohlcv(
                     sig["symbol"],
@@ -146,7 +148,8 @@ class PositionPoller:
                     limit=self.ema_retest_period + 10,
                 )
                 closes = [bar[4] for bar in bars]  # index 4 = close
-                ema_value = compute_ema(closes, self.ema_retest_period)
+                ema_series = compute_ema_series(closes, self.ema_retest_period)
+                ema_value = ema_series[-1]
 
                 # Check for retest (with overshoot cap)
                 max_overshoot = ema_value * (self.ema_retest_max_overshoot_pct / 100)
@@ -158,6 +161,24 @@ class PositionPoller:
 
                 if not retest:
                     continue
+
+                # Flat-slope gate: 14-day audit (137 trades) showed every fill
+                # with |EMA(9) 3-bar slope| < 0.03% lost. Skip the fill on this
+                # poll tick only — leave the pending alive; it can release on a
+                # later tick if the tape wakes up, or expire normally.
+                if self.min_5m_slope_pct > 0 and len(ema_series) >= 4:
+                    prior_ema = ema_series[-4]
+                    slope_pct = (ema_value - prior_ema) / prior_ema * 100.0 \
+                        if prior_ema else 0.0
+                    if abs(slope_pct) < self.min_5m_slope_pct:
+                        log.info(
+                            "Pending %d (%s %s) fill blocked by flat EMA slope: "
+                            "|%.4f%%| < %.3f%% threshold (price=%.4f, ema=%.4f)",
+                            sig["id"], sig["action"], sig["symbol"],
+                            slope_pct, self.min_5m_slope_pct,
+                            current_price, ema_value,
+                        )
+                        continue
 
                 log.info(
                     "EMA(%d) retest confirmed for %s %s: price=%.2f, ema=%.2f",
