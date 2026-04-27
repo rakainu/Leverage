@@ -159,11 +159,11 @@ class CurationPipeline:
                     existing[addr]["active"] = True
                     updated += 1
             else:
-                # Add new discovered wallet
+                # Add new discovered wallet — provenance from candidate
                 existing[addr] = {
                     "address": addr,
                     "label": nw.get("label_hint", f"auto-{addr[:8]}"),
-                    "source": "nansen-live",
+                    "source": nw.get("source", "auto"),
                     "added_at": datetime.now(timezone.utc).isoformat(),
                     "score": nw["score"],
                     "stats": nw["stats"],
