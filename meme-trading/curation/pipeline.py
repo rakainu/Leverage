@@ -291,6 +291,47 @@ class CurationPipeline:
 
         return added, updated, deactivated
 
+    async def _prune_dead_wallets(self, days: int) -> int:
+        """Deactivate auto-source wallets with 0 buy_events in the last `days` days.
+
+        Manual wallets are never touched. Returns count of wallets newly deactivated.
+        Updates both DB and wallets.json.
+        """
+        db = await get_db()
+        rows = await db.execute_fetchall(
+            f"""SELECT w.address FROM tracked_wallets w
+                LEFT JOIN buy_events b
+                  ON b.wallet_address = w.address
+                  AND b.timestamp > datetime('now', '-{int(days)} days')
+                WHERE w.active = 1 AND w.source != 'manual'
+                GROUP BY w.address
+                HAVING COUNT(b.id) = 0"""
+        )
+        dead = [r["address"] for r in (rows or [])]
+        if not dead:
+            return 0
+
+        # Deactivate in DB
+        placeholders = ",".join("?" for _ in dead)
+        await db.execute(
+            f"UPDATE tracked_wallets SET active = 0 WHERE address IN ({placeholders})",
+            dead,
+        )
+        await db.commit()
+
+        # Mirror change in wallets.json (preserve order, skip manual defensively)
+        path = Path(self.settings.wallets_json_path)
+        data = json.loads(path.read_text())
+        dead_set = set(dead)
+        for w in data.get("wallets", []):
+            if w.get("address") in dead_set and w.get("source") != "manual":
+                w["active"] = False
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        data["version"] = data.get("version", 0) + 1
+        path.write_text(json.dumps(data, indent=2))
+
+        return len(dead)
+
     async def _sync_to_db(self):
         """Sync wallets.json to the tracked_wallets DB table for dashboard queries."""
         path = Path(self.settings.wallets_json_path)

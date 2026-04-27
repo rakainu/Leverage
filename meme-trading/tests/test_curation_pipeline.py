@@ -172,3 +172,43 @@ async def test_discover_gmgn_apify_one_bucket_fails_other_succeeds(settings):
 
     addrs = [w["address"] for w in result]
     assert addrs == ["GOOD1"]
+
+
+@pytest.mark.asyncio
+async def test_prune_dead_wallets_skips_manual_and_inactive(settings, tmp_wallets, tmp_path):
+    """Only auto-source, currently-active wallets with 0 buys in window get deactivated."""
+    # Replace wallets file with a richer fixture
+    tmp_wallets.write_text(json.dumps({
+        "wallets": [
+            {"address": "MANUAL1", "label": "m", "source": "manual", "active": True, "score": 80,
+             "added_at": "2026-01-01T00:00:00+00:00"},
+            {"address": "GMGN_ACTIVE", "label": "g1", "source": "gmgn-apify", "active": True, "score": 75,
+             "added_at": "2026-01-01T00:00:00+00:00"},
+            {"address": "GMGN_DEAD", "label": "g2", "source": "gmgn-apify", "active": True, "score": 65,
+             "added_at": "2026-01-01T00:00:00+00:00"},
+            {"address": "ALREADY_OFF", "label": "off", "source": "nansen-live", "active": False, "score": 30,
+             "added_at": "2026-01-01T00:00:00+00:00"},
+        ],
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "version": 1,
+    }))
+
+    # Mock the DB query result — only GMGN_DEAD comes back as dead (had no recent buys)
+    dead_rows = [{"address": "GMGN_DEAD"}]
+    fake_db = AsyncMock()
+    fake_db.execute_fetchall = AsyncMock(return_value=dead_rows)
+    fake_db.execute = AsyncMock()
+    fake_db.commit = AsyncMock()
+
+    pipeline = CurationPipeline(settings)
+    with patch("curation.pipeline.get_db", AsyncMock(return_value=fake_db)):
+        pruned = await pipeline._prune_dead_wallets(days=7)
+
+    assert pruned == 1
+
+    data = json.loads(tmp_wallets.read_text())
+    by_addr = {w["address"]: w for w in data["wallets"]}
+    assert by_addr["MANUAL1"]["active"] is True
+    assert by_addr["GMGN_ACTIVE"]["active"] is True
+    assert by_addr["GMGN_DEAD"]["active"] is False
+    assert by_addr["ALREADY_OFF"]["active"] is False  # unchanged
