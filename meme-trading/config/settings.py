@@ -104,4 +104,4 @@ class Settings(BaseSettings):
             return json.loads(v)
         return v
 
-    model_config = {"env_file": ".env", "env_prefix": "SMC_", "extra": "ignore"}
+    model_config = {"env_file": ".env", "env_prefix": "SMC_"}

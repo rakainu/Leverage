@@ -36,7 +36,7 @@ Key settings:
 - `SMC_CONVERGENCE_THRESHOLD` — min wallets for signal (default: 3)
 - `SMC_CONVERGENCE_WINDOW_MINUTES` — sliding window (default: 60)
 - `SMC_TRADE_AMOUNT_SOL` — per-trade size (default: 0.25)
-- `SMC_TAKE_PROFIT_PCT` / `SMC_STOP_LOSS_PCT` — exit thresholds
+- `SMC_STOP_LOSS_PCT` — stop-loss threshold (TP is now handled by trailing stop, see SMC_TRAIL_*)
 - `SMC_POSITION_TIMEOUT_MINUTES` — max hold time (default: 240)
 
 ## Architecture
