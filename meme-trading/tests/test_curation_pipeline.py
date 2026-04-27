@@ -1,6 +1,8 @@
 """Tests for CurationPipeline."""
 import json
+import time
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -63,9 +65,6 @@ async def test_merge_default_source_when_missing(settings, tmp_wallets):
     assert anon["source"] == "auto"
 
 
-from unittest.mock import AsyncMock, patch
-
-
 @pytest.mark.asyncio
 async def test_discover_gmgn_apify_no_token_returns_empty(settings):
     settings.apify_api_token = ""
@@ -83,7 +82,6 @@ async def test_discover_gmgn_apify_filters_by_score(settings):
     settings.gmgn_max_new_per_cycle = 20
 
     # Build a high-score and a low-score candidate from Apify
-    import time
     now = time.time()
     high = {
         "wallet_address": "HIGH1",
@@ -111,7 +109,7 @@ async def test_discover_gmgn_apify_filters_by_score(settings):
     assert "LOW1" not in addrs
     # Source is correctly tagged
     assert all(w["source"] == "gmgn-apify" for w in result)
-    # max_new_per_cycle cap applied — duplicate HIGH1 dedupes to one entry
+    # Dedupe collapses HIGH1's two-bucket appearance into one; LOW1 is filtered by score
     assert len(result) == 1
 
 
@@ -122,7 +120,6 @@ async def test_discover_gmgn_apify_caps_new_per_cycle(settings):
     settings.gmgn_min_score = 60.0
     settings.gmgn_max_new_per_cycle = 3
 
-    import time
     now = time.time()
     candidates = [
         {
@@ -143,3 +140,35 @@ async def test_discover_gmgn_apify_caps_new_per_cycle(settings):
         result = await pipeline._discover_gmgn_apify()
 
     assert len(result) == 3
+
+
+@pytest.mark.asyncio
+async def test_discover_gmgn_apify_one_bucket_fails_other_succeeds(settings):
+    """If one Apify bucket raises, the other's wallets still flow through."""
+    settings.apify_api_token = "test-token"
+    settings.gmgn_min_score = 60.0
+    settings.gmgn_max_new_per_cycle = 20
+
+    now = time.time()
+    good = {
+        "wallet_address": "GOOD1",
+        "winrate_7d": 0.65, "realized_profit_7d": 8000,
+        "winrate_30d": 0.60, "realized_profit_30d": 30000,
+        "txs_7d": 25, "last_active": now - 3600,
+        "pnl_2x_5x_num_7d": 2,
+    }
+
+    async def first_bucket_fails(*args, **kwargs):
+        if kwargs.get("trader_type") == "smart_degen":
+            raise RuntimeError("apify smart_degen blew up")
+        return [good]
+
+    fake_apify = AsyncMock()
+    fake_apify.discover_copytrade_wallets = AsyncMock(side_effect=first_bucket_fails)
+
+    pipeline = CurationPipeline(settings)
+    with patch("curation.pipeline.ApifyGMGNClient", return_value=fake_apify):
+        result = await pipeline._discover_gmgn_apify()
+
+    addrs = [w["address"] for w in result]
+    assert addrs == ["GOOD1"]

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -182,12 +183,28 @@ class CurationPipeline:
             if addr and addr not in seen:
                 seen[addr] = c
 
-        # Score, filter, sort
-        scored: list[tuple[float, dict, dict]] = []  # (composite, candidate, score_result)
-        for addr, c in seen.items():
-            if not ranker.meets_minimum(c, min_composite=self.settings.gmgn_min_score):
+        # Score, filter, sort. Call score() once per candidate (avoid the
+        # double-compute in meets_minimum which scores then re-checks).
+        now_ts = time.time()
+        scored: list[tuple[float, dict, dict]] = []
+        for c in seen.values():
+            # Hard floors (mirrors GMGNRanker.meets_minimum, minus its score() call)
+            txs_7d = int(c.get("txs_7d", 0) or 0)
+            if txs_7d < 5 or txs_7d > 1000:
                 continue
+            last_active = c.get("last_active") or 0
+            if not last_active or now_ts - float(last_active) > 7 * 86400:
+                continue
+            if float(c.get("realized_profit_7d", 0) or 0) <= 0:
+                continue
+            if float(c.get("realized_profit_30d", 0) or 0) <= 0:
+                continue
+            if float(c.get("winrate_7d", 0) or 0) < 0.45:
+                continue
+            # Now score once and gate on composite
             result = ranker.score(c)
+            if result["composite"] < self.settings.gmgn_min_score:
+                continue
             scored.append((result["composite"], c, result))
 
         scored.sort(key=lambda x: x[0], reverse=True)
