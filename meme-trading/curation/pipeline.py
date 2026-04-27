@@ -12,6 +12,8 @@ from config.settings import Settings
 from curation.discovery import WalletDiscovery
 from curation.scorer import WalletScorer
 from curation.dedupe import dedupe_wallets
+from curation.apify_gmgn import ApifyGMGNClient
+from curation.gmgn_ranker import GMGNRanker
 from db.database import get_db
 
 logger = logging.getLogger("smc.curation.pipeline")
@@ -135,6 +137,86 @@ class CurationPipeline:
         except Exception as e:
             logger.error(f"Nansen discovery failed: {e}")
             return []
+
+    async def _discover_gmgn_apify(self) -> list[dict]:
+        """Pull profitable wallets from GMGN via Apify (smart_degen + pump_smart buckets).
+
+        Filters candidates through GMGNRanker.meets_minimum, sorts by composite score,
+        caps additions at gmgn_max_new_per_cycle to keep the pool stable.
+        """
+        if not self.settings.apify_api_token:
+            logger.warning("No Apify API token — skipping GMGN-Apify discovery")
+            return []
+
+        apify = ApifyGMGNClient(self.settings.apify_api_token, self.http)
+        ranker = GMGNRanker()
+
+        # Pull two trader-type buckets in parallel
+        buckets = ("smart_degen", "pump_smart")
+        results = await asyncio.gather(
+            *[
+                apify.discover_copytrade_wallets(
+                    trader_type=tt,
+                    sort_by="profit_7days",
+                    min_winrate_7d=self.settings.gmgn_min_winrate_pct,
+                    min_txs_7d=self.settings.gmgn_min_txs_7d,
+                    max_items=self.settings.gmgn_max_per_actor,
+                )
+                for tt in buckets
+            ],
+            return_exceptions=True,
+        )
+
+        candidates: list[dict] = []
+        for tt, items in zip(buckets, results):
+            if isinstance(items, Exception):
+                logger.error(f"Apify {tt} bucket failed: {items}")
+                continue
+            candidates.extend(items)
+            logger.info(f"GMGN-Apify {tt}: {len(items)} raw")
+
+        # Dedupe by address (same wallet may appear in both buckets)
+        seen: dict[str, dict] = {}
+        for c in candidates:
+            addr = c.get("wallet_address") or c.get("address")
+            if addr and addr not in seen:
+                seen[addr] = c
+
+        # Score, filter, sort
+        scored: list[tuple[float, dict, dict]] = []  # (composite, candidate, score_result)
+        for addr, c in seen.items():
+            if not ranker.meets_minimum(c, min_composite=self.settings.gmgn_min_score):
+                continue
+            result = ranker.score(c)
+            scored.append((result["composite"], c, result))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        scored = scored[: self.settings.gmgn_max_new_per_cycle]
+
+        qualified = []
+        for composite, c, result in scored:
+            addr = c.get("wallet_address") or c.get("address")
+            wr_pct = int(float(c.get("winrate_7d", 0) or 0) * 100)
+            profit_k = int(float(c.get("realized_profit_7d", 0) or 0) / 1000)
+            qualified.append({
+                "address": addr,
+                "score": composite,
+                "stats": {
+                    "total_trades": int(c.get("txs_7d", 0) or 0),
+                    "win_rate": float(c.get("winrate_7d", 0) or 0) * 100,
+                    "total_pnl_sol": 0.0,  # GMGN reports USD, not SOL
+                    "total_pnl_usd_7d": float(c.get("realized_profit_7d", 0) or 0),
+                    "avg_hold_minutes": 0,
+                },
+                "label_hint": f"gmgn-{int(composite)}-wr{wr_pct}-${profit_k}k7d",
+                "source": "gmgn-apify",
+            })
+
+        logger.info(
+            f"GMGN-Apify discovery: {len(seen)} unique candidates → "
+            f"{len(qualified)} qualified (score≥{self.settings.gmgn_min_score})"
+        )
+        return qualified
 
     async def _merge_wallets(self, new_wallets: list[dict]) -> tuple[int, int, int]:
         """Update wallets.json: add new auto wallets, deactivate stale ones.
