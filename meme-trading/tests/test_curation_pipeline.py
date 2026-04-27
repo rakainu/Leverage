@@ -66,6 +66,42 @@ async def test_merge_default_source_when_missing(settings, tmp_wallets):
 
 
 @pytest.mark.asyncio
+async def test_merge_updates_existing_nonmanual_preserves_source(settings, tmp_wallets):
+    """Re-discovering a non-manual wallet refreshes score/stats but never changes source."""
+    # Seed: an existing nansen-live wallet
+    tmp_wallets.write_text(json.dumps({
+        "wallets": [
+            {"address": "EXISTING1", "label": "old", "source": "nansen-live",
+             "score": 70, "stats": {"total_trades": 5, "win_rate": 50, "total_pnl_sol": 0,
+             "avg_hold_minutes": 0}, "active": True, "added_at": "2026-01-01T00:00:00+00:00"},
+        ],
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "version": 1,
+    }))
+
+    pipeline = CurationPipeline(settings)
+    # Re-discovery: same address, but candidate carries source=gmgn-apify
+    new = [{
+        "address": "EXISTING1",
+        "score": 88,
+        "stats": {"total_trades": 25, "win_rate": 70, "total_pnl_sol": 0, "avg_hold_minutes": 0},
+        "label_hint": "gmgn-88-wr70",
+        "source": "gmgn-apify",
+    }]
+    added, updated, below_threshold = await pipeline._merge_wallets(new)
+
+    assert added == 0
+    assert updated == 1
+
+    data = json.loads(tmp_wallets.read_text())
+    w = next(w for w in data["wallets"] if w["address"] == "EXISTING1")
+    assert w["score"] == 88                # refreshed
+    assert w["stats"]["total_trades"] == 25  # refreshed
+    assert w["source"] == "nansen-live"    # PRESERVED — never changed
+    assert w["active"] is True
+
+
+@pytest.mark.asyncio
 async def test_discover_gmgn_apify_no_token_returns_empty(settings):
     settings.apify_api_token = ""
     pipeline = CurationPipeline(settings)

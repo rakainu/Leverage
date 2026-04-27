@@ -21,15 +21,17 @@ logger = logging.getLogger("smc.curation.pipeline")
 
 
 class CurationPipeline:
-    """Scheduled pipeline that discovers new wallets and maintains the wallet list.
+    """Scheduled pipeline that maintains the active wallet pool.
 
-    Runs every N hours:
-    1. Get trending/recent winning tokens
-    2. Find top traders for each
-    3. Get full stats and score each candidate
-    4. Merge qualified wallets into wallets.json
-    5. Deactivate stale auto-wallets below threshold
-    6. Sync wallet list to tracked_wallets DB table
+    Runs every `curation_interval_hours` hours:
+    1. Prune dead-weight: deactivate non-manual wallets with 0 buy_events in the last
+       `wallet_prune_dead_days` days.
+    2. Discover new wallets via GMGN-Apify (smart_degen + pump_smart trader-type buckets),
+       scored by `GMGNRanker`, capped at `gmgn_max_new_per_cycle`.
+    3. Optionally pull from Nansen Smart Money if a key is configured (secondary source).
+    4. Merge new candidates into wallets.json — manual wallets are immutable; existing
+       auto/source wallets get their score+stats refreshed.
+    5. Sync wallets.json to the `tracked_wallets` DB table for dashboard queries.
     """
 
     def __init__(self, settings: Settings):
@@ -246,7 +248,9 @@ class CurationPipeline:
     async def _merge_wallets(self, new_wallets: list[dict]) -> tuple[int, int, int]:
         """Update wallets.json: add new auto wallets, deactivate stale ones.
 
-        Returns (added, updated, deactivated) counts.
+        Returns (added, updated, below_threshold) counts. below_threshold = auto wallets newly
+        deactivated due to score < min_wallet_score (separate from prune-by-inactivity, which
+        lives in _prune_dead_wallets).
         """
         path = Path(self.settings.wallets_json_path)
         data = json.loads(path.read_text())
@@ -279,12 +283,12 @@ class CurationPipeline:
                 added += 1
 
         # Deactivate auto wallets below threshold
-        deactivated = 0
+        below_threshold = 0
         for addr, w in existing.items():
             if w.get("source") == "auto" and w.get("score", 0) < self.settings.min_wallet_score:
                 if w.get("active", True):
                     w["active"] = False
-                    deactivated += 1
+                    below_threshold += 1
 
         # Dedupe before write — defensive guard against race conditions
         merged_list = list(existing.values())
@@ -297,7 +301,7 @@ class CurationPipeline:
         data["version"] = data.get("version", 0) + 1
         path.write_text(json.dumps(data, indent=2))
 
-        return added, updated, deactivated
+        return added, updated, below_threshold
 
     async def _prune_dead_wallets(self, days: int) -> int:
         """Deactivate auto-source wallets with 0 buy_events in the last `days` days.
@@ -311,7 +315,7 @@ class CurationPipeline:
                 LEFT JOIN buy_events b
                   ON b.wallet_address = w.address
                   AND b.timestamp > datetime('now', '-{int(days)} days')
-                WHERE w.active = 1 AND w.source != 'manual'
+                WHERE w.active = 1 AND (w.source IS NULL OR w.source != 'manual')
                 GROUP BY w.address
                 HAVING COUNT(b.id) = 0"""
         )
