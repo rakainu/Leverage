@@ -212,3 +212,73 @@ async def test_prune_dead_wallets_skips_manual_and_inactive(settings, tmp_wallet
     assert by_addr["GMGN_ACTIVE"]["active"] is True
     assert by_addr["GMGN_DEAD"]["active"] is False
     assert by_addr["ALREADY_OFF"]["active"] is False  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_run_once_calls_gmgn_first_then_nansen_when_key_set(settings):
+    """run_once: prune → GMGN → Nansen (only if key) → merge → sync."""
+    settings.apify_api_token = "tok"
+    settings.nansen_api_key = "nansen-tok"
+
+    pipeline = CurationPipeline(settings)
+    pipeline._prune_dead_wallets = AsyncMock(return_value=2)
+    pipeline._discover_gmgn_apify = AsyncMock(return_value=[
+        {"address": "G1", "score": 80, "stats": {"total_trades": 10, "win_rate": 60,
+            "total_pnl_sol": 0, "avg_hold_minutes": 0}, "label_hint": "g", "source": "gmgn-apify"},
+    ])
+    pipeline._discover_nansen = AsyncMock(return_value=[
+        {"address": "N1", "score": 72, "stats": {"total_trades": 5, "win_rate": 0,
+            "total_pnl_sol": 0, "avg_hold_minutes": 0}, "label_hint": "n", "source": "nansen-live"},
+    ])
+    pipeline._merge_wallets = AsyncMock(return_value=(2, 0, 0))
+    pipeline._sync_to_db = AsyncMock()
+
+    await pipeline.run_once()
+
+    pipeline._prune_dead_wallets.assert_awaited_once()
+    pipeline._discover_gmgn_apify.assert_awaited_once()
+    pipeline._discover_nansen.assert_awaited_once()
+    # _merge_wallets called with both providers' candidates concatenated
+    args, _ = pipeline._merge_wallets.call_args
+    addrs = {w["address"] for w in args[0]}
+    assert addrs == {"G1", "N1"}
+    pipeline._sync_to_db.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_once_skips_nansen_when_no_key(settings):
+    settings.apify_api_token = "tok"
+    settings.nansen_api_key = ""
+
+    pipeline = CurationPipeline(settings)
+    pipeline._prune_dead_wallets = AsyncMock(return_value=0)
+    pipeline._discover_gmgn_apify = AsyncMock(return_value=[
+        {"address": "G1", "score": 80, "stats": {"total_trades": 10, "win_rate": 60,
+            "total_pnl_sol": 0, "avg_hold_minutes": 0}, "label_hint": "g", "source": "gmgn-apify"},
+    ])
+    pipeline._discover_nansen = AsyncMock()
+    pipeline._merge_wallets = AsyncMock(return_value=(1, 0, 0))
+    pipeline._sync_to_db = AsyncMock()
+
+    await pipeline.run_once()
+
+    pipeline._discover_nansen.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_once_no_discoveries_still_syncs(settings):
+    """If both providers return empty, still run prune + sync (no merge)."""
+    settings.apify_api_token = ""
+    settings.nansen_api_key = ""
+
+    pipeline = CurationPipeline(settings)
+    pipeline._prune_dead_wallets = AsyncMock(return_value=3)
+    pipeline._discover_gmgn_apify = AsyncMock(return_value=[])
+    pipeline._discover_nansen = AsyncMock(return_value=[])
+    pipeline._merge_wallets = AsyncMock()
+    pipeline._sync_to_db = AsyncMock()
+
+    await pipeline.run_once()
+
+    pipeline._merge_wallets.assert_not_awaited()
+    pipeline._sync_to_db.assert_awaited_once()

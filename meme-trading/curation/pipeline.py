@@ -51,24 +51,31 @@ class CurationPipeline:
             await asyncio.sleep(self.settings.curation_interval_hours * 3600)
 
     async def run_once(self):
-        """Single curation cycle — Nansen Smart Money discovery."""
+        """Single curation cycle: prune dead → discover GMGN → discover Nansen (opt) → merge → sync."""
         logger.info("Starting curation cycle...")
 
-        # Discover active SM wallets from Nansen
-        nansen_wallets = await self._discover_nansen()
+        pruned = await self._prune_dead_wallets(days=self.settings.wallet_prune_dead_days)
 
-        if not nansen_wallets:
-            logger.warning("No new wallets from Nansen this cycle")
-            return
+        gmgn_wallets = await self._discover_gmgn_apify()
 
-        # Merge into wallets.json
-        added, updated, deactivated = await self._merge_wallets(nansen_wallets)
-        logger.info(
-            f"Curation complete: +{added} added, ~{updated} updated, -{deactivated} deactivated"
-        )
+        nansen_wallets: list[dict] = []
+        if self.settings.nansen_api_key:
+            nansen_wallets = await self._discover_nansen()
 
-        # Sync to DB
+        new_wallets = gmgn_wallets + nansen_wallets
+
+        added = updated = below_threshold = 0
+        if new_wallets:
+            added, updated, below_threshold = await self._merge_wallets(new_wallets)
+
         await self._sync_to_db()
+
+        logger.info(
+            "Curation cycle done: "
+            f"gmgn={len(gmgn_wallets)} nansen={len(nansen_wallets)} "
+            f"+{added} added, ~{updated} updated, "
+            f"-{pruned} pruned-dead, -{below_threshold} below-threshold"
+        )
 
     async def _discover_nansen(self) -> list[dict]:
         """Pull active Smart Money wallets from Nansen DEX Trades API."""
@@ -130,6 +137,7 @@ class CurationPipeline:
                     },
                     "label_hint": f"nansen-sm-{s['buys']}buys-{s['usd']:.0f}usd",
                     "tokens": tokens_str,
+                    "source": "nansen-live",
                 })
 
             logger.info(f"Nansen: {len(qualified)} wallets buying memecoins out of {len(stats)} total SM")
