@@ -77,10 +77,11 @@ class LiveExecutor:
             db = await get_db()
             cursor = await db.execute(
                 """INSERT INTO positions
-                   (token_mint, token_symbol, mode, status, entry_price,
+                   (signal_id, token_mint, token_symbol, mode, status, entry_price,
                     amount_sol, amount_tokens, buy_signature, opened_at)
-                   VALUES (?, ?, 'live', 'open', ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, 'live', 'open', ?, ?, ?, ?, ?)""",
                 (
+                    signal.db_id,
                     signal.token_mint,
                     signal.token_symbol,
                     entry_price,
@@ -93,14 +94,13 @@ class LiveExecutor:
             await db.commit()
             position_id = cursor.lastrowid
 
-            # Link signal
-            await db.execute(
-                """UPDATE convergence_signals SET position_id=?, action_taken='live_trade'
-                   WHERE token_mint=? AND position_id IS NULL
-                   ORDER BY signal_at DESC LIMIT 1""",
-                (position_id, signal.token_mint),
-            )
-            await db.commit()
+            # Inverse link cs.position_id -> p.id, keyed by signal row id
+            if signal.db_id is not None:
+                await db.execute(
+                    "UPDATE convergence_signals SET position_id=?, action_taken='live_trade' WHERE id=?",
+                    (position_id, signal.db_id),
+                )
+                await db.commit()
 
             logger.info(
                 f"LIVE TRADE opened: {signal.token_mint[:12]}.. | "

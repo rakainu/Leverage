@@ -46,10 +46,11 @@ class PaperExecutor:
 
         cursor = await db.execute(
             """INSERT INTO positions
-               (token_mint, token_symbol, mode, status, entry_price,
+               (signal_id, token_mint, token_symbol, mode, status, entry_price,
                 amount_sol, amount_tokens, opened_at)
-               VALUES (?, ?, 'paper', 'open', ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, 'paper', 'open', ?, ?, ?, ?)""",
             (
+                signal.db_id,
                 signal.token_mint,
                 signal.token_symbol,
                 entry_price,
@@ -68,12 +69,14 @@ class PaperExecutor:
             f"ID: {position_id}"
         )
 
-        # Link signal to position
-        await db.execute(
-            "UPDATE convergence_signals SET position_id=?, action_taken='paper_trade' WHERE token_mint=? AND position_id IS NULL ORDER BY signal_at DESC LIMIT 1",
-            (position_id, signal.token_mint),
-        )
-        await db.commit()
+        # Inverse link cs.position_id -> p.id, keyed by the signal's own row id
+        # (was: brittle MATCH-by-token+ORDER BY which raced if multiple signals were close)
+        if signal.db_id is not None:
+            await db.execute(
+                "UPDATE convergence_signals SET position_id=?, action_taken='paper_trade' WHERE id=?",
+                (position_id, signal.db_id),
+            )
+            await db.commit()
 
         return position_id
 

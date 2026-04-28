@@ -29,3 +29,4 @@ class ConvergenceSignal:
     avg_amount_sol: float
     total_amount_sol: float
     convergence_minutes: float = 0.0
+    db_id: int | None = None  # set by ConvergenceEngine._persist_signal so executors can FK back

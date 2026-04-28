@@ -108,10 +108,10 @@ class ConvergenceEngine:
         await self.signal_bus.put(signal)
 
     async def _persist_signal(self, signal: ConvergenceSignal):
-        """Save convergence signal to database."""
+        """Save convergence signal to database. Sets signal.db_id so executors can FK back."""
         try:
             db = await get_db()
-            await db.execute(
+            cursor = await db.execute(
                 """INSERT INTO convergence_signals
                    (token_mint, token_symbol, wallet_count, wallets_json,
                     first_buy_at, signal_at, avg_amount_sol, total_amount_sol)
@@ -128,6 +128,7 @@ class ConvergenceEngine:
                 ),
             )
             await db.commit()
+            signal.db_id = cursor.lastrowid
         except Exception as e:
             logger.error(f"Failed to persist signal: {e}")
 
