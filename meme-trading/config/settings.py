@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     telegram_chat_id: str = "6421609315"
     notify_2buy: bool = True     # watch-only 2-wallet convergence alerts (noisy)
 
+    # Audit endpoint (Bearer auth for /api/audit-and-notify, called by scheduled cloud agents)
+    audit_token: str = ""
+
     # Curation cadence
     curation_interval_hours: float = 12.0  # was 6.0 — sufficient given pool stability
 

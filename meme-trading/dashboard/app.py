@@ -8,14 +8,19 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, StreamingResponse
 
+from config.settings import Settings
+from dashboard.audit import register_audit_routes
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("smc.dashboard.app")
 
 
-def create_app(ws_manager: WebSocketManager, db) -> FastAPI:
+def create_app(ws_manager: WebSocketManager, db, settings: Settings | None = None) -> FastAPI:
     """Create and configure the FastAPI dashboard app."""
     app = FastAPI(title="SMC Trading Dashboard")
+    if settings is None:
+        settings = Settings()
+    register_audit_routes(app, db, settings)
 
     @app.get("/", response_class=HTMLResponse)
     async def index():

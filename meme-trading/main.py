@@ -166,7 +166,7 @@ async def alert_fanout(alert_bus: asyncio.Queue, telegram_queue: asyncio.Queue, 
 
 async def run_dashboard(settings: Settings, ws_manager: WebSocketManager, db):
     """Run the FastAPI dashboard server."""
-    app = create_app(ws_manager, db)
+    app = create_app(ws_manager, db, settings)
     config = uvicorn.Config(
         app,
         host=settings.dashboard_host,
