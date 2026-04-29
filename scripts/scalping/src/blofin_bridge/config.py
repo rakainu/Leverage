@@ -63,6 +63,7 @@ class BridgeCreds(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore",
     )
     shared_secret: str = Field(alias="BRIDGE_SECRET")
+    audit_secret: str = Field(alias="BRIDGE_AUDIT_SECRET", default="")
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN", default="")
     telegram_chat_id: str = Field(alias="TELEGRAM_CHAT_ID", default="")
     telegram_allowed_user_id: int = Field(

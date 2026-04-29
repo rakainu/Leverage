@@ -168,6 +168,67 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="invalid secret")
         return {"trades": store.get_trade_log(limit=limit)}
 
+    @app.get("/audit")
+    def audit(secret: str = "", limit: int = 200) -> dict[str, Any]:
+        """Read-only audit endpoint for scheduled cloud agents.
+
+        Returns the trade_log + pre-computed summary stats so the agent
+        can render a verdict without needing to do its own SQL or math.
+        Uses BRIDGE_AUDIT_SECRET (separate from BRIDGE_SECRET) so a leak
+        of the audit key cannot trigger fake webhook trades.
+        """
+        if not settings.bridge.audit_secret:
+            raise HTTPException(status_code=503, detail="audit endpoint not configured")
+        if secret != settings.bridge.audit_secret:
+            raise HTTPException(status_code=401, detail="invalid audit secret")
+
+        trades = store.get_trade_log(limit=limit)
+
+        def _stat(rows: list[dict]) -> dict[str, Any]:
+            if not rows:
+                return {"n": 0}
+            pnls = [(r.get("pnl_usdt") or 0.0) for r in rows]
+            wins = [p for p in pnls if p > 0]
+            losses = [p for p in pnls if p <= 0]
+            sl_pnls = [(r.get("pnl_usdt") or 0.0) for r in rows if r.get("exit_reason") == "sl"]
+            trail_pnls = [(r.get("pnl_usdt") or 0.0) for r in rows if r.get("exit_reason") == "trail_sl"]
+            return {
+                "n": len(rows),
+                "net_pnl": round(sum(pnls), 2),
+                "avg_pnl": round(sum(pnls) / len(rows), 3),
+                "win_rate": round(len(wins) / len(rows), 3),
+                "wins_count": len(wins),
+                "losses_count": len(losses),
+                "avg_win": round(sum(wins) / len(wins), 2) if wins else 0,
+                "avg_loss": round(sum(losses) / len(losses), 2) if losses else 0,
+                "sl_count": len(sl_pnls),
+                "sl_avg": round(sum(sl_pnls) / len(sl_pnls), 2) if sl_pnls else 0,
+                "trail_count": len(trail_pnls),
+                "trail_avg": round(sum(trail_pnls) / len(trail_pnls), 2) if trail_pnls else 0,
+                "first_opened_at": rows[-1]["opened_at"] if rows else None,
+                "last_closed_at": rows[0]["closed_at"] if rows else None,
+            }
+
+        return {
+            "config": {
+                "env": settings.blofin.env,
+                "margin_usdt": settings.defaults.margin_usdt,
+                "leverage": settings.defaults.leverage,
+                "sl_loss_usdt": settings.defaults.sl_loss_usdt,
+                "breakeven_usdt": settings.defaults.breakeven_usdt,
+                "lock_profit_activate_usdt": settings.defaults.lock_profit_activate_usdt,
+                "lock_profit_usdt": settings.defaults.lock_profit_usdt,
+                "trail_activate_usdt": settings.defaults.trail_activate_usdt,
+                "trail_start_usdt": settings.defaults.trail_start_usdt,
+                "trail_distance_usdt": settings.defaults.trail_distance_usdt,
+            },
+            "open_positions_count": len(store.list_open_positions()),
+            "summary_all": _stat(trades),
+            "summary_sol": _stat([r for r in trades if r.get("symbol") == "SOL-USDT"]),
+            "summary_zec": _stat([r for r in trades if r.get("symbol") == "ZEC-USDT"]),
+            "trades": trades,
+        }
+
     def _process_webhook(payload: WebhookPayload, raw: bytes, event_id: int) -> None:
         """Process webhook in background so TV doesn't timeout."""
         try:
