@@ -21,6 +21,9 @@ class PositionRow:
     entry_price: float
     initial_size: float
     current_size: float
+    # Sizing context — captured at entry, immutable for life of the position.
+    margin_usdt: float
+    leverage: float
     tp_stage: int
     tp1_fill_price: Optional[float]
     tp2_fill_price: Optional[float]
@@ -57,16 +60,19 @@ class Store:
     def create_position(
         self, *, symbol: str, side: str, entry_price: float,
         initial_size: float, sl_policy: str, source: str,
+        margin_usdt: float = 100.0, leverage: float = 30.0,
     ) -> int:
         with self._conn() as c:
             cur = c.execute(
                 """
                 INSERT INTO positions
                   (symbol, side, entry_price, initial_size, current_size,
+                   margin_usdt, leverage,
                    tp_stage, sl_policy, opened_at, source)
-                VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (symbol, side, entry_price, initial_size, initial_size,
+                 margin_usdt, leverage,
                  sl_policy, _now_iso(), source),
             )
             return cur.lastrowid
@@ -304,10 +310,16 @@ class Store:
 
     @staticmethod
     def _row_to_position(row: sqlite3.Row) -> PositionRow:
+        keys = row.keys() if hasattr(row, "keys") else []
         return PositionRow(
             id=row["id"], symbol=row["symbol"], side=row["side"],
             entry_price=row["entry_price"], initial_size=row["initial_size"],
-            current_size=row["current_size"], tp_stage=row["tp_stage"],
+            current_size=row["current_size"],
+            # Defensive: pre-V3 DBs may not have these columns. Fall back to
+            # historical defaults so a v1/v2 DB stays readable in-place.
+            margin_usdt=row["margin_usdt"] if "margin_usdt" in keys else 100.0,
+            leverage=row["leverage"] if "leverage" in keys else 30.0,
+            tp_stage=row["tp_stage"],
             tp1_fill_price=row["tp1_fill_price"],
             tp2_fill_price=row["tp2_fill_price"],
             sl_order_id=row["sl_order_id"],

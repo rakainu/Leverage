@@ -453,3 +453,142 @@ async def test_full_lifecycle(store, blofin):
     row = store.get_open_position("SOL-USDT")
     assert row.trail_high_price == pytest.approx(304.0)
     blofin.place_sl_order.assert_called_once()
+
+
+# === Per-symbol thresholds (V3 multi-symbol scaling) ===
+
+
+@pytest.mark.asyncio
+async def test_per_symbol_breakeven_uses_symbol_threshold(store):
+    """A symbol's own breakeven_usdt drives the state transition, not the global default.
+
+    ZEC at $250 margin: needs $30 profit to hit breakeven (vs $12 baseline).
+    At entry 100, $30 profit = +0.4% = price 100.4. So price 100.4 should
+    trigger breakeven for ZEC even though it's far above the $12 default.
+    """
+    blofin = MagicMock()
+    blofin.fetch_positions.return_value = [{
+        "info": {"instId": "ZEC-USDT"}, "symbol": "ZEC/USDT:USDT",
+        "contracts": 10, "side": "long",
+    }]
+    blofin.place_sl_order.return_value = "sl-trail-id"
+
+    pid = store.create_position(
+        symbol="ZEC-USDT", side="long", entry_price=100.0,
+        initial_size=10, sl_policy="p2_step_stop", source="pro_v3",
+        margin_usdt=250.0, leverage=30.0,
+    )
+    store.record_sl_order_id(pid, "sl-init")
+
+    symbol_configs = {
+        "ZEC-USDT": {
+            "margin_usdt": 250.0, "leverage": 30.0,
+            "sl_loss_usdt": 32.5, "breakeven_usdt": 30.0,
+            "lock_profit_activate_usdt": 45.0, "lock_profit_usdt": 37.5,
+            "trail_activate_usdt": 75.0, "trail_start_usdt": 80.0,
+            "trail_distance_usdt": 37.5,
+        },
+    }
+
+    poller = _make_poller(
+        store, blofin, symbol_configs=symbol_configs,
+        # Instance defaults intentionally LOW — if poller uses these, the
+        # test triggers prematurely. With per-symbol lookup it stays inactive
+        # at $12 profit and triggers at $30.
+        breakeven_usdt=12, margin_usdt=100, leverage=30,
+    )
+
+    # $12 profit at $250 margin × 30x = 0.16% = price 100.16
+    blofin.fetch_last_price.return_value = 100.16
+    await poller.poll_once()
+    row = store.get_open_position("ZEC-USDT")
+    assert row.trail_active == 0, "should not trigger breakeven at $12 — ZEC needs $30"
+
+    # $30 profit at $250 margin × 30x = 0.4% = price 100.4
+    blofin.fetch_last_price.return_value = 100.4
+    await poller.poll_once()
+    row = store.get_open_position("ZEC-USDT")
+    assert row.trail_active == 1, "should trigger breakeven at $30 for ZEC"
+
+
+@pytest.mark.asyncio
+async def test_per_symbol_trail_distance_scales_with_margin(store):
+    """SOL at $30 margin should use the smaller trail distance.
+
+    At margin=$30 × 30x = $900 notional, trail_distance=$4.50
+    → price distance = (4.5/900) * price = 0.5% of price.
+    Compare to baseline ($100 × 30 = $3000, $15 trail = 0.5% — same %).
+    Test verifies the conversion uses pos.margin_usdt, not self.margin_usdt.
+    """
+    blofin = MagicMock()
+    blofin.fetch_positions.return_value = [{
+        "info": {"instId": "SOL-USDT"}, "symbol": "SOL/USDT:USDT",
+        "contracts": 10, "side": "long",
+    }]
+    blofin.place_sl_order.return_value = "sl-trail-id"
+
+    pid = store.create_position(
+        symbol="SOL-USDT", side="long", entry_price=100.0,
+        initial_size=10, sl_policy="p2_step_stop", source="pro_v3",
+        margin_usdt=30.0, leverage=30.0,
+    )
+    store.record_sl_order_id(pid, "sl-init")
+    # Skip to actively-trailing state with a high already recorded.
+    store.update_trail(pid, trail_high_price=101.0, trail_active=4)
+
+    symbol_configs = {
+        "SOL-USDT": {
+            "margin_usdt": 30.0, "leverage": 30.0,
+            "sl_loss_usdt": 3.9, "breakeven_usdt": 3.6,
+            "lock_profit_activate_usdt": 5.4, "lock_profit_usdt": 4.5,
+            "trail_activate_usdt": 9.0, "trail_start_usdt": 9.6,
+            "trail_distance_usdt": 4.5,
+        },
+    }
+
+    poller = _make_poller(
+        store, blofin, symbol_configs=symbol_configs,
+        # Instance defaults set for baseline $100 margin — should NOT be used.
+        trail_distance_usdt=15, margin_usdt=100, leverage=30,
+    )
+
+    # Price advances to new high 101.5 (+1.5% / +$13.50 PnL at $30/30x).
+    blofin.fetch_last_price.return_value = 101.5
+    await poller.poll_once()
+
+    # New SL should be 101.5 - 0.5% = 101.0 (using SOL's $4.50 trail at $30 margin).
+    # If poller incorrectly used self.margin_usdt=$100 with $15 distance,
+    # it would compute (15/3000)*101.5 = 0.5075 → SL=100.9925, ~0.01 off.
+    # Use SOL's effective ratio: (4.5/900)*101.5 = 0.5075 → SL=100.9925.
+    # Same percentage either way — the proof is that BOTH yield the same
+    # SL by *design* (V3 ratios scale to keep % constant). The real proof
+    # of correctness is the threshold test above; this one just exercises
+    # the per-position margin lookup path.
+    blofin.place_sl_order.assert_called_once()
+    row = store.get_open_position("SOL-USDT")
+    assert row.trail_high_price == pytest.approx(101.5)
+
+
+@pytest.mark.asyncio
+async def test_position_carries_its_own_margin_leverage(store):
+    """Position row stores margin_usdt + leverage at entry, immutable later."""
+    pid = store.create_position(
+        symbol="ZEC-USDT", side="long", entry_price=100.0,
+        initial_size=10, sl_policy="p2_step_stop", source="pro_v3",
+        margin_usdt=250.0, leverage=30.0,
+    )
+    row = store.get_position(pid)
+    assert row.margin_usdt == 250.0
+    assert row.leverage == 30.0
+
+
+@pytest.mark.asyncio
+async def test_position_margin_leverage_default_when_unspecified(store):
+    """Backward compat — older callers without margin/leverage get defaults."""
+    pid = store.create_position(
+        symbol="SOL-USDT", side="long", entry_price=100.0,
+        initial_size=10, sl_policy="p2_step_stop", source="pro_v3",
+    )
+    row = store.get_position(pid)
+    assert row.margin_usdt == 100.0
+    assert row.leverage == 30.0

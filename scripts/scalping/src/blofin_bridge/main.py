@@ -83,13 +83,12 @@ def create_app() -> FastAPI:
             + " — frozen: " + ", ".join(rec_report.frozen_symbols)
         )
 
+    # Per-symbol *effective* configs — each value is already resolved
+    # (auto-scaled by margin or symbol-overridden) so the poller and entry
+    # handler can read it directly.
     symbol_configs = {
         name: {
             **sc.model_dump(),
-            "sl_loss_usdt": settings.defaults.sl_loss_usdt,
-            "trail_activate_usdt": settings.defaults.trail_activate_usdt,
-            "trail_distance_usdt": settings.defaults.trail_distance_usdt,
-            "tp_limit_margin_pct": settings.defaults.tp_limit_margin_pct,
             "ema_retest_timeout_minutes": settings.defaults.ema_retest_timeout_minutes,
         }
         for name, sc in settings.symbols.items()
@@ -209,23 +208,25 @@ def create_app() -> FastAPI:
                 "last_closed_at": rows[0]["closed_at"] if rows else None,
             }
 
+        per_symbol_summaries = {
+            f"summary_{name.split('-')[0].lower()}": _stat(
+                [r for r in trades if r.get("symbol") == name]
+            )
+            for name in settings.symbols
+        }
+
         return {
             "config": {
                 "env": settings.blofin.env,
-                "margin_usdt": settings.defaults.margin_usdt,
-                "leverage": settings.defaults.leverage,
-                "sl_loss_usdt": settings.defaults.sl_loss_usdt,
-                "breakeven_usdt": settings.defaults.breakeven_usdt,
-                "lock_profit_activate_usdt": settings.defaults.lock_profit_activate_usdt,
-                "lock_profit_usdt": settings.defaults.lock_profit_usdt,
-                "trail_activate_usdt": settings.defaults.trail_activate_usdt,
-                "trail_start_usdt": settings.defaults.trail_start_usdt,
-                "trail_distance_usdt": settings.defaults.trail_distance_usdt,
+                "defaults": settings.defaults.model_dump(),
+                "symbols": {
+                    name: sc.model_dump()
+                    for name, sc in settings.symbols.items()
+                },
             },
             "open_positions_count": len(store.list_open_positions()),
             "summary_all": _stat(trades),
-            "summary_sol": _stat([r for r in trades if r.get("symbol") == "SOL-USDT"]),
-            "summary_zec": _stat([r for r in trades if r.get("symbol") == "ZEC-USDT"]),
+            **per_symbol_summaries,
             "trades": trades,
         }
 

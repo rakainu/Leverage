@@ -109,6 +109,7 @@ def handle_entry(
     pid = store.create_position(
         symbol=symbol, side=side, entry_price=entry_price,
         initial_size=contracts, sl_policy=sl_policy_name, source="pro_v3",
+        margin_usdt=margin_usdt, leverage=leverage,
     )
 
     # --- Capture the tpslId of the SL that BloFin attached to the entry ---

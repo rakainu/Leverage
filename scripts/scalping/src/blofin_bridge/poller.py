@@ -5,10 +5,19 @@ Every poll cycle (default 2s):
   2. For each open position, fetch current price and compute unrealized P&L.
   3. SL state machine: 0→1→2→3→4 (see _process_position).
   4. SL never moves backward (only tightens).
+
+Per-symbol sizing / thresholds
+------------------------------
+Every dollar threshold (sl_loss_usdt, breakeven_usdt, lock_*, trail_*) is
+looked up per position via `self.symbol_configs[pos.symbol]`. The poller
+*also* keeps instance-level defaults from the legacy constructor kwargs so
+that existing tests (and any tests with no symbol_configs) continue to work.
+Lookup helpers prefer per-symbol values when present.
 """
 from __future__ import annotations
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -23,6 +32,20 @@ from .notify import (
 from .state import Store
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _Thresholds:
+    """All effective $ thresholds + sizing for one position."""
+    margin_usdt: float
+    leverage: float
+    sl_loss_usdt: float
+    breakeven_usdt: float
+    lock_profit_activate_usdt: float
+    lock_profit_usdt: float
+    trail_activate_usdt: float
+    trail_start_usdt: float
+    trail_distance_usdt: float
 
 
 class PositionPoller:
@@ -76,6 +99,40 @@ class PositionPoller:
         self.gate = gate
         self._task: Optional[asyncio.Task] = None
         self._stop_event: Optional[asyncio.Event] = None
+
+    def _thresholds_for(self, pos) -> _Thresholds:
+        """Resolve effective thresholds for a specific position.
+
+        Order of preference for each value:
+          1. The position's own captured sizing (margin_usdt, leverage).
+             Captured at entry so config changes during the position's life
+             can't break the trail math.
+          2. The per-symbol entry in self.symbol_configs (effective values
+             from ResolvedSymbolConfig — supplied by main.py at startup).
+          3. The instance-level fallback (legacy constructor kwargs).
+
+        This lets tests instantiate the poller with no symbol_configs and
+        still drive the state machine off the global kwargs.
+        """
+        sym_cfg = self.symbol_configs.get(pos.symbol, {}) if self.symbol_configs else {}
+
+        def pick(field: str, instance_default: float) -> float:
+            v = sym_cfg.get(field) if sym_cfg else None
+            return float(v) if v is not None else instance_default
+
+        return _Thresholds(
+            margin_usdt=getattr(pos, "margin_usdt", None) or pick("margin_usdt", self.margin_usdt),
+            leverage=getattr(pos, "leverage", None) or pick("leverage", self.leverage),
+            sl_loss_usdt=pick("sl_loss_usdt", self.sl_loss_usdt),
+            breakeven_usdt=pick("breakeven_usdt", self.breakeven_usdt),
+            lock_profit_activate_usdt=pick(
+                "lock_profit_activate_usdt", self.lock_profit_activate_usdt,
+            ),
+            lock_profit_usdt=pick("lock_profit_usdt", self.lock_profit_usdt),
+            trail_activate_usdt=pick("trail_activate_usdt", self.trail_activate_usdt),
+            trail_start_usdt=pick("trail_start_usdt", self.trail_start_usdt),
+            trail_distance_usdt=pick("trail_distance_usdt", self.trail_distance_usdt),
+        )
 
     async def poll_once(self) -> None:
         # --- Check pending signals for EMA retest ---
@@ -249,11 +306,13 @@ class PositionPoller:
         except Exception:
             pass
 
+        thr = self._thresholds_for(pos)
+
         # Compute the initial SL price from entry + configured $ loss so we can
         # distinguish an SL fill (exit near SL price) from a true drift
         # (external close / manual / unknown).
         sl_price_distance = _dollar_to_price_distance(
-            self.sl_loss_usdt, self.margin_usdt, self.leverage, pos.entry_price,
+            thr.sl_loss_usdt, thr.margin_usdt, thr.leverage, pos.entry_price,
         )
         if pos.side == "long":
             initial_sl_price = pos.entry_price - sl_price_distance
@@ -270,25 +329,27 @@ class PositionPoller:
 
         self.store.log_trade(
             position_id=pos.id, exit_price=exit_price, exit_reason=exit_reason,
-            margin_usdt=self.margin_usdt, leverage=self.leverage,
+            margin_usdt=thr.margin_usdt, leverage=thr.leverage,
             initial_sl=initial_sl_price, tp_ceiling=None,
         )
         self.store.close_position(pos.id, realized_pnl=None)
 
     def _compute_unrealized_pnl_usdt(self, pos, current_price: float) -> float:
         """Compute unrealized P&L in USDT for this position."""
-        notional = self.margin_usdt * self.leverage
+        thr = self._thresholds_for(pos)
+        notional = thr.margin_usdt * thr.leverage
         if pos.side == "long":
             pct_move = (current_price - pos.entry_price) / pos.entry_price
         else:
             pct_move = (pos.entry_price - current_price) / pos.entry_price
         return pct_move * notional
 
-    def _trail_distance_as_price(self, current_price: float) -> float:
-        """Convert trail_distance_usdt to a price distance."""
+    def _trail_distance_as_price(self, pos, current_price: float) -> float:
+        """Convert trail_distance_usdt to a price distance (per-position)."""
+        thr = self._thresholds_for(pos)
         return _dollar_to_price_distance(
-            self.trail_distance_usdt, self.margin_usdt,
-            self.leverage, current_price,
+            thr.trail_distance_usdt, thr.margin_usdt,
+            thr.leverage, current_price,
         )
 
     def _process_position(
@@ -307,39 +368,40 @@ class PositionPoller:
             return
 
         pnl = self._compute_unrealized_pnl_usdt(pos, current_price)
+        thr = self._thresholds_for(pos)
 
         # --- Trail logic ---
         # trail_active: 0=inactive, 1=breakeven, 2=lock profit, 3=jumped/locked (dead zone), 4=trailing
         if pos.trail_active == 0:
-            if pnl >= self.breakeven_usdt:
+            if pnl >= thr.breakeven_usdt:
                 log.info(
                     "Breakeven for %s (pos %d): pnl=$%.2f >= $%.2f",
-                    pos.symbol, pos.id, pnl, self.breakeven_usdt,
+                    pos.symbol, pos.id, pnl, thr.breakeven_usdt,
                 )
                 self._move_to_breakeven(pos)
         elif pos.trail_active == 1:
             # Breakeven — waiting for lock_profit threshold
-            if pnl >= self.lock_profit_activate_usdt:
+            if pnl >= thr.lock_profit_activate_usdt:
                 log.info(
                     "Lock profit for %s (pos %d): pnl=$%.2f >= $%.2f, locking $%.0f",
-                    pos.symbol, pos.id, pnl, self.lock_profit_activate_usdt,
-                    self.lock_profit_usdt,
+                    pos.symbol, pos.id, pnl, thr.lock_profit_activate_usdt,
+                    thr.lock_profit_usdt,
                 )
                 self._lock_profit(pos)
         elif pos.trail_active == 2:
             # Profit locked — waiting for trail_activate threshold
-            if pnl >= self.trail_activate_usdt:
+            if pnl >= thr.trail_activate_usdt:
                 log.info(
                     "Trail jump for %s (pos %d): pnl=$%.2f >= $%.2f, locking profit",
-                    pos.symbol, pos.id, pnl, self.trail_activate_usdt,
+                    pos.symbol, pos.id, pnl, thr.trail_activate_usdt,
                 )
                 self._activate_trail(pos, current_price)
         elif pos.trail_active == 3:
             # Dead zone: SL is locked, waiting for trail_start_usdt
-            if pnl >= self.trail_start_usdt:
+            if pnl >= thr.trail_start_usdt:
                 log.info(
                     "Trail starting for %s (pos %d): pnl=$%.2f >= $%.2f, now trailing",
-                    pos.symbol, pos.id, pnl, self.trail_start_usdt,
+                    pos.symbol, pos.id, pnl, thr.trail_start_usdt,
                 )
                 self.store.update_trail(pos.id, trail_high_price=current_price, trail_active=4)
                 self._update_trail(pos, current_price)
@@ -362,9 +424,10 @@ class PositionPoller:
             )
 
     def _lock_profit(self, pos) -> None:
-        """At +$20: SL moves to lock in $15 profit."""
+        """SL moves to lock in `lock_profit_usdt` profit."""
+        thr = self._thresholds_for(pos)
         lock_price_dist = _dollar_to_price_distance(
-            self.lock_profit_usdt, self.margin_usdt, self.leverage, pos.entry_price,
+            thr.lock_profit_usdt, thr.margin_usdt, thr.leverage, pos.entry_price,
         )
         if pos.side == "long":
             new_sl = pos.entry_price + lock_price_dist
@@ -375,22 +438,22 @@ class PositionPoller:
         self.store.update_trail(pos.id, trail_high_price=0, trail_active=2)
         log.info(
             "Lock profit SL for %s: locking $%.0f, SL=%.4f",
-            pos.symbol, self.lock_profit_usdt, new_sl,
+            pos.symbol, thr.lock_profit_usdt, new_sl,
         )
         if self.notifier:
             self.notifier.send(
                 f"🔒 LOCK PROFIT {pos.symbol}\n"
                 f"━━━━━━━━━━━━━━━\n"
-                f"🛑 SL moved to +${self.lock_profit_usdt:.0f}: ${new_sl:,.2f}\n"
-                f"💰 ${self.lock_profit_usdt:.0f} locked in"
+                f"🛑 SL moved to +${thr.lock_profit_usdt:.0f}: ${new_sl:,.2f}\n"
+                f"💰 ${thr.lock_profit_usdt:.0f} locked in"
             )
 
     def _activate_trail(self, pos, current_price: float) -> None:
-        """At +$25: SL jumps to lock in $20 profit. Dead zone until +$30."""
-        # Lock in = trail_start - trail_distance = $30 - $10 = $20 profit
-        lock_in_usdt = self.trail_start_usdt - self.trail_distance_usdt
+        """SL jumps to lock in (trail_start - trail_distance) profit. Dead zone until trail_start."""
+        thr = self._thresholds_for(pos)
+        lock_in_usdt = thr.trail_start_usdt - thr.trail_distance_usdt
         lock_in_price_dist = _dollar_to_price_distance(
-            lock_in_usdt, self.margin_usdt, self.leverage, pos.entry_price,
+            lock_in_usdt, thr.margin_usdt, thr.leverage, pos.entry_price,
         )
 
         if pos.side == "long":
@@ -406,7 +469,7 @@ class PositionPoller:
         self.store.update_trail(pos.id, trail_high_price=high_price, trail_active=3)
         log.info(
             "Trail jumped for %s: locking $%.0f profit, SL=%.4f (dead zone until +$%.0f)",
-            pos.symbol, lock_in_usdt, new_sl, self.trail_start_usdt,
+            pos.symbol, lock_in_usdt, new_sl, thr.trail_start_usdt,
         )
         if self.notifier:
             pnl = self._compute_unrealized_pnl_usdt(pos, current_price)
@@ -415,7 +478,7 @@ class PositionPoller:
     def _update_trail(self, pos, current_price: float) -> None:
         """Trail is active. Move SL if price made a new high."""
         old_high = pos.trail_high_price or pos.entry_price
-        trail_dist = self._trail_distance_as_price(current_price)
+        trail_dist = self._trail_distance_as_price(pos, current_price)
 
         if pos.side == "long":
             if current_price <= old_high:

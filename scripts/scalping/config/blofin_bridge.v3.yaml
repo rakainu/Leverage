@@ -1,0 +1,65 @@
+# Scalping V3 — multi-symbol, per-margin-scaled thresholds
+#
+# Defaults are the strategy DNA at baseline margin ($100). Each enabled symbol
+# sets its own margin; ResolvedSymbolConfig auto-scales every dollar
+# threshold by (symbol_margin / defaults.margin_usdt) at load time.
+#
+# Add a new token: copy a symbol block, change `margin_usdt`. Done.
+# Override an individual threshold per-symbol: add the field under that
+# symbol (rarely needed).
+
+defaults:
+  margin_usdt: 100
+  leverage: 30
+  margin_mode: isolated
+  position_mode: net
+  sl_policy: p2_step_stop
+  # --- SL / Trail / TP @ baseline margin ($100) ---
+  # V3 strategy DNA: V1's tighter SL + tweaked trail mechanics
+  sl_loss_usdt: 13          # SL distance — V1's proven value
+  breakeven_usdt: 12        # earlier BE (V2 was 15)
+  lock_profit_activate_usdt: 18  # earlier lock (V2 was 20)
+  lock_profit_usdt: 15
+  trail_activate_usdt: 30   # earlier trail activation (V2 was 25)
+  trail_start_usdt: 32      # consistent with activation
+  trail_distance_usdt: 15   # wider — let runners run (V2 was 10)
+  tp_limit_margin_pct: 2.0
+  # --- EMA retest entry (symbol-agnostic) ---
+  ema_retest_period: 9
+  ema_retest_timeframe: "5m"
+  ema_retest_timeout_minutes: 30
+  ema_retest_max_overshoot_pct: 0.2
+  min_5m_slope_pct: 0.03
+  poll_interval_seconds: 2
+
+symbols:
+  # ZEC — the proven edge. 2.5× margin → all $ thresholds scale 2.5×.
+  # Effective: SL $32.50, BE $30, lock_activate $45, lock_profit $37.50,
+  # trail_activate $75, trail_start $80, trail_distance $37.50.
+  ZEC-USDT:
+    enabled: true
+    margin_usdt: 250
+    leverage: 30
+    margin_mode: isolated
+    sl_policy: p2_step_stop
+
+  # SOL — kept enabled at minimal size for regime diversification.
+  # 0.3× margin → all $ thresholds scale 0.3×.
+  # Effective: SL $3.90, BE $3.60, lock_activate $5.40, lock_profit $4.50,
+  # trail_activate $9, trail_start $9.60, trail_distance $4.50.
+  SOL-USDT:
+    enabled: true
+    margin_usdt: 30
+    leverage: 30
+    margin_mode: isolated
+    sl_policy: p2_step_stop
+
+  # --- Add new tokens here as we expand. Template:
+  # SYMBOL-USDT:
+  #   enabled: true
+  #   margin_usdt: 100
+  #   leverage: 30
+  #   margin_mode: isolated
+  #   sl_policy: p2_step_stop
+  # Optionally override any of sl_loss_usdt / breakeven_usdt / lock_*_usdt
+  # / trail_*_usdt if this token needs a different ratio than the default.

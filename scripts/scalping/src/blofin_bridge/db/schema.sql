@@ -5,6 +5,11 @@ CREATE TABLE IF NOT EXISTS positions (
     entry_price     REAL NOT NULL,
     initial_size    REAL NOT NULL,
     current_size    REAL NOT NULL,
+    -- Per-position sizing context (captured at entry; immutable for the life
+    -- of the position so the trail state machine and PnL math are unaffected
+    -- by later config changes).
+    margin_usdt     REAL NOT NULL DEFAULT 100.0,
+    leverage        REAL NOT NULL DEFAULT 30.0,
     tp_stage        INTEGER NOT NULL DEFAULT 0,
     tp1_fill_price  REAL,
     tp2_fill_price  REAL,

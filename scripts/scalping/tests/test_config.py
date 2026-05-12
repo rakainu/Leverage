@@ -129,3 +129,151 @@ def test_poll_interval_must_be_at_least_one(tmp_path, monkeypatch):
     _set_env(monkeypatch)
     with pytest.raises(Exception):
         load_config(yaml_path)
+
+
+# ---------- Per-symbol scaling ----------
+
+
+def _v3_defaults():
+    """V3-style defaults at $100 baseline for scaling tests."""
+    return _base_defaults(
+        sl_loss_usdt=13,
+        breakeven_usdt=12,
+        lock_profit_activate_usdt=18,
+        lock_profit_usdt=15,
+        trail_activate_usdt=30,
+        trail_start_usdt=32,
+        trail_distance_usdt=15,
+        tp_limit_margin_pct=2.0,
+    )
+
+
+def test_symbol_at_baseline_margin_keeps_default_thresholds(tmp_path, monkeypatch):
+    """A symbol with the same margin as defaults gets defaults verbatim."""
+    monkeypatch.chdir(tmp_path)
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(yaml.safe_dump({
+        "defaults": _v3_defaults(),
+        "symbols": {
+            "FOO-USDT": {
+                "enabled": True, "margin_usdt": 100, "leverage": 30,
+                "margin_mode": "isolated", "sl_policy": "p2_step_stop",
+            },
+        },
+    }))
+    _set_env(monkeypatch)
+
+    cfg = load_config(yaml_path)
+    foo = cfg.symbols["FOO-USDT"]
+    assert foo.margin_usdt == 100
+    assert foo.sl_loss_usdt == 13
+    assert foo.breakeven_usdt == 12
+    assert foo.lock_profit_activate_usdt == 18
+    assert foo.lock_profit_usdt == 15
+    assert foo.trail_activate_usdt == 30
+    assert foo.trail_start_usdt == 32
+    assert foo.trail_distance_usdt == 15
+
+
+def test_symbol_with_2_5x_margin_scales_all_thresholds(tmp_path, monkeypatch):
+    """ZEC at $250 margin should get every $-threshold × 2.5."""
+    monkeypatch.chdir(tmp_path)
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(yaml.safe_dump({
+        "defaults": _v3_defaults(),
+        "symbols": {
+            "ZEC-USDT": {
+                "enabled": True, "margin_usdt": 250, "leverage": 30,
+                "margin_mode": "isolated", "sl_policy": "p2_step_stop",
+            },
+        },
+    }))
+    _set_env(monkeypatch)
+
+    cfg = load_config(yaml_path)
+    zec = cfg.symbols["ZEC-USDT"]
+    assert zec.margin_usdt == 250
+    assert zec.sl_loss_usdt == pytest.approx(32.5)         # 13 × 2.5
+    assert zec.breakeven_usdt == pytest.approx(30.0)       # 12 × 2.5
+    assert zec.lock_profit_activate_usdt == pytest.approx(45.0)  # 18 × 2.5
+    assert zec.lock_profit_usdt == pytest.approx(37.5)     # 15 × 2.5
+    assert zec.trail_activate_usdt == pytest.approx(75.0)  # 30 × 2.5
+    assert zec.trail_start_usdt == pytest.approx(80.0)     # 32 × 2.5
+    assert zec.trail_distance_usdt == pytest.approx(37.5)  # 15 × 2.5
+
+
+def test_symbol_with_0_3x_margin_scales_all_thresholds(tmp_path, monkeypatch):
+    """SOL at $30 margin should get every $-threshold × 0.3."""
+    monkeypatch.chdir(tmp_path)
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(yaml.safe_dump({
+        "defaults": _v3_defaults(),
+        "symbols": {
+            "SOL-USDT": {
+                "enabled": True, "margin_usdt": 30, "leverage": 30,
+                "margin_mode": "isolated", "sl_policy": "p2_step_stop",
+            },
+        },
+    }))
+    _set_env(monkeypatch)
+
+    cfg = load_config(yaml_path)
+    sol = cfg.symbols["SOL-USDT"]
+    assert sol.margin_usdt == 30
+    assert sol.sl_loss_usdt == pytest.approx(3.9)          # 13 × 0.3
+    assert sol.breakeven_usdt == pytest.approx(3.6)        # 12 × 0.3
+    assert sol.lock_profit_activate_usdt == pytest.approx(5.4)
+    assert sol.trail_activate_usdt == pytest.approx(9.0)
+    assert sol.trail_distance_usdt == pytest.approx(4.5)
+
+
+def test_explicit_per_symbol_override_beats_scaling(tmp_path, monkeypatch):
+    """An explicit per-symbol threshold wins over the scaled value."""
+    monkeypatch.chdir(tmp_path)
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(yaml.safe_dump({
+        "defaults": _v3_defaults(),
+        "symbols": {
+            "BTC-USDT": {
+                "enabled": True, "margin_usdt": 200, "leverage": 30,
+                "margin_mode": "isolated", "sl_policy": "p2_step_stop",
+                # Override: BTC needs a tighter SL than the 2× scaled value.
+                "sl_loss_usdt": 15,
+            },
+        },
+    }))
+    _set_env(monkeypatch)
+
+    cfg = load_config(yaml_path)
+    btc = cfg.symbols["BTC-USDT"]
+    # Explicit override wins
+    assert btc.sl_loss_usdt == 15
+    # Everything else still scales at 2× margin
+    assert btc.breakeven_usdt == pytest.approx(24.0)        # 12 × 2
+    assert btc.trail_distance_usdt == pytest.approx(30.0)   # 15 × 2
+
+
+def test_multi_symbol_scaling_independent(tmp_path, monkeypatch):
+    """Multiple symbols scale independently from the same defaults."""
+    monkeypatch.chdir(tmp_path)
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text(yaml.safe_dump({
+        "defaults": _v3_defaults(),
+        "symbols": {
+            "ZEC-USDT": {
+                "enabled": True, "margin_usdt": 250, "leverage": 30,
+                "margin_mode": "isolated", "sl_policy": "p2_step_stop",
+            },
+            "SOL-USDT": {
+                "enabled": True, "margin_usdt": 30, "leverage": 30,
+                "margin_mode": "isolated", "sl_policy": "p2_step_stop",
+            },
+        },
+    }))
+    _set_env(monkeypatch)
+
+    cfg = load_config(yaml_path)
+    assert cfg.symbols["ZEC-USDT"].sl_loss_usdt == pytest.approx(32.5)
+    assert cfg.symbols["SOL-USDT"].sl_loss_usdt == pytest.approx(3.9)
+    # Defaults themselves unchanged.
+    assert cfg.defaults.sl_loss_usdt == 13
