@@ -1,4 +1,4 @@
-"""Daily refresh of candidate wallets via Hyperliquid leaderboard."""
+"""Daily refresh of candidate wallets via Hyperliquid leaderboard + manual seed list."""
 from __future__ import annotations
 
 import logging
@@ -13,16 +13,27 @@ log = logging.getLogger(__name__)
 
 
 class LeaderboardCrawler:
-    def __init__(self, client: HyperliquidREST, *, top_n: int = 100) -> None:
+    def __init__(self, client: HyperliquidREST, *, top_n: int = 100,
+                 seed_wallets: list[str] | None = None) -> None:
         self.client = client
         self.top_n = top_n
+        self.seed_wallets = [a.strip() for a in (seed_wallets or []) if a and a.strip()]
 
     def refresh(self, session: Session) -> int:
-        """Pull leaderboard, upsert wallets, return count of new addresses added."""
-        rows = self.client.leaderboard()
+        """Pull leaderboard (best-effort) + seed wallets; upsert; return count of new addresses."""
+        try:
+            rows = self.client.leaderboard()
+        except Exception:  # noqa: BLE001
+            log.warning("HL leaderboard endpoint unavailable; falling back to seed wallets only")
+            rows = []
+
+        # Seed wallets always count
+        seed_count = self._upsert_seed(session)
+
         if not rows:
-            log.warning("leaderboard call returned empty")
-            return 0
+            if seed_count == 0:
+                log.warning("leaderboard empty and no seed wallets configured; system has nothing to track")
+            return seed_count
 
         # Sort by 'allTime' window PnL (descending) when present
         def _score_key(r: dict) -> float:
@@ -38,7 +49,7 @@ class LeaderboardCrawler:
         rows.sort(key=_score_key, reverse=True)
         top = rows[: self.top_n]
         now = datetime.now(timezone.utc)
-        added = 0
+        added = seed_count
         for r in top:
             addr = r.get("ethAddress") or r.get("user")
             if not addr:
@@ -46,6 +57,24 @@ class LeaderboardCrawler:
             existing = session.get(Wallet, addr)
             if existing is None:
                 session.add(Wallet(address=addr, source="leaderboard", discovered_at=now, last_seen_at=now, active=True))
+                added += 1
+            else:
+                existing.last_seen_at = now
+                existing.active = True
+        session.flush()
+        return added
+
+    def _upsert_seed(self, session: Session) -> int:
+        """Insert seed wallets if missing. Returns count of newly-added rows."""
+        if not self.seed_wallets:
+            return 0
+        now = datetime.now(timezone.utc)
+        added = 0
+        for raw in self.seed_wallets:
+            addr = raw.lower()
+            existing = session.get(Wallet, addr)
+            if existing is None:
+                session.add(Wallet(address=addr, source="seed", discovered_at=now, last_seen_at=now, active=True))
                 added += 1
             else:
                 existing.last_seen_at = now

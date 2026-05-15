@@ -211,7 +211,11 @@ async def heartbeat_loop(runtime: Runtime, *, interval_seconds: int = 3600) -> N
 async def daily_refresh_loop(runtime: Runtime, *, interval_seconds: int = 21600) -> None:
     """Every 6h: refresh leaderboard, rebuild positions, recompute scores."""
     rest = HyperliquidREST()
-    crawler = LeaderboardCrawler(rest, top_n=int(runtime.weights.get("ingest", {}).get("top_n_wallets", 100)))
+    crawler = LeaderboardCrawler(
+        rest,
+        top_n=int(runtime.weights.get("ingest", {}).get("top_n_wallets", 100)),
+        seed_wallets=runtime.weights.get("ingest", {}).get("seed_wallets") or [],
+    )
     ingestor = HistoricalIngestor(rest, days=int(runtime.weights.get("ingest", {}).get("historical_days", 90)))
     cfg = ScoringConfig(
         min_trades=int(runtime.weights.get("scoring", {}).get("min_trades", 50)),

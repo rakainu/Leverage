@@ -40,6 +40,9 @@ ingest:
   top_n_wallets: 100
   historical_days: 90
   ws_latency_alert_seconds: 30
+  # Seed wallets: HL addresses to always track, even if leaderboard endpoint fails.
+  # Add one address per line. The auto-leaderboard crawler unions with this list.
+  seed_wallets: []
 
 # Universe (auto-discovered at startup; this is the desired coverage list)
 universe:
