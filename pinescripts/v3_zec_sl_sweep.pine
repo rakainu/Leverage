@@ -1,0 +1,85 @@
+//@version=6
+// V3 ZEC SL sweep — Pine simulation
+//
+// Purpose: vary INITIAL SL only, keep entry logic fixed. Run on ZECUSDT.P 5m.
+// Drop into TradingView, apply to a ZEC 5m chart, open the Strategy Tester,
+// change the "Initial SL %" input across a sweep and record the results.
+//
+// Entry signal mirrors the Heikin-Ashi smoothed-EMA crossover used by
+// SMRT Algo Pro V3 (sensitivity / fakeout / range filters). Defaults match
+// the live config (sensitivity=8, fakeout=0.2, range=0.2).
+//
+// Exit: initial SL only. Position closes on opposite signal OR SL hit.
+// No BE / lock / trail — those are bridge-side and not the variable here.
+
+strategy(
+    title              = "V3 ZEC — SL Sweep",
+    shorttitle         = "V3 SL sweep",
+    overlay            = true,
+    pyramiding         = 0,
+    initial_capital    = 10000,
+    default_qty_type   = strategy.percent_of_equity,
+    default_qty_value  = 100,
+    commission_type    = strategy.commission.percent,
+    commission_value   = 0.06,           // BloFin taker fee
+    slippage           = 1,
+    process_orders_on_close = true,
+    calc_on_every_tick = false
+)
+
+// --------------------------- inputs ---------------------------
+sensitivity   = input.int(  8,   "Sensitivity",       minval=1, maxval=15, group="Signal")
+fakeout_filt  = input.float(0.2, "Fakeout filter",    minval=0, step=0.1,  group="Signal")
+range_filt    = input.float(0.2, "Range (ADX) filter",minval=0, step=0.1,  group="Signal")
+
+// THE variable being swept. ZEC live V3 effective SL ≈ 0.43% (SL $32.50 / $7500 notional).
+sl_pct        = input.float(0.43, "Initial SL %",     minval=0.05, maxval=2.0, step=0.05, group="Risk")
+allow_long    = input.bool( true, "Long entries",     group="Side")
+allow_short   = input.bool( true, "Short entries",    group="Side")
+
+// --------------------- Heikin-Ashi smoothed ---------------------
+ha_close = (open + high + low + close) / 4
+var float ha_open_v = na
+ha_open_v := na(ha_open_v[1]) ? (open + close) / 2 : (nz(ha_open_v[1]) + nz(ha_close[1])) / 2
+
+smooth_len = math.max(1, 16 - sensitivity)
+smoothed   = ta.ema(ha_close, smooth_len)
+
+ha_bullish = smoothed > smoothed[1]
+ha_bearish = smoothed < smoothed[1]
+
+// --------------------------- filters ---------------------------
+atr14 = ta.atr(14)
+body  = math.abs(close - open)
+fakeout_pass = fakeout_filt > 0 ? body > fakeout_filt * atr14 : true
+
+[diplus, diminus, adxv] = ta.dmi(14, 14)
+range_pass = range_filt > 0 ? adxv > (20.0 * range_filt) : true
+
+// --------------------------- signals ---------------------------
+flip_up   = ha_bullish and not ha_bullish[1]
+flip_down = ha_bearish and not ha_bearish[1]
+
+buy_sig  = flip_up   and fakeout_pass and range_pass
+sell_sig = flip_down and fakeout_pass and range_pass
+
+// --------------------- entries + initial SL ---------------------
+sl_dist = close * (sl_pct / 100.0)
+
+if allow_long and buy_sig
+    strategy.entry("L", strategy.long)
+    strategy.exit("Lx", "L", stop = close - sl_dist)
+
+if allow_short and sell_sig
+    strategy.entry("S", strategy.short)
+    strategy.exit("Sx", "S", stop = close + sl_dist)
+
+// Close on opposite signal (Pro V3-style reversal)
+if strategy.position_size > 0 and sell_sig
+    strategy.close("L", comment="flip")
+if strategy.position_size < 0 and buy_sig
+    strategy.close("S", comment="flip")
+
+// --------------------------- plots ----------------------------
+plotshape(buy_sig,  title="Buy",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.green, 0), size=size.tiny)
+plotshape(sell_sig, title="Sell", style=shape.triangledown, location=location.abovebar, color=color.new(color.red,   0), size=size.tiny)
