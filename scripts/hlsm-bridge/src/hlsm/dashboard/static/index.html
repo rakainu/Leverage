@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HLSM</title>
+  <style>
+    :root {
+      --bg: #0a0e1a;
+      --bg2: #0f1525;
+      --panel: #0a0e1a;
+      --border: #1f2937;
+      --border-soft: #131b2c;
+      --text: #cdd6e1;
+      --text-muted: #64748b;
+      --label: #475569;
+      --green: #22c55e;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --blue: #60a5fa;
+      --silver: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px; line-height: 1.45;
+    }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 24px;
+      background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; letter-spacing: 0.3px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot.paused { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+    .dot.breaker { background: var(--red); box-shadow: 0 0 8px var(--red); }
+    .meta { color: var(--text-muted); font-size: 11px; font-weight: 400; }
+    .stats { display: flex; gap: 32px; align-items: center; }
+    .stat { display: flex; flex-direction: column; align-items: flex-end; }
+    .stat .label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
+    .stat .val { font-size: 18px; font-weight: 600; color: #e2e8f0; font-variant-numeric: tabular-nums; }
+    .stat .val.up { color: var(--green); }
+    .stat .val.dn { color: var(--red); }
+    .grid {
+      display: grid; grid-template-columns: 1.5fr 1fr; gap: 1px;
+      background: var(--border); border-top: 1px solid var(--border);
+    }
+    .panel { background: var(--panel); padding: 20px 24px; }
+    .panel h3 {
+      margin: 0 0 14px 0;
+      font-size: 11px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 1px; font-weight: 600;
+    }
+    .row, .row.head {
+      display: grid; gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border-soft);
+      font-size: 12px; align-items: center;
+    }
+    .row.head {
+      font-size: 10px; color: var(--label);
+      text-transform: uppercase; letter-spacing: 0.6px;
+      border-bottom-color: var(--border);
+    }
+    .feed .row { grid-template-columns: 70px 70px 50px 1fr 90px; }
+    .pos  .row { grid-template-columns: 70px 50px 1fr 90px; }
+    .wallets .row { grid-template-columns: 36px 1fr 70px 60px; }
+    .coin { font-weight: 600; color: #e2e8f0; }
+    .side {
+      font-size: 10px; padding: 2px 6px; border-radius: 3px;
+      font-weight: 600; letter-spacing: 0.5px; display: inline-block;
+    }
+    .side.long { background: rgba(34,197,94,0.15); color: var(--green); }
+    .side.short { background: rgba(239,68,68,0.15); color: var(--red); }
+    .num { font-variant-numeric: tabular-nums; }
+    .muted { color: var(--text-muted); font-size: 11px; }
+    .pnl { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+    .pnl.up { color: var(--green); }
+    .pnl.dn { color: var(--red); }
+    .state {
+      font-size: 10px; padding: 2px 6px; border-radius: 3px;
+      font-weight: 600; letter-spacing: 0.4px; display: inline-block;
+    }
+    .state.open { background: rgba(96,165,250,0.15); color: var(--blue); }
+    .state.filled { background: rgba(96,165,250,0.15); color: var(--blue); }
+    .state.tp { background: rgba(34,197,94,0.15); color: var(--green); }
+    .state.sl { background: rgba(239,68,68,0.15); color: var(--red); }
+    .state.wallet_exit, .state.drain { background: rgba(148,163,184,0.15); color: var(--silver); }
+    .state.skipped_paused, .state.skipped_drain, .state.skipped_breaker,
+    .state.skipped_coin_paused, .state.skipped_universe, .state.skipped_max_concurrent {
+      background: rgba(245,158,11,0.12); color: var(--amber);
+    }
+    .state.pending { background: rgba(100,116,139,0.20); color: var(--text-muted); }
+    .state.error { background: rgba(239,68,68,0.15); color: var(--red); }
+    .rank { color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .addr { font-family: ui-monospace, monospace; font-size: 11px; color: var(--silver); }
+    .score { font-weight: 700; text-align: right; color: #e2e8f0; font-variant-numeric: tabular-nums; }
+    .score.elite { color: var(--green); }
+    .full { grid-column: 1 / -1; }
+    .footer {
+      padding: 10px 24px; background: #070a13;
+      border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--label);
+      display: flex; justify-content: space-between;
+    }
+    .empty { color: var(--text-muted); font-style: italic; padding: 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">
+      <span class="dot" id="armed-dot"></span>
+      <span>HLSM</span>
+      <span class="meta" id="armed-state">loading…</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="label">Tracked</span><span class="val num" id="tracked-wallets">–</span></div>
+      <div class="stat"><span class="label">Scored</span><span class="val num" id="scored-wallets">–</span></div>
+      <div class="stat"><span class="label">Convergences 24h</span><span class="val num" id="conv-24h">–</span></div>
+      <div class="stat"><span class="label">Open</span><span class="val num" id="open-count">–</span></div>
+      <div class="stat"><span class="label">Day PnL</span><span class="val num" id="day-pnl">–</span></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel feed">
+      <h3>Live convergence feed</h3>
+      <div class="row head"><div>Coin</div><div>Side</div><div>Wallets</div><div>When</div><div>State</div></div>
+      <div id="feed-body"></div>
+    </div>
+    <div class="panel pos">
+      <h3>Open positions</h3>
+      <div class="row head"><div>Coin</div><div>Side</div><div></div><div>PnL</div></div>
+      <div id="pos-body"></div>
+    </div>
+    <div class="panel full wallets">
+      <h3>Top ranked Hyperliquid wallets</h3>
+      <div class="row head"><div>#</div><div>Address</div><div></div><div>Score</div></div>
+      <div id="wallet-body"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>convergence rule: 3 wallets · 45min · score ≥75</span>
+    <span>exit: median (2/3) · SL −25% · TP from expectancy · breaker −$100/day</span>
+  </div>
+
+<script>
+const fmtPct = (n) => (n == null ? "–" : (n >= 0 ? "+" : "") + Number(n).toFixed(2) + "%");
+const fmtUsdt = (n) => (n == null ? "–" : (n >= 0 ? "+" : "") + "$" + Number(n).toFixed(2));
+const fmtAge = (iso) => {
+  if (!iso) return "–";
+  const now = Date.now();
+  const t = new Date(iso).getTime();
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.round(s/60) + "m ago";
+  if (s < 86400) return Math.round(s/3600) + "h ago";
+  return Math.round(s/86400) + "d ago";
+};
+const shortAddr = (a) => (a && a.length > 10) ? a.slice(0,6) + "…" + a.slice(-4) : (a || "");
+
+async function refresh() {
+  try {
+    const [stats, conv, pos, wal] = await Promise.all([
+      fetch("/api/stats").then(r => r.json()),
+      fetch("/api/convergence?limit=20").then(r => r.json()),
+      fetch("/api/positions?status=open").then(r => r.json()),
+      fetch("/api/wallets?limit=50").then(r => r.json()),
+    ]);
+    renderTopBar(stats);
+    renderFeed(conv.events || []);
+    renderPositions(pos.positions || []);
+    renderWallets(wal.wallets || []);
+  } catch (e) {
+    console.error("refresh failed", e);
+  }
+}
+
+function renderTopBar(s) {
+  document.getElementById("tracked-wallets").textContent = s.tracked_wallets ?? "0";
+  document.getElementById("scored-wallets").textContent = s.scored_wallets ?? "0";
+  document.getElementById("conv-24h").textContent = s.convergence_events_24h ?? "0";
+  document.getElementById("open-count").textContent = s.open_positions ?? "0";
+  const dpnl = document.getElementById("day-pnl");
+  const v = s.day_pnl_usdt ?? 0;
+  dpnl.textContent = fmtUsdt(v);
+  dpnl.className = "val num " + (v >= 0 ? "up" : "dn");
+
+  const dot = document.getElementById("armed-dot");
+  const lbl = document.getElementById("armed-state");
+  if (s.breaker_tripped) { dot.className = "dot breaker"; lbl.textContent = "BREAKER · entries paused"; }
+  else if (s.paused_global || s.drain_mode) { dot.className = "dot paused"; lbl.textContent = s.drain_mode ? "DRAIN · halting" : "PAUSED · no new entries"; }
+  else { dot.className = "dot"; lbl.textContent = "ARMED · BloFin demo"; }
+}
+
+function renderFeed(events) {
+  const root = document.getElementById("feed-body");
+  if (!events.length) { root.innerHTML = '<div class="empty">no convergence events yet</div>'; return; }
+  root.innerHTML = events.map(e => {
+    const sideCls = "side " + (e.side || "long");
+    const posState = e.position ? (e.position.status === "closed" ? (e.position.close_reason || "closed") : "open") : (e.status || "");
+    return `
+      <div class="row">
+        <div class="coin">${e.coin}</div>
+        <div><span class="${sideCls}">${(e.side||"").toUpperCase()}</span></div>
+        <div class="num muted">${e.wallet_count}</div>
+        <div class="muted">${fmtAge(e.fired_at)} · ${e.wallet_count} in ${e.window_minutes}m</div>
+        <div><span class="state ${posState}">${posState}</span></div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderPositions(rows) {
+  const root = document.getElementById("pos-body");
+  if (!rows.length) { root.innerHTML = '<div class="empty">no open paper positions</div>'; return; }
+  root.innerHTML = rows.map(p => {
+    const sideCls = "side " + p.side;
+    const upnl = p.realized_pnl_usdt;
+    const pnlCls = "pnl " + ((upnl == null || upnl >= 0) ? "up" : "dn");
+    return `
+      <div class="row">
+        <div class="coin">${p.coin}</div>
+        <div><span class="${sideCls}">${p.side.toUpperCase()}</span></div>
+        <div class="muted">$${p.margin_usdt} · ${p.leverage}x · ${fmtAge(p.opened_at)}</div>
+        <div class="${pnlCls}">${fmtUsdt(upnl)}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderWallets(rows) {
+  const root = document.getElementById("wallet-body");
+  if (!rows.length) { root.innerHTML = '<div class="empty">no scored wallets yet</div>'; return; }
+  root.innerHTML = rows.map((w, i) => {
+    const scoreCls = "score " + ((w.score || 0) >= 85 ? "elite" : "");
+    return `
+      <div class="row">
+        <div class="rank">${String(i+1).padStart(2,"0")}</div>
+        <div><span class="addr">${shortAddr(w.address)}</span> <span class="muted">· ${w.style || "—"} · ${w.trade_count || "—"} trades</span></div>
+        <div></div>
+        <div class="${scoreCls}">${w.score != null ? Number(w.score).toFixed(0) : "–"}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

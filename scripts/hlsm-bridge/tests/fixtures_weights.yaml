@@ -1,0 +1,35 @@
+convergence:
+  cluster_n: 3
+  window_minutes: 45
+  score_floor: 75
+scoring:
+  min_trades: 50
+  min_days_active: 30
+  max_single_trade_pnl_pct: 50.0
+  recency_half_life_days: 30
+  weights:
+    sharpe: 0.30
+    max_dd: 0.20
+    win_rate: 0.20
+    sample_size: 0.15
+    recency: 0.15
+executor:
+  per_trade_margin_usdt: 50.0
+  leverage: 10
+  hard_sl_pct: 25.0
+  tp_default_pct: 30.0
+  max_concurrent_positions: 5
+  exit_rule: median
+safety:
+  daily_loss_pause_usdt: 100.0
+  paused_global: false
+  paused_coins: []
+  drain_mode: false
+ingest:
+  top_n_wallets: 100
+  historical_days: 90
+universe:
+  memecoin_perps: ["PEPE", "WIF", "BONK", "FARTCOIN"]
+dashboard:
+  feed_max_events: 20
+  wallet_table_top_n: 50

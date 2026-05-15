@@ -1,0 +1,20 @@
+# Secrets — credentials live OUTSIDE this repo in C:\Users\rakai\.hlsm-bridge-secrets\.env.demo
+.env
+.env.*
+
+# Runtime data
+data/
+*.db
+*.db-journal
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+venv/
+.venv/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/

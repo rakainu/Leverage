@@ -1,0 +1,66 @@
+# HLSM-Bridge tunables. Hot-reloaded within ~30s. NEVER hardcode these in source.
+
+# Convergence trigger
+convergence:
+  cluster_n: 3              # require N ranked wallets aligned
+  window_minutes: 45        # within Y minutes of each other
+  score_floor: 75           # wallet composite score gate
+
+# Wallet scoring
+scoring:
+  min_trades: 50            # anti-fluke
+  min_days_active: 30       # anti-fluke
+  max_single_trade_pnl_pct: 50.0  # anti-fluke: no single-trade dominance
+  recency_half_life_days: 30
+  weights:
+    sharpe: 0.30
+    max_dd: 0.20
+    win_rate: 0.20
+    sample_size: 0.15
+    recency: 0.15
+
+# Executor / position sizing
+executor:
+  per_trade_margin_usdt: 50.0
+  leverage: 10
+  hard_sl_pct: 25.0         # absolute, e.g. -25% triggers SL
+  tp_default_pct: 30.0      # fallback if wallet expectancy lookup fails
+  max_concurrent_positions: 5
+  exit_rule: median         # one of: any, median, all  (1/3, 2/3, 3/3)
+
+# Off-switches / safety
+safety:
+  daily_loss_pause_usdt: 100.0   # cumulative -USD day PnL trips circuit breaker
+  paused_global: false
+  paused_coins: []
+  drain_mode: false
+
+# Ingest
+ingest:
+  top_n_wallets: 100
+  historical_days: 90
+  ws_latency_alert_seconds: 30
+
+# Universe (auto-discovered at startup; this is the desired coverage list)
+universe:
+  memecoin_perps:
+    - PEPE
+    - WIF
+    - BONK
+    - FARTCOIN
+    - POPCAT
+    - GOAT
+    - MOODENG
+    - DOGE
+    - SHIB
+    - TRUMP
+
+# Telegram (channel-mode preferred; bot token + chat_id supplied via .env)
+telegram:
+  daily_summary_utc_hour: 0
+  heartbeat_utc_hour: 0
+
+# Dashboard
+dashboard:
+  feed_max_events: 20
+  wallet_table_top_n: 50
