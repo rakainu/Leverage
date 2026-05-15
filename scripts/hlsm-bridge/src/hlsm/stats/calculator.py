@@ -1,12 +1,18 @@
-"""Compute risk-adjusted statistics for a wallet's reconstructed positions.
+"""Compute risk-adjusted statistics for a wallet's trading history.
 
-We compute these per-wallet metrics:
-- sharpe_proxy: per-trade mean return / per-trade stdev * sqrt(N)
-- max_dd_pct: peak-to-trough drawdown of the equity curve, expressed in percent
-- win_rate: fraction of closed positions with realized_pnl > 0
-- sample_size: count of closed positions
-- avg_hold_seconds: mean of (closed_at - opened_at)
-- max_single_trade_pnl_share: |largest single trade PnL| / |sum of |pnl||
+Primary input is the per-fill `closedPnl` stream (HL's authoritative realized PnL
+per fill). Each fill with closedPnl != 0 is a realized trade. We avoid the
+position-reconstruction approach because active scalpers scale in/out without
+ever flattening, and the reconstructor would emit zero closed trades for them.
+
+Metrics:
+- sharpe_proxy: per-trade mean / per-trade stdev (PnL-USD scale, then sqrt(N))
+- max_dd_pct: peak-to-trough drawdown of cumulative PnL, percent of peak
+- win_rate: fraction of realized trades with closedPnl > 0
+- sample_size: count of realized trades
+- avg_hold_seconds: NOT directly available from fills; reported from hl_positions
+  when those exist, else 0 (the scoring layer doesn't use it as a hard gate)
+- max_single_trade_pnl_share: |largest single trade PnL| / sum |pnl|
 """
 from __future__ import annotations
 
@@ -18,7 +24,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from hlsm.db import HlPosition
+from hlsm.db import Fill, HlPosition
 
 
 @dataclass
@@ -33,23 +39,51 @@ class WalletStats:
 
 
 def compute_wallet_stats(session: Session, wallet_address: str) -> WalletStats:
-    rows = session.execute(
-        select(HlPosition).where(HlPosition.wallet_address == wallet_address,
-                                  HlPosition.status == "closed").order_by(HlPosition.closed_at)
-    ).scalars().all()
+    """Compute stats primarily from per-fill closedPnl (the HL-authoritative number).
 
-    if not rows:
+    Falls back to hl_positions for avg_hold_seconds only, since fills don't carry
+    open-time info.
+    """
+    fills = session.execute(
+        select(Fill.ts, Fill.closed_pnl, Fill.px, Fill.sz)
+        .where(Fill.wallet_address == wallet_address)
+        .order_by(Fill.ts)
+    ).all()
+
+    # Realized trades = fills with non-null, non-zero closedPnl
+    pnl_values: list[float] = []
+    pnl_pct_values: list[float] = []
+    last_ts: datetime | None = None
+    for ts, closed_pnl, px, sz in fills:
+        if closed_pnl is None:
+            continue
+        pnl = float(closed_pnl)
+        if pnl == 0:
+            continue
+        pnl_values.append(pnl)
+        notional = float(px) * float(sz) if px and sz else 0.0
+        pct = (pnl / notional) * 100.0 if notional > 0 else 0.0
+        pnl_pct_values.append(pct)
+        last_ts = ts
+
+    if not pnl_values:
         return WalletStats()
 
-    pnl_values: list[float] = [float(r.realized_pnl or 0) for r in rows]
-    pnl_pct_values: list[float] = [float(r.realized_pnl_pct or 0) for r in rows]
-    holds: list[int] = [int(r.hold_seconds or 0) for r in rows]
+    # avg_hold_seconds from hl_positions when available (best-effort)
+    pos_rows = session.execute(
+        select(HlPosition.hold_seconds).where(
+            HlPosition.wallet_address == wallet_address,
+            HlPosition.status == "closed",
+            HlPosition.hold_seconds.is_not(None),
+        )
+    ).all()
+    holds = [int(h[0]) for h in pos_rows if h[0] is not None]
+    avg_hold = int(sum(holds) / len(holds)) if holds else 0
 
     n = len(pnl_values)
     wins = sum(1 for p in pnl_values if p > 0)
-    win_rate = wins / n if n else 0.0
-    avg_hold = int(sum(holds) / n) if n else 0
-    last_at = rows[-1].closed_at
+    win_rate = wins / n
+    last_at = last_ts
 
     # Sharpe proxy from per-trade % returns
     mean = sum(pnl_pct_values) / n

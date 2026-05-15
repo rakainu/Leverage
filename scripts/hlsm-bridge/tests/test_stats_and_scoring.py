@@ -4,12 +4,21 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from hlsm.db import HlPosition, Wallet
+from hlsm.db import Fill, HlPosition, Wallet
 from hlsm.scoring import ScoringConfig, score_wallet, score_all
 from hlsm.stats import WalletStats, compute_wallet_stats
 
 
 def _make_position(session, *, wallet, coin, pnl, pnl_pct, opened, closed, side="long"):
+    """Insert a closing fill carrying realized PnL (drives stats) + a closed hl_position (drives avg_hold)."""
+    session.add(Fill(
+        wallet_address=wallet, ts=closed, coin=coin, side="sell" if side == "long" else "buy",
+        direction="close_long" if side == "long" else "close_short",
+        px=Decimal("1"), sz=Decimal("100"),
+        hash=f"{wallet}-{closed.isoformat()}-close",
+        fee=Decimal("0"),
+        closed_pnl=Decimal(str(pnl)),
+    ))
     session.add(HlPosition(
         wallet_address=wallet, coin=coin, side=side,
         opened_at=opened, closed_at=closed,
