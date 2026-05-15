@@ -129,6 +129,11 @@ class Runtime:
     def _on_signal(self, signal: Signal, pp: PaperPosition | None, outcome) -> None:
         if signal.status == "filled" and pp is not None:
             self.alerts.send(format_position_open(signal, pp))
+        elif signal.status == "error":
+            self.alerts.send(
+                f"<b>EXECUTION ERROR</b>  {signal.coin} {signal.side.upper()} signal #{signal.id}\n"
+                f"<i>{(signal.reason or '')[:200]}</i>"
+            )
 
     def _on_close(self, pp: PaperPosition, decision, pnl_usdt: Decimal) -> None:
         self.alerts.send(format_position_close(pp, decision, pnl_usdt))
@@ -176,12 +181,17 @@ class Runtime:
             self.executor.execute(sess, ev)
 
 
+def _run_exit_sweep(runtime: Runtime) -> None:
+    with get_session() as sess:
+        runtime.exit_policy.sweep_open(sess)
+        runtime.breaker.check(sess)
+
+
 async def exit_sweep_loop(runtime: Runtime, *, interval_seconds: int = 30) -> None:
+    """Exit sweep talks to the venue (synchronous ccxt) — runs in a thread."""
     while True:
         try:
-            with get_session() as sess:
-                runtime.exit_policy.sweep_open(sess)
-                runtime.breaker.check(sess)
+            await asyncio.to_thread(_run_exit_sweep, runtime)
         except Exception:  # noqa: BLE001
             log.exception("exit sweep failed")
         await asyncio.sleep(interval_seconds)
@@ -208,8 +218,10 @@ async def heartbeat_loop(runtime: Runtime, *, interval_seconds: int = 3600) -> N
         await asyncio.sleep(interval_seconds)
 
 
-async def daily_refresh_loop(runtime: Runtime, *, interval_seconds: int = 21600) -> None:
-    """Every 6h: refresh leaderboard, rebuild positions, recompute scores."""
+def _run_refresh_cycle(runtime: Runtime, cfg: ScoringConfig) -> None:
+    """One full refresh cycle. Synchronous; meant to be called inside asyncio.to_thread
+    so the asyncio event loop (dashboard, telegram, WS, exit-sweep) stays responsive
+    while the slow HL ingest runs."""
     rest = HyperliquidREST()
     crawler = LeaderboardCrawler(
         rest,
@@ -217,6 +229,31 @@ async def daily_refresh_loop(runtime: Runtime, *, interval_seconds: int = 21600)
         seed_wallets=runtime.weights.get("ingest", {}).get("seed_wallets") or [],
     )
     ingestor = HistoricalIngestor(rest, days=int(runtime.weights.get("ingest", {}).get("historical_days", 90)))
+
+    with get_session() as sess:
+        added = crawler.refresh(sess)
+        addresses = [w.address for w in sess.execute(select(Wallet).where(Wallet.active.is_(True))).scalars().all()]
+    log.info("leaderboard refreshed: %d new wallets, %d total active", added, len(addresses))
+
+    successes = 0
+    for addr in addresses:
+        try:
+            with get_session() as sess:
+                ingestor.ingest_wallet(sess, addr)
+                reconstruct_positions(sess, addr)
+            successes += 1
+        except Exception:  # noqa: BLE001
+            log.exception("ingest+reconstruct failed for %s", addr)
+    log.info("ingest+reconstruct complete: %d/%d wallets succeeded", successes, len(addresses))
+
+    with get_session() as sess:
+        score_all(sess, config=cfg, addresses=addresses)
+    log.info("scoring complete")
+
+
+async def daily_refresh_loop(runtime: Runtime, *, interval_seconds: int = 21600) -> None:
+    """Every 6h: refresh leaderboard, rebuild positions, recompute scores.
+    The blocking work runs in a thread to keep the event loop responsive."""
     cfg = ScoringConfig(
         min_trades=int(runtime.weights.get("scoring", {}).get("min_trades", 50)),
         min_days_active=int(runtime.weights.get("scoring", {}).get("min_days_active", 30)),
@@ -224,32 +261,9 @@ async def daily_refresh_loop(runtime: Runtime, *, interval_seconds: int = 21600)
         recency_half_life_days=int(runtime.weights.get("scoring", {}).get("recency_half_life_days", 30)),
         weights=runtime.weights.get("scoring", {}).get("weights"),
     )
-
     while True:
         try:
-            # Leaderboard refresh in its own transaction
-            with get_session() as sess:
-                added = crawler.refresh(sess)
-                addresses = [w.address for w in sess.execute(select(Wallet).where(Wallet.active.is_(True))).scalars().all()]
-            log.info("leaderboard refreshed: %d new wallets, %d total active", added, len(addresses))
-
-            # Per-wallet ingest + reconstruct each in its own transaction.
-            # Isolated so one wallet's failure doesn't poison the others.
-            successes = 0
-            for addr in addresses:
-                try:
-                    with get_session() as sess:
-                        ingestor.ingest_wallet(sess, addr)
-                        reconstruct_positions(sess, addr)
-                    successes += 1
-                except Exception:  # noqa: BLE001
-                    log.exception("ingest+reconstruct failed for %s", addr)
-            log.info("ingest+reconstruct complete: %d/%d wallets succeeded", successes, len(addresses))
-
-            # Scoring in its own transaction
-            with get_session() as sess:
-                score_all(sess, config=cfg, addresses=addresses)
-            log.info("scoring complete")
+            await asyncio.to_thread(_run_refresh_cycle, runtime, cfg)
         except Exception:  # noqa: BLE001
             log.exception("daily_refresh_loop failed")
         await asyncio.sleep(interval_seconds)

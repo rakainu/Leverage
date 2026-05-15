@@ -99,7 +99,7 @@ class PaperExecutor:
                 side=ev.side,
                 margin_usdt=self.config.per_trade_margin_usdt,
                 leverage=self.config.leverage,
-                client_order_id=f"hlsm-{signal.id}",
+                client_order_id=f"hlsm{signal.id}",
             ))
         except ExchangeError as e:
             signal.status = "error"
