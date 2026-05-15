@@ -45,6 +45,8 @@ ingest:
   seed_wallets: []
 
 # Universe (auto-discovered at startup; this is the desired coverage list)
+# Use canonical (Hyperliquid-style) symbols. The BloFin adapter translates to its
+# venue-specific tickers (e.g. BONK -> 1000BONK-USDT, FLOKI -> 1000FLOKI-USDT).
 universe:
   memecoin_perps:
     - PEPE
@@ -57,6 +59,7 @@ universe:
     - DOGE
     - SHIB
     - TRUMP
+    - FLOKI
 
 # Telegram (channel-mode preferred; bot token + chat_id supplied via .env)
 telegram:

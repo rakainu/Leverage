@@ -44,13 +44,28 @@ def _build_ccxt_client() -> Any:
     return client
 
 
+# Tokens BloFin trades in 1000-unit batches because their price-per-token is too small
+# for normal lot sizing. Hyperliquid (and most other venues) trade them 1-for-1, so we
+# need to alias when crossing the boundary.
+COIN_ALIAS_TO_VENUE: dict[str, str] = {
+    "BONK": "1000BONK",
+    "FLOKI": "1000FLOKI",
+    # add more if BloFin lists 1000X-USDT for other tokens we want to trade
+}
+COIN_ALIAS_TO_CANONICAL: dict[str, str] = {v: k for k, v in COIN_ALIAS_TO_VENUE.items()}
+
+
 def _canonical_to_venue_symbol(coin: str) -> str:
-    """Canonical 'PEPE' -> BloFin 'PEPE-USDT' (BloFin uses dash notation in REST symbols)."""
-    return f"{coin.upper()}-USDT"
+    """Canonical 'BONK' -> BloFin '1000BONK-USDT'. Plain coins pass through unchanged."""
+    base = coin.upper()
+    venue_base = COIN_ALIAS_TO_VENUE.get(base, base)
+    return f"{venue_base}-USDT"
 
 
 def _venue_to_canonical_symbol(venue_symbol: str) -> str:
-    return venue_symbol.split("-")[0].split("/")[0].upper()
+    """BloFin '1000BONK-USDT' or '1000BONK/USDT:USDT' -> canonical 'BONK'."""
+    base = venue_symbol.split("-")[0].split("/")[0].upper()
+    return COIN_ALIAS_TO_CANONICAL.get(base, base)
 
 
 class BloFinExchange(Exchange):
@@ -81,8 +96,9 @@ class BloFinExchange(Exchange):
             base = (m.get("base") or "").upper()
             if not base:
                 continue
+            canonical = COIN_ALIAS_TO_CANONICAL.get(base, base)
             out.append(PerpInfo(
-                symbol=base,
+                symbol=canonical,
                 venue_symbol=str(m.get("id") or sym),
                 contract_value=Decimal(str(m.get("contractSize") or 1)),
                 min_size=Decimal(str((m.get("limits") or {}).get("amount", {}).get("min") or "0.01")),
