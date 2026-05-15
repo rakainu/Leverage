@@ -28,6 +28,8 @@ node_modules/
 # Tool caches
 .playwright-mcp/
 .claude/scheduled_tasks.lock
+.superpowers/
+.scratch/
 
 # blofin-bridge runtime
 scripts/blofin-bridge/data/
