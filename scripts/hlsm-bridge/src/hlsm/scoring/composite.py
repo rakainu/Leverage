@@ -99,9 +99,9 @@ def score_wallet(stats: WalletStats, *, config: ScoringConfig) -> ScoredWallet:
         return ScoredWallet(
             address="",  # filled by caller
             composite=0.0,
-            sharpe_proxy=stats.sharpe_proxy,
-            max_dd_pct=stats.max_dd_pct,
-            win_rate=stats.win_rate,
+            sharpe_proxy=max(-100.0, min(100.0, stats.sharpe_proxy)),
+            max_dd_pct=max(0.0, min(9999.0, stats.max_dd_pct)),
+            win_rate=max(0.0, min(1.0, stats.win_rate)),
             sample_size=stats.sample_size,
             avg_hold_seconds=stats.avg_hold_seconds,
             recency_weight=0.0,
@@ -109,8 +109,11 @@ def score_wallet(stats: WalletStats, *, config: ScoringConfig) -> ScoredWallet:
             fluke_reason=fluke_reason,
         )
 
-    sharpe_n = _normalize_sharpe(stats.sharpe_proxy)
-    dd_n = _normalize_max_dd(stats.max_dd_pct)
+    # Clamp components defensively so DB Numeric columns never overflow
+    clamped_sharpe = max(-100.0, min(100.0, stats.sharpe_proxy))
+    clamped_dd = max(0.0, min(9999.0, stats.max_dd_pct))
+    sharpe_n = _normalize_sharpe(clamped_sharpe)
+    dd_n = _normalize_max_dd(clamped_dd)
     win_n = max(0.0, min(1.0, stats.win_rate))
     sample_n = _normalize_sample_size(stats.sample_size)
     rec_n = _recency_weight(stats.last_trade_at, half_life_days=config.recency_half_life_days)
@@ -127,9 +130,9 @@ def score_wallet(stats: WalletStats, *, config: ScoringConfig) -> ScoredWallet:
     return ScoredWallet(
         address="",
         composite=composite,
-        sharpe_proxy=stats.sharpe_proxy,
-        max_dd_pct=stats.max_dd_pct,
-        win_rate=stats.win_rate,
+        sharpe_proxy=clamped_sharpe,
+        max_dd_pct=clamped_dd,
+        win_rate=max(0.0, min(1.0, stats.win_rate)),
         sample_size=stats.sample_size,
         avg_hold_seconds=stats.avg_hold_seconds,
         recency_weight=rec_n,

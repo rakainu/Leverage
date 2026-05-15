@@ -65,7 +65,7 @@ class Fill(Base):
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     coin: Mapped[str] = mapped_column(String(32), nullable=False)
     side: Mapped[str] = mapped_column(String(8), nullable=False)  # buy | sell
-    direction: Mapped[str] = mapped_column(String(16), nullable=False)  # open_long | close_long | open_short | close_short
+    direction: Mapped[str] = mapped_column(String(32), nullable=False)  # open_long | close_long | open_short | close_short | other HL dir strings
     px: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     sz: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     start_position: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))

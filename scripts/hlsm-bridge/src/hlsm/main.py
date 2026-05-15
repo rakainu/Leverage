@@ -227,18 +227,29 @@ async def daily_refresh_loop(runtime: Runtime, *, interval_seconds: int = 21600)
 
     while True:
         try:
+            # Leaderboard refresh in its own transaction
             with get_session() as sess:
                 added = crawler.refresh(sess)
                 addresses = [w.address for w in sess.execute(select(Wallet).where(Wallet.active.is_(True))).scalars().all()]
-                log.info("leaderboard refreshed: %d new wallets, %d total active", added, len(addresses))
-                for addr in addresses:
-                    try:
+            log.info("leaderboard refreshed: %d new wallets, %d total active", added, len(addresses))
+
+            # Per-wallet ingest + reconstruct each in its own transaction.
+            # Isolated so one wallet's failure doesn't poison the others.
+            successes = 0
+            for addr in addresses:
+                try:
+                    with get_session() as sess:
                         ingestor.ingest_wallet(sess, addr)
                         reconstruct_positions(sess, addr)
-                    except Exception:  # noqa: BLE001
-                        log.exception("ingest+reconstruct failed for %s", addr)
+                    successes += 1
+                except Exception:  # noqa: BLE001
+                    log.exception("ingest+reconstruct failed for %s", addr)
+            log.info("ingest+reconstruct complete: %d/%d wallets succeeded", successes, len(addresses))
+
+            # Scoring in its own transaction
+            with get_session() as sess:
                 score_all(sess, config=cfg, addresses=addresses)
-                log.info("scoring complete")
+            log.info("scoring complete")
         except Exception:  # noqa: BLE001
             log.exception("daily_refresh_loop failed")
         await asyncio.sleep(interval_seconds)

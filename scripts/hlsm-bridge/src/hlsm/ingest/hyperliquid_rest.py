@@ -23,11 +23,23 @@ from hlsm.db import Fill, Wallet
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://api.hyperliquid.xyz"
+STATS_URL = "https://stats-data.hyperliquid.xyz"
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Origin": "https://app.hyperliquid.xyz",
+    "Referer": "https://app.hyperliquid.xyz/",
+    "Accept": "application/json",
+}
 
 
 @dataclass
 class RateLimit:
-    requests_per_second: float = 5.0
+    requests_per_second: float = 2.0
+    max_retries_on_429: int = 3
+    backoff_seconds: float = 5.0
 
 
 class HyperliquidREST:
@@ -50,10 +62,18 @@ class HyperliquidREST:
         self._last_call_ts = time.monotonic()
 
     def _info(self, body: dict[str, Any]) -> Any:
-        self._throttle()
-        r = self._client.post(f"{self.base_url}/info", json=body)
-        r.raise_for_status()
-        return r.json()
+        attempt = 0
+        while True:
+            self._throttle()
+            r = self._client.post(f"{self.base_url}/info", json=body)
+            if r.status_code == 429 and attempt < self.rate.max_retries_on_429:
+                wait = self.rate.backoff_seconds * (2 ** attempt)
+                log.warning("HL 429 (attempt %d) — backing off %.1fs", attempt + 1, wait)
+                time.sleep(wait)
+                attempt += 1
+                continue
+            r.raise_for_status()
+            return r.json()
 
     def user_fills(self, address: str, *, aggregate_by_time: bool = False) -> list[dict[str, Any]]:
         """Return the last batch of fills for the user (HL caps at ~2000 fills per call)."""
@@ -81,10 +101,30 @@ class HyperliquidREST:
         return self._info({"type": "meta"})
 
     def leaderboard(self) -> list[dict[str, Any]]:
-        """Return Hyperliquid's public leaderboard. Multiple periods (day/week/month/allTime)."""
-        result = self._info({"type": "leaderBoard"})
-        if isinstance(result, dict):
-            return result.get("leaderboardRows") or []
+        """Return Hyperliquid's public leaderboard rows.
+
+        The /info {type:'leaderBoard'} endpoint returns 422 in current API. The
+        leaderboard is served via the stats-data subdomain instead, which is
+        Cloudfront-gated and requires browser-style headers (Origin + Referer +
+        UA). The shape returned matches the original (rows with ethAddress +
+        windowPerformances).
+        """
+        self._throttle()
+        try:
+            r = self._client.get(
+                f"{STATS_URL}/Mainnet/leaderboard",
+                headers=BROWSER_HEADERS,
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            payload = r.json()
+        except Exception as e:  # noqa: BLE001
+            log.warning("HL stats-data leaderboard fetch failed: %s", e)
+            return []
+        if isinstance(payload, dict):
+            return payload.get("leaderboardRows") or []
+        if isinstance(payload, list):
+            return payload
         return []
 
     def close(self) -> None:
@@ -101,7 +141,8 @@ def _classify_direction(dir_str: str) -> str:
         return "open_short"
     if "close" in d and "short" in d:
         return "close_short"
-    return d or "unknown"
+    # Truncate any other HL direction string to fit the column (spot conversion, liquidations, etc.)
+    return (d or "unknown")[:32]
 
 
 def _upsert_fill(session: Session, row: Fill) -> None:

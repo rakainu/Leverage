@@ -69,8 +69,10 @@ def compute_wallet_stats(session: Session, wallet_address: str) -> WalletStats:
         dd = peak - equity
         if dd > max_dd_abs:
             max_dd_abs = dd
-            peak_for_dd = peak if peak > 0 else max(peak, 1)
-    max_dd_pct = (max_dd_abs / peak_for_dd) * 100.0 if peak_for_dd > 0 else 0.0
+            peak_for_dd = peak
+    # DD denominator floored at $1 to avoid blowups when peak equity is tiny
+    denom = max(peak_for_dd, 1.0)
+    max_dd_pct = min(9999.0, (max_dd_abs / denom) * 100.0) if max_dd_abs > 0 else 0.0
 
     total_abs = sum(abs(p) for p in pnl_values)
     max_share = (max(abs(p) for p in pnl_values) / total_abs) if total_abs > 0 else 0.0
