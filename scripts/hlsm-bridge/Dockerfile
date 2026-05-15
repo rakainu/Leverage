@@ -11,8 +11,9 @@ COPY pyproject.toml ./
 COPY src ./src
 COPY config ./config
 COPY migrations ./migrations
+COPY tests ./tests
 COPY alembic.ini ./
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e ".[dev]"
 
 RUN mkdir -p /app/data && chown -R hlsm:hlsm /app
 USER hlsm
