@@ -1,0 +1,79 @@
+# Scalping V3.1 — V3 base + tightened slope gate + weekday + body filters.
+#
+# Built 2026-05-15 from 6mo (52k-bar) engine backtest. The trail state
+# machine and per-symbol margin scaling are unchanged from V3. New gates
+# all live in `defaults` and apply at fill time (after EMA retest + slope).
+# Set any of them to empty/0 to disable that gate and recover V3 behavior.
+#
+# Revert to V3 at any time: see /docker/scalping-v3.1/SWITCH.md
+
+defaults:
+  margin_usdt: 100
+  leverage: 30
+  margin_mode: isolated
+  position_mode: net
+  sl_policy: p2_step_stop
+  # --- SL / Trail / TP @ baseline margin ($100) ---
+  # V3 strategy DNA unchanged — engine sweep showed the trail mechanics work
+  # well across a broad SL band once entry quality is filtered.
+  sl_loss_usdt: 13
+  breakeven_usdt: 12
+  lock_profit_activate_usdt: 18
+  lock_profit_usdt: 15
+  trail_activate_usdt: 30
+  trail_start_usdt: 32
+  trail_distance_usdt: 15
+  tp_limit_margin_pct: 2.0
+  # --- EMA retest entry (symbol-agnostic) ---
+  ema_retest_period: 9
+  ema_retest_timeframe: "5m"
+  ema_retest_timeout_minutes: 30
+  ema_retest_max_overshoot_pct: 0.2
+  # *** V3.1 change *** — slope gate raised 0.03 -> 0.15. Engine sweep showed
+  # the 0.03-0.06 and 0.06-0.10 slope buckets were the dominant losers
+  # (-$5.7K and -$3.7K over 6mo). 0.15 keeps WR 60-70% and PF 2.2+.
+  min_5m_slope_pct: 0.15
+  poll_interval_seconds: 2
+  # *** V3.1 new *** — block Sunday (UTC). Engine sweep: Sunday alone cost
+  # -$2,381 over 6mo with WR 51.9% (basically coinflip + negative drift).
+  block_weekdays_utc: [6]
+  # *** V3.1 new *** — skip retest entries where the most recently CLOSED
+  # 5m bar had body/ATR(14) in [0.3, 0.5). Engine sweep: this bucket lost
+  # -$3,502 over 6mo. Big bodies (>1.2) and small bodies (<0.3) are both fine.
+  block_body_atr_band: [0.3, 0.5]
+  # Optional: hard minimum body/ATR (0 = disabled). Not used by default.
+  min_body_atr_ratio: 0.0
+
+symbols:
+  # ZEC — 2.5x margin scaling. All $ thresholds auto-scale 2.5x at load time.
+  # Effective: SL $32.50, BE $30, lock_activate $45, lock_profit $37.50,
+  # trail_activate $75, trail_start $80, trail_distance $37.50.
+  #
+  # V3.1 keeps SL at the V3 effective $32.50. Engine sweep showed the
+  # filtered-entry edge holds across SL $42-$95 with PF >= 2.83. Wider SL
+  # would marginally raise avg trade but also DD; the conservative call is
+  # to validate the filter changes alone first, then revisit SL in a
+  # follow-up evaluation cycle.
+  #
+  # To widen SL to engine optimum ($82.50) later: uncomment the override below.
+  ZEC-USDT:
+    enabled: true
+    margin_usdt: 250
+    leverage: 30
+    margin_mode: isolated
+    sl_policy: p2_step_stop
+    # sl_loss_usdt: 82.50   # uncomment to switch ZEC to wide-SL variant
+
+  # SOL — 0.3x margin scaling. Filter changes apply (no SOL-specific override).
+  # Effective: SL $3.90, BE $3.60, lock_activate $5.40, lock_profit $4.50,
+  # trail_activate $9, trail_start $9.60, trail_distance $4.50.
+  SOL-USDT:
+    enabled: true
+    margin_usdt: 30
+    leverage: 30
+    margin_mode: isolated
+    sl_policy: p2_step_stop
+
+  # Add new tokens: copy a symbol block + change margin_usdt. The new entry
+  # filters (slope/weekday/body) apply globally; per-symbol overrides only
+  # apply to dollar thresholds.
