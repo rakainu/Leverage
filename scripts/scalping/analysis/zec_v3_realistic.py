@@ -45,7 +45,11 @@ RETEST_OVERSHOOT_PCT = 0.2
 SLOPE_LOOKBACK_BARS = 3
 MIN_SLOPE_PCT = 0.03
 RETEST_TIMEOUT_BARS = 6
-BLOCK_HOURS_UTC = set(range(11, 18))
+# Live bridge does NOT block any hours of day — earlier version of this script
+# mistakenly imported the SMC trading system's 11-18 UTC block. Keeping the
+# variable so the mechanism is in place if we ever want to test an hours block
+# as a filter, but defaulting to empty matches live behavior.
+BLOCK_HOURS_UTC: set[int] = set()
 
 
 def generate_v3_signals(df: pd.DataFrame, sensitivity: int = SENS, noise: float = NOISE,
