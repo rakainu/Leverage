@@ -95,6 +95,7 @@ class Runtime:
                 tp_default_pct=Decimal(str(e.get("tp_default_pct", 30))),
                 max_concurrent_positions=int(e.get("max_concurrent_positions", 5)),
                 universe=self.universe,
+                signal_cooldown_minutes=int(e.get("signal_cooldown_minutes", 60)),
             ),
             on_signal=self._on_signal,
         )

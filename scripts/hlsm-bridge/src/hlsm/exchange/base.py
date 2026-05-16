@@ -42,8 +42,14 @@ class Exchange(ABC):
 
     @abstractmethod
     def attach_sl_tp(self, *, coin: str, side, entry_px: Decimal, sl_pct: Decimal, tp_pct: Decimal,
-                     size: Decimal) -> SLTPResult:
-        """Attach hard stop-loss and take-profit orders to an open position."""
+                     size: Decimal, leverage: int) -> SLTPResult:
+        """Attach hard stop-loss and take-profit orders to an open position.
+
+        sl_pct and tp_pct are expressed as PnL % on margin (the trader-facing convention).
+        For a 10x leveraged position, sl_pct=25 means "stop when down 25% on margin",
+        which translates to a 2.5% adverse notional move. The leverage parameter is
+        required to do that conversion.
+        """
 
     @abstractmethod
     def close_position(self, *, coin: str, reason: str = "manual") -> OrderResult | None:

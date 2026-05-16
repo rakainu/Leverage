@@ -4,9 +4,12 @@ Per the existing blofin-bridge reference memory:
 - ccxt.set_sandbox_mode(True) raises NotSupported for BloFin
 - Manually swap `client.urls["api"]["rest"]` to the demo URL when env == "demo"
 - BloFin has no native trailing stop; SL/TP are placed as separate algo orders
+- BloFin SL/TP orders are "TPSL" algo orders, listed/cancelled via /trade/orders-tpsl-pending
+  and /trade/cancel-tpsl (NOT the regular open-orders endpoints).
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from decimal import Decimal
@@ -183,14 +186,19 @@ class BloFinExchange(Exchange):
         )
 
     def attach_sl_tp(self, *, coin: str, side: Side, entry_px: Decimal,
-                     sl_pct: Decimal, tp_pct: Decimal, size: Decimal) -> SLTPResult:
+                     sl_pct: Decimal, tp_pct: Decimal, size: Decimal,
+                     leverage: int) -> SLTPResult:
+        # sl_pct/tp_pct are margin-PnL %. Convert to notional move by dividing by leverage.
+        lev = Decimal(max(leverage, 1))
+        notional_sl = sl_pct / Decimal(100) / lev
+        notional_tp = tp_pct / Decimal(100) / lev
         if side == Side.LONG:
-            sl_px = (entry_px * (Decimal(1) - sl_pct / Decimal(100))).quantize(Decimal("0.00000001"))
-            tp_px = (entry_px * (Decimal(1) + tp_pct / Decimal(100))).quantize(Decimal("0.00000001"))
+            sl_px = (entry_px * (Decimal(1) - notional_sl)).quantize(Decimal("0.00000001"))
+            tp_px = (entry_px * (Decimal(1) + notional_tp)).quantize(Decimal("0.00000001"))
             close_side = "sell"
         else:
-            sl_px = (entry_px * (Decimal(1) + sl_pct / Decimal(100))).quantize(Decimal("0.00000001"))
-            tp_px = (entry_px * (Decimal(1) - tp_pct / Decimal(100))).quantize(Decimal("0.00000001"))
+            sl_px = (entry_px * (Decimal(1) + notional_sl)).quantize(Decimal("0.00000001"))
+            tp_px = (entry_px * (Decimal(1) - notional_tp)).quantize(Decimal("0.00000001"))
             close_side = "buy"
 
         venue_sym = _canonical_to_venue_symbol(coin)
@@ -243,20 +251,39 @@ class BloFinExchange(Exchange):
         )
 
     def cancel_protective_orders(self, *, coin: str) -> int:
+        """Cancel BloFin TPSL (algo) orders for a coin.
+
+        BloFin keeps SL/TP orders in a separate algo-order endpoint, not in the
+        regular open-orders list. Use the trade/orders-tpsl-pending endpoint to
+        list them, then cancel via trade/cancel-tpsl.
+        """
         venue_sym = _canonical_to_venue_symbol(coin)
         try:
-            opens = self._client.fetch_open_orders(venue_sym) or []
+            resp = self._client.request(
+                "trade/orders-tpsl-pending", api="private", method="GET"
+            )
         except Exception:  # noqa: BLE001
+            log.warning("fetch TPSL pending failed", exc_info=True)
             return 0
+        data = (resp or {}).get("data") or []
+        # Filter to this coin only
+        ours = [d for d in data if (d.get("instId") or "") == venue_sym]
         cancelled = 0
-        for o in opens:
-            params = (o.get("info") or {})
-            is_protective = params.get("stopLossPrice") or params.get("takeProfitPrice")
-            if not is_protective:
+        for d in ours:
+            tpsl_id = d.get("tpslId")
+            if not tpsl_id:
                 continue
             try:
-                self._client.cancel_order(o.get("id"), venue_sym)
+                # BloFin /trade/cancel-tpsl wants a JSON array body
+                self._client.request(
+                    "trade/cancel-tpsl",
+                    api="private",
+                    method="POST",
+                    body=json.dumps([{"instId": venue_sym, "tpslId": str(tpsl_id)}]),
+                    headers={"Content-Type": "application/json"},
+                )
                 cancelled += 1
             except Exception:  # noqa: BLE001
+                log.warning("cancel TPSL failed for id=%s", tpsl_id, exc_info=True)
                 continue
         return cancelled

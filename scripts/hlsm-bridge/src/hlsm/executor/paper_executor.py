@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Callable
 
@@ -31,6 +31,11 @@ class ExecutorConfig:
     tp_default_pct: Decimal = Decimal("30")
     max_concurrent_positions: int = 5
     universe: frozenset[str] = field(default_factory=frozenset)
+    # Persistent cooldown: skip a (coin, side) convergence if we already fired one or
+    # closed a paper_position on the same (coin, side) within this many minutes.
+    # Survives container restarts (queried from DB), unlike the in-memory dedup map
+    # in ConvergenceDetector.
+    signal_cooldown_minutes: int = 60
 
 
 @dataclass
@@ -56,9 +61,41 @@ class PaperExecutor:
             select(PaperPosition.id).where(PaperPosition.status == "open")
         ).scalars().all().__len__()
 
+    def _already_open_on_coin(self, session: Session, coin: str) -> bool:
+        existing = session.execute(
+            select(PaperPosition.id).where(
+                PaperPosition.coin == coin.upper(),
+                PaperPosition.status == "open",
+            )
+        ).first()
+        return existing is not None
+
+    def _within_signal_cooldown(self, session: Session, coin: str, side: str) -> Signal | None:
+        """Return the most recent signal on (coin, side) within the cooldown window, if any.
+
+        Persistent across container restarts (queries the signals table). Combined with the
+        in-memory ConvergenceDetector cooldown, this prevents the system from re-issuing a
+        trade on the same (coin, side) just because the in-memory dedup map got wiped.
+        """
+        if self.config.signal_cooldown_minutes <= 0:
+            return None
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.config.signal_cooldown_minutes)
+        recent = session.execute(
+            select(Signal).where(
+                Signal.coin == coin.upper(),
+                Signal.side == side,
+                Signal.fired_at >= cutoff,
+                Signal.status.in_(["filled", "pending"]),
+            ).order_by(Signal.fired_at.desc()).limit(1)
+        ).scalar_one_or_none()
+        return recent
+
     def execute(self, session: Session, ev: ConvergenceEvent) -> ExecutionOutcome:
         """Process a single convergence event. Always persists a Signal row, even if skipped."""
-        # Always-create signal so the dashboard sees every detected convergence.
+        # Persistent cooldown check FIRST, before adding our own signal row to avoid
+        # finding ourselves. Survives container restarts (queried from DB).
+        recent = self._within_signal_cooldown(session, ev.coin, ev.side.value)
+
         signal = Signal(
             fired_at=datetime.now(timezone.utc),
             coin=ev.coin,
@@ -72,14 +109,30 @@ class PaperExecutor:
         session.add(signal)
         session.flush()  # get signal.id
 
+        if recent is not None:
+            signal.status = "skipped_already_open_on_coin"
+            signal.reason = (
+                f"cooldown: previous signal #{recent.id} at {recent.fired_at.isoformat()} "
+                f"within {self.config.signal_cooldown_minutes}min window"
+            )[:128]
+            outcome = ExecutionOutcome(signal.id, None, signal.status, signal.reason)
+            if self.on_signal is not None:
+                try:
+                    self.on_signal(signal, None, outcome)
+                except Exception:  # noqa: BLE001
+                    log.exception("on_signal callback failed (cooldown path)")
+            return outcome
+
         # Gate entry
         open_count = self._count_open_positions(session)
+        already_open = self._already_open_on_coin(session, ev.coin)
         gate = gate_entry(
             session=session,
             coin=ev.coin,
             open_paper_count=open_count,
             max_concurrent=self.config.max_concurrent_positions,
             universe=self.config.universe or None,
+            already_open_on_coin=already_open,
         )
         if not gate.allowed:
             signal.status = gate.decision.value
@@ -112,6 +165,15 @@ class PaperExecutor:
                     log.exception("on_signal callback failed (error path)")
             return outcome
 
+        # Cancel any orphan/stale protective orders for this coin BEFORE attaching new ones,
+        # so we never end up with stacked SL/TP orders on the same position.
+        try:
+            stale = self.exchange.cancel_protective_orders(coin=ev.coin)
+            if stale:
+                log.info("cancelled %d stale protective orders on %s before attach", stale, ev.coin)
+        except Exception:  # noqa: BLE001
+            log.warning("cancel_protective_orders pre-attach raised", exc_info=True)
+
         # Attach SL + TP
         try:
             sltp = self.exchange.attach_sl_tp(
@@ -121,6 +183,7 @@ class PaperExecutor:
                 sl_pct=self.config.hard_sl_pct,
                 tp_pct=self.config.tp_default_pct,
                 size=order.filled_size,
+                leverage=self.config.leverage,
             )
         except ExchangeError as e:
             # Position is open but unprotected — close immediately for safety

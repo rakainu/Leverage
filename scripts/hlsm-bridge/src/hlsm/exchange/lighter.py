@@ -46,7 +46,8 @@ class LighterStub(Exchange):
         raise NotImplementedError("LighterStub does not execute orders. Wire the real Lighter SDK in V2.")
 
     def attach_sl_tp(self, *, coin: str, side: Side, entry_px: Decimal,  # noqa: ARG002
-                     sl_pct: Decimal, tp_pct: Decimal, size: Decimal) -> SLTPResult:
+                     sl_pct: Decimal, tp_pct: Decimal, size: Decimal,
+                     leverage: int) -> SLTPResult:
         raise NotImplementedError("LighterStub does not place protective orders.")
 
     def close_position(self, *, coin: str, reason: str = "manual") -> OrderResult | None:  # noqa: ARG002

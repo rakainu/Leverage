@@ -26,6 +26,7 @@ class EntryDecision(str, Enum):
     SKIP_BREAKER = "skipped_breaker"
     SKIP_MAX_CONCURRENT = "skipped_max_concurrent"
     SKIP_UNIVERSE = "skipped_universe"
+    SKIP_ALREADY_OPEN = "skipped_already_open_on_coin"
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ def gate_entry(
     open_paper_count: int,
     max_concurrent: int,
     universe: frozenset[str] | None = None,
+    already_open_on_coin: bool = False,
 ) -> EntryGateResult:
     """Return whether a prospective entry on `coin` is allowed right now."""
     state = get_safety_state(session)
@@ -60,6 +62,11 @@ def gate_entry(
         return EntryGateResult(EntryDecision.SKIP_COIN_PAUSED, f"{coin_u} paused")
     if universe is not None and coin_u not in universe:
         return EntryGateResult(EntryDecision.SKIP_UNIVERSE, f"{coin_u} not in trading universe")
+    if already_open_on_coin:
+        return EntryGateResult(
+            EntryDecision.SKIP_ALREADY_OPEN,
+            f"already have an open paper position on {coin_u}; refusing to stack",
+        )
     if open_paper_count >= max_concurrent:
         return EntryGateResult(
             EntryDecision.SKIP_MAX_CONCURRENT,

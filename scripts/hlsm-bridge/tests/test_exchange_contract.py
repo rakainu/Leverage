@@ -40,6 +40,42 @@ def test_lighter_stub_raises_on_place_order():
                                       margin_usdt=Decimal("50"), leverage=10))
 
 
+def test_attach_sl_tp_math_uses_margin_pnl_semantics():
+    """sl_pct / tp_pct are margin-PnL %, divided by leverage to get notional move."""
+    from unittest.mock import MagicMock
+    from hlsm.exchange.types import Side
+
+    fake_client = MagicMock()
+    # Mock create_order calls so attach_sl_tp succeeds.
+    fake_client.create_order.return_value = {"id": "stub-order", "orderId": "stub"}
+    fake_client.load_markets.return_value = {}
+    ex = BloFinExchange(client=fake_client)
+
+    # SHORT @ 0.20, sl 25% margin, tp 30% margin, lev=10
+    # notional sl move = 2.5%, notional tp move = 3.0%
+    # SL above entry (short) = 0.20 * 1.025 = 0.205
+    # TP below entry (short) = 0.20 * 0.97  = 0.194
+    result = ex.attach_sl_tp(
+        coin="FARTCOIN", side=Side.SHORT,
+        entry_px=Decimal("0.20"),
+        sl_pct=Decimal("25"), tp_pct=Decimal("30"),
+        size=Decimal("100"), leverage=10,
+    )
+    assert result.sl_px == Decimal("0.20500000")
+    assert result.tp_px == Decimal("0.19400000")
+
+    # LONG @ 0.20, lev=10 same percentages
+    # SL below entry (long) = 0.195, TP above entry (long) = 0.206
+    result_long = ex.attach_sl_tp(
+        coin="FARTCOIN", side=Side.LONG,
+        entry_px=Decimal("0.20"),
+        sl_pct=Decimal("25"), tp_pct=Decimal("30"),
+        size=Decimal("100"), leverage=10,
+    )
+    assert result_long.sl_px == Decimal("0.19500000")
+    assert result_long.tp_px == Decimal("0.20600000")
+
+
 def test_lighter_stub_get_balance_returns_zero():
     stub = LighterStub()
     bal = stub.get_balance()
