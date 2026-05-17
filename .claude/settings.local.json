@@ -94,7 +94,15 @@
       "Bash(venv/Scripts/python -m pytest tests/test_router.py -q)",
       "Bash(venv/Scripts/python -m pytest -q)",
       "Bash(venv/Scripts/python -c \"from blofin_bridge.main import create_app; import os; os.environ.setdefault\\('BLOFIN_DEMO_API_KEY','k'\\); os.environ.setdefault\\('BLOFIN_DEMO_API_SECRET','s'\\); os.environ.setdefault\\('BLOFIN_DEMO_PASSPHRASE','p'\\); os.environ.setdefault\\('BRIDGE_SECRET','xxxxxxxxxxxxxxxxxxxx'\\); print\\('import ok'\\)\")",
-      "Read(//c/Users/rakai/**)"
+      "Read(//c/Users/rakai/**)",
+      "Bash(pytest tests/ --collect-only)",
+      "Bash(pytest tests/test_curation_pipeline.py::test_discover_gmgn_apify_no_token_returns_empty -v)",
+      "Bash(pytest tests/test_curation_pipeline.py -v)",
+      "Skill(schedule)",
+      "Bash(cp *)",
+      "Bash(mkdir -p C:/Users/rakai/Leverage/scripts/scalping/v3.1-drafts)",
+      "Bash(cp C:/Users/rakai/Leverage/.scratch/v3.1-drafts/*.py C:/Users/rakai/Leverage/.scratch/v3.1-drafts/blofin_bridge.yaml C:/Users/rakai/Leverage/.scratch/v3.1-drafts/docker-compose.yml C:/Users/rakai/Leverage/.scratch/v3.1-drafts/SWITCH.md C:/Users/rakai/Leverage/scripts/scalping/v3.1-drafts/)",
+      "WebFetch(domain:hlsm.agentneo.cloud)"
     ]
   }
 }
