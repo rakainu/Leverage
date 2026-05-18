@@ -31,10 +31,11 @@ defaults:
   ema_retest_max_overshoot_pct: 0.2
   # *** V3.1 change *** — slope gate. Initial deploy 2026-05-15 at 0.15
   # based on engine sweep. Relaxed to 0.09 on 2026-05-16 after day-1
-  # fill rate of ~11% — Rich called the gate too tight, validating live
-  # behavior vs sim. Engine flagged 0.06–0.10 bucket as losing; live data
-  # will tell us whether that ranking holds for this bridge.
-  min_5m_slope_pct: 0.09
+  # fill rate of ~11%. Wide-opened to 0.03 (V3 baseline) on 2026-05-18 —
+  # last attempt before retiring V3.1 if it still won't generate fills.
+  # Body band + Sunday block remain on, so this isolates the slope gate
+  # as the sole change vs V3.
+  min_5m_slope_pct: 0.03
   poll_interval_seconds: 2
   # *** V3.1 new *** — block Sunday (UTC). Engine sweep: Sunday alone cost
   # -$2,381 over 6mo with WR 51.9% (basically coinflip + negative drift).
