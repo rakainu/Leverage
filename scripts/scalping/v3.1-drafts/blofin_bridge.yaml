@@ -29,13 +29,10 @@ defaults:
   ema_retest_timeframe: "5m"
   ema_retest_timeout_minutes: 30
   ema_retest_max_overshoot_pct: 0.2
-  # *** V3.1 change *** — slope gate. Initial deploy 2026-05-15 at 0.15
-  # based on engine sweep. Relaxed to 0.09 on 2026-05-16 after day-1
-  # fill rate of ~11%. Wide-opened to 0.03 (V3 baseline) on 2026-05-18 —
-  # last attempt before retiring V3.1 if it still won't generate fills.
-  # Body band + Sunday block remain on, so this isolates the slope gate
-  # as the sole change vs V3.
-  min_5m_slope_pct: 0.03
+  # *** V3.1 change *** — slope gate raised 0.03 -> 0.15. Engine sweep showed
+  # the 0.03-0.06 and 0.06-0.10 slope buckets were the dominant losers
+  # (-$5.7K and -$3.7K over 6mo). 0.15 keeps WR 60-70% and PF 2.2+.
+  min_5m_slope_pct: 0.15
   poll_interval_seconds: 2
   # *** V3.1 new *** — block Sunday (UTC). Engine sweep: Sunday alone cost
   # -$2,381 over 6mo with WR 51.9% (basically coinflip + negative drift).
