@@ -1,0 +1,58 @@
+# Lighter paper bridge config — Pro V3 locked config from 2026-05-20 sweep.
+# Locked Phase C deployment candidate.
+
+connection:
+  host: "https://mainnet.zklighter.elliot.ai"
+  initial_collateral_usdc: 2000        # $2k paper account
+
+# Symbols to trade. Market IDs verified via smoke_test.py 2026-05-20.
+symbols:
+  ZEC:
+    market_id: 90
+    enabled: true
+    margin_usdt: 250                   # margin per trade
+    leverage: 30                       # 30x leverage = $7,500 notional / trade
+  SOL:
+    market_id: 2
+    enabled: true
+    margin_usdt: 250
+    leverage: 30
+
+# Entry filters (Batch 1 shared best)
+entry:
+  timeframe: "5m"
+  min_abs_slope_pct: 0.12              # EMA(9) slope gate
+  block_body_band: [0.3, 0.6]          # skip mid-body retests
+  block_weekdays: [6]                  # block Sunday (0=Mon...6=Sun)
+  ema_period: 9
+  retest_overshoot_pct: 0.2
+  slope_lookback_bars: 3
+  retest_timeout_bars: 6
+
+# Exit state machine (Batch 2 interior winner)
+exits:
+  sl_loss_usdt: 80                     # initial SL = $80 loss
+  breakeven_usdt: 15                   # move SL to BE when +$15 in profit
+  lock_profit_activate_usdt: 25        # lock-in trigger
+  lock_profit_usdt: 20                 # lock at $20 profit after trigger
+  trail_activate_usdt: 40              # start trailing setup
+  trail_start_usdt: 45                 # arm the trail
+  trail_distance_usdt: 15              # trail tightness
+  tp_ceiling_pct: 2.0                  # hard ceiling at 200% of margin
+
+# Pine signal inputs (V3 defaults — match live)
+pine:
+  sensitivity: 8
+  noise: 0.0
+  fakeout: 0.2
+  range_filter: 0.2
+
+# Polling cadence
+loop:
+  bar_poll_interval_s: 30              # check for new closed bar every 30s
+  position_check_interval_s: 5         # check SL/state every 5s
+
+# Logging
+log:
+  level: "INFO"
+  db_path: "data/lighter_paper.db"
