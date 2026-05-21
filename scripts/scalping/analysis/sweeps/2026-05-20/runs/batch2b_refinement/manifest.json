@@ -1,0 +1,21 @@
+{
+  "batch": "batch2b_refinement",
+  "symbol": "SOL",
+  "timeframe": "5m",
+  "days_back": 180,
+  "bars": 51840,
+  "data_window": [
+    "2025-11-22 00:30:00+00:00",
+    "2026-05-21 00:25:00+00:00"
+  ],
+  "n_configs": 162,
+  "run_seconds": 243.1,
+  "fee_profiles": {
+    "blofin": {
+      "commission_pct": 0.0006
+    },
+    "lighter": {
+      "commission_pct": 0.0
+    }
+  }
+}

@@ -1,0 +1,6 @@
+# Regenerable OHLCV cache — engine fetches fresh from ccxt on demand
+data/
+
+# Python bytecode
+__pycache__/
+*.pyc

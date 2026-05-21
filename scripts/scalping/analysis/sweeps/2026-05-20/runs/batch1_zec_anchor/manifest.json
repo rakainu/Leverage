@@ -1,0 +1,21 @@
+{
+  "batch": "batch1_zec_anchor",
+  "symbol": "ZEC",
+  "timeframe": "5m",
+  "days_back": 180,
+  "bars": 51840,
+  "data_window": [
+    "2025-11-21 17:05:00+00:00",
+    "2026-05-20 17:00:00+00:00"
+  ],
+  "n_configs": 480,
+  "run_seconds": 1411.7,
+  "fee_profiles": {
+    "blofin": {
+      "commission_pct": 0.0006
+    },
+    "lighter": {
+      "commission_pct": 0.0
+    }
+  }
+}
