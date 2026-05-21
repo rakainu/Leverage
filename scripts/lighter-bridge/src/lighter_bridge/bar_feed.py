@@ -133,17 +133,33 @@ class BarFeed:
 
     async def run_loop(self, on_new_bar: Callable[[str, pd.DataFrame], Awaitable[None]]):
         """Poll forever, calling `on_new_bar(symbol, df)` whenever a new bar closes."""
-        await self.bootstrap()
-        # Hand the initial seed to the consumer so it has warm state
+        # Bootstrap with retries — Lighter REST can flake on startup
+        backoff = 5
+        while not self._stopped and self.df is None:
+            try:
+                await self.bootstrap()
+            except Exception as exc:
+                log.error("%s: bootstrap failed (retry in %ds): %s",
+                          self.cfg.symbol, backoff, exc)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 300)
+        if self._stopped:
+            return
         await on_new_bar(self.cfg.symbol, self.df)
 
+        consecutive_errs = 0
         while not self._stopped:
             try:
                 df = await self.fetch_latest()
                 if df is not None:
                     await on_new_bar(self.cfg.symbol, df)
+                consecutive_errs = 0
             except Exception as exc:
-                log.error("%s: feed error: %s", self.cfg.symbol, exc, exc_info=True)
+                consecutive_errs += 1
+                log.error("%s: feed error (#%d): %s", self.cfg.symbol, consecutive_errs, exc)
+                # Soft backoff on repeated errors — caps at 5 min
+                extra_sleep = min(consecutive_errs * 30, 270)
+                await asyncio.sleep(extra_sleep)
             await asyncio.sleep(self.cfg.poll_interval_s)
 
     def stop(self):

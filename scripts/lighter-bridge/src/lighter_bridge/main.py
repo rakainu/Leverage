@@ -29,6 +29,7 @@ from .bar_feed import BarFeed, BarFeedConfig
 from .config import BridgeConfig, load_config
 from .db import TradeLogDB
 from .executor import OpenPosition, PaperExecutor
+from . import notify
 from .signals import (
     check_retest, compute_ema_and_slope, generate_v3_signals,
     passes_entry_filters, prepare,
@@ -119,13 +120,18 @@ class Bridge:
         # Wait briefly so the order book has data before signaling
         await asyncio.sleep(2)
 
+        # Telegram startup ping
+        await notify.notify_startup(self.cfg)
+
         # Kick off async tasks
         tasks = []
         for name, feed in self.feeds.items():
             tasks.append(asyncio.create_task(feed.run_loop(self.on_new_bar)))
         tasks.append(asyncio.create_task(self.position_check_loop()))
         tasks.append(asyncio.create_task(self.heartbeat_loop()))
-        log.info("Bridge running. %d bar-feed tasks + 1 position checker + 1 heartbeat.", len(self.feeds))
+        tasks.append(asyncio.create_task(self.daily_summary_loop()))
+        log.info("Bridge running. %d bar-feed tasks + position checker + heartbeat + daily summary.",
+                 len(self.feeds))
 
         try:
             await asyncio.gather(*tasks)
@@ -267,6 +273,8 @@ class Bridge:
                 adx_at_entry=float(last.get("adx", 0)),
             )
             self.trade_ids[symbol] = trade_id
+            # Telegram alert (fire-and-forget)
+            asyncio.create_task(notify.notify_open(pos))
             self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(sig.detected_at_bar_ts),
                                outcome="fired", ema9=ema_v, slope_pct=slope_v,
                                body_atr_ratio=body_v,
@@ -306,20 +314,51 @@ class Bridge:
                             closed_at=datetime.now(timezone.utc).isoformat(),
                         )
                         del self.trade_ids[symbol]
+                        # Telegram close alert
+                        asyncio.create_task(notify.notify_close(
+                            symbol, pos.side, pos.entry_price, exit_p,
+                            pnl, decision.reason, duration, pos.max_state,
+                        ))
             await asyncio.sleep(self.cfg.loop.position_check_interval_s)
 
     async def heartbeat_loop(self):
         """Every 5 minutes, snapshot account state to DB and log a summary line."""
+        last_seen_at = time.time()
         while not self._stopped:
             await asyncio.sleep(300)
             if self.executor is None:
                 continue
-            s = self.executor.account_summary()
-            cum_pnl = s["portfolio_value"] - self.cfg.initial_collateral_usdc
-            self.db.snapshot_account(s["collateral"], s["portfolio_value"],
-                                     s["open_positions"], cum_pnl)
-            log.info("HEARTBEAT  portfolio=$%.2f  cum_pnl=$%+.2f  open=%d",
-                     s["portfolio_value"], cum_pnl, s["open_positions"])
+            try:
+                s = self.executor.account_summary()
+                cum_pnl = s["portfolio_value"] - self.cfg.initial_collateral_usdc
+                self.db.snapshot_account(s["collateral"], s["portfolio_value"],
+                                         s["open_positions"], cum_pnl)
+                log.info("HEARTBEAT  portfolio=$%.2f  cum_pnl=$%+.2f  open=%d",
+                         s["portfolio_value"], cum_pnl, s["open_positions"])
+                last_seen_at = time.time()
+            except Exception as exc:
+                # Don't crash the heartbeat — alert if we go silent for > 30 min
+                log.error("Heartbeat error: %s", exc, exc_info=True)
+                if time.time() - last_seen_at > 1800:
+                    asyncio.create_task(notify.notify_error(
+                        f"Heartbeat silent for >30m: {exc}"
+                    ))
+
+    async def daily_summary_loop(self):
+        """Send one Telegram daily summary every 24h (anchored to first call)."""
+        # Initial wait: 60 min after startup, then every 24h.
+        # Keeps the timing stable across restarts.
+        await asyncio.sleep(3600)
+        while not self._stopped:
+            try:
+                stats = self.db.summary()
+                if self.executor is not None:
+                    s = self.executor.account_summary()
+                    stats["portfolio_value"] = s["portfolio_value"]
+                await notify.notify_daily(stats)
+            except Exception as exc:
+                log.error("Daily summary error: %s", exc, exc_info=True)
+            await asyncio.sleep(86400)
 
 
 async def amain(config_path: str):

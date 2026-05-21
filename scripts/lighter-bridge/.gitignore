@@ -5,3 +5,5 @@ data/
 *.db
 *.db-journal
 *.log
+.env
+runs.log
