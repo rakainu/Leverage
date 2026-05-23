@@ -64,33 +64,45 @@ class PaperExecutor:
     def get_mark_price(self, symbol: str) -> Optional[float]:
         """Current best-known price for `symbol`.
 
-        Uses PaperClient's `last_trade_price` which IS kept fresh by the
-        Lighter WS trade stream. We previously read `pos.mark_price` first,
-        but that field is frozen at the position's fill price and never
-        updates — the state machine was ticking blind, trail never armed,
-        and positions sat in stasis. See incident 2026-05-22 (positions
-        #13/#14 stuck >14h with unrealized profit invisible to the SM).
+        Reads the live order book mid (mean of best bid + best ask) from
+        PaperClient.order_books, which IS kept fresh by the Lighter WS
+        subscription `order_book/{market_id}`. Two prior approaches failed:
+
+        - `pos.mark_price`: frozen at position's fill price, never updates
+          (incident 2026-05-22, positions #13/#14 stuck >14h).
+        - `market_configs[mid].last_trade_price`: populated once at
+          subscription time from a REST snapshot and never refreshed by
+          the WS. The order book listener only subscribes to the
+          `order_book/{market_id}` channel — there is no trade channel.
+          (incident 2026-05-23, position #16 stuck on a constant mark.)
+
+        Order book mid is the right source because (1) every WS update
+        mutates it, (2) it's what paper fills match against in the SDK,
+        and (3) bid/ask prices are quantized to the market's tick size,
+        so any genuine market move surfaces here.
         """
         market_id = self.symbols[symbol]["market_id"]
-        config = self.paper.market_configs.get(market_id)
-        if config is None:
+        book = self.paper.order_books.get(market_id)
+        if book is None:
             return None
-        last = getattr(config, "last_trade_price", None)
-        if last is not None and float(last) > 0:
-            val = float(last)
-            # Freshness bookkeeping — only update timestamp on actual value
-            # changes. A healthy WS for an active market like ZEC/SOL will
-            # tick value through here many times per minute.
-            prior = self._mark_value.get(market_id)
-            if prior is None or prior != val:
-                self._mark_value[market_id] = val
-                self._mark_change_monotonic[market_id] = time.monotonic()
-            return val
-        # Last-resort fallback: stale pos.mark_price is still better than nothing
-        pos = self.paper.get_position(market_id)
-        if pos is not None and pos.size != 0:
-            return float(pos.mark_price)
-        return None
+        best_ask = book.best_ask
+        best_bid = book.best_bid
+        if best_ask is None or best_bid is None:
+            return None
+        ask = best_ask.price_float
+        bid = best_bid.price_float
+        if ask <= 0 or bid <= 0:
+            return None
+        val = (ask + bid) / 2.0
+        # Freshness bookkeeping — only update timestamp on actual value
+        # changes. For an active market like ZEC/SOL the top of book
+        # churns several times a second, so the mid ticks through here
+        # continuously when the WS is healthy.
+        prior = self._mark_value.get(market_id)
+        if prior is None or prior != val:
+            self._mark_value[market_id] = val
+            self._mark_change_monotonic[market_id] = time.monotonic()
+        return val
 
     def mark_age_seconds(self, symbol: str) -> Optional[float]:
         """Seconds since this symbol's mark value last changed.
