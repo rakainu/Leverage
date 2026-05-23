@@ -55,16 +55,27 @@ class PaperExecutor:
         self.positions: dict[str, OpenPosition] = {}   # symbol -> OpenPosition
 
     def get_mark_price(self, symbol: str) -> Optional[float]:
-        """Current best-known price for `symbol` (updated by Lighter WS book)."""
+        """Current best-known price for `symbol`.
+
+        Uses PaperClient's `last_trade_price` which IS kept fresh by the
+        Lighter WS trade stream. We previously read `pos.mark_price` first,
+        but that field is frozen at the position's fill price and never
+        updates — the state machine was ticking blind, trail never armed,
+        and positions sat in stasis. See incident 2026-05-22 (positions
+        #13/#14 stuck >14h with unrealized profit invisible to the SM).
+        """
         market_id = self.symbols[symbol]["market_id"]
         config = self.paper.market_configs.get(market_id)
         if config is None:
             return None
-        # Prefer mark from open position (WebSocket-updated); fall back to last trade
+        last = getattr(config, "last_trade_price", None)
+        if last is not None and float(last) > 0:
+            return float(last)
+        # Last-resort fallback: stale pos.mark_price is still better than nothing
         pos = self.paper.get_position(market_id)
         if pos is not None and pos.size != 0:
             return float(pos.mark_price)
-        return float(config.last_trade_price)
+        return None
 
     def size_for_margin(self, symbol: str, ref_price: float) -> float:
         """Compute base_amount for a position with the symbol's margin × leverage."""
