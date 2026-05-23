@@ -120,6 +120,12 @@ class Bridge:
         # Wait briefly so the order book has data before signaling
         await asyncio.sleep(2)
 
+        # Verify the live mark feed is delivering for every enabled symbol
+        # before we touch trade restoration or open the loops. A bridge that
+        # starts without a working WS is exactly the failure mode that left
+        # position #16 stuck on 2026-05-23 — refuse to run blind.
+        await self._verify_mark_feed_live(enabled, deadline_s=30)
+
         # Restore any open positions from prior run (orphans of a crash/restart)
         restored = await self.restore_open_positions()
 
@@ -133,8 +139,11 @@ class Bridge:
         tasks.append(asyncio.create_task(self.position_check_loop()))
         tasks.append(asyncio.create_task(self.heartbeat_loop()))
         tasks.append(asyncio.create_task(self.daily_summary_loop()))
-        log.info("Bridge running. %d bar-feed tasks + position checker + heartbeat + daily summary.",
-                 len(self.feeds))
+        tasks.append(asyncio.create_task(self.mark_freshness_loop()))
+        log.info(
+            "Bridge running. %d bar-feed tasks + position checker + heartbeat + "
+            "daily summary + mark-feed watchdog.", len(self.feeds),
+        )
 
         try:
             await asyncio.gather(*tasks)
@@ -356,9 +365,19 @@ class Bridge:
                 free_basis = self.cfg.initial_collateral_usdc + realized
                 n_open = len(self.executor.positions)
                 self.db.snapshot_account(free_basis, equity, n_open, total_pnl)
+                # Per-symbol mark-feed freshness, for at-a-glance WS health.
+                mark_parts: list[str] = []
+                for name in self.executor.symbols:
+                    mark = self.executor.get_mark_price(name)
+                    age = self.executor.mark_age_seconds(name)
+                    if mark is not None and age is not None:
+                        mark_parts.append(f"{name}=${mark:.2f}({age:.0f}s)")
+                    elif mark is None:
+                        mark_parts.append(f"{name}=NO_MARK")
+                marks_str = "  " + " ".join(mark_parts) if mark_parts else ""
                 log.info(
-                    "HEARTBEAT  equity=$%.2f  realized=$%+.2f  unrealized=$%+.2f  open=%d",
-                    equity, realized, unrealized, n_open,
+                    "HEARTBEAT  equity=$%.2f  realized=$%+.2f  unrealized=$%+.2f  open=%d%s",
+                    equity, realized, unrealized, n_open, marks_str,
                 )
                 last_seen_at = time.time()
             except Exception as exc:
@@ -367,6 +386,103 @@ class Bridge:
                     asyncio.create_task(notify.notify_error(
                         f"Heartbeat silent for >30m: {exc}"
                     ))
+
+    async def _verify_mark_feed_live(self, enabled: dict, deadline_s: int):
+        """Block until every enabled symbol has reported a non-zero mark price,
+        or fail fast. Refusing to start blind is intentional — see incident
+        2026-05-23 (position #16 stuck on a never-updating WS).
+        """
+        log.info("Verifying live mark feed for %d symbol(s) (deadline %ds)...",
+                 len(enabled), deadline_s)
+        deadline = time.monotonic() + deadline_s
+        not_ready: list[str] = list(enabled.keys())
+        while not_ready and time.monotonic() < deadline:
+            still = []
+            for name in not_ready:
+                mark = self.executor.get_mark_price(name)
+                if mark is None or mark <= 0:
+                    still.append(name)
+                else:
+                    log.info("  %s mark live @ $%.4f", name, mark)
+            not_ready = still
+            if not_ready:
+                await asyncio.sleep(1)
+        if not_ready:
+            log.error("Mark feed not live for %s after %ds — refusing to start.",
+                      not_ready, deadline_s)
+            try:
+                await notify.notify_error(
+                    f"Bridge startup aborted: WS mark feed silent for {not_ready}"
+                )
+            except Exception:
+                pass
+            raise RuntimeError(f"WS mark feed dead for {not_ready}")
+        log.info("Mark feed verified live for all symbols.")
+
+    async def mark_freshness_loop(self):
+        """Watchdog: detect when the Lighter WS trade subscription has gone
+        silent for an enabled symbol and remediate.
+
+        Pure infrastructure. Does NOT block, modify, gate, or filter any
+        trades. The state machine continues to tick on whatever
+        get_mark_price returns. This loop only:
+          - logs WARN when mark value has been unchanged >= warn_s
+          - attempts re-subscribe (cheap remediation) at most once per 60s
+          - exits the process when stale >= fatal_s (Docker restart policy
+            then rebuilds the WS connection cleanly)
+        """
+        warn_s = self.cfg.loop.mark_stale_warn_s
+        fatal_s = self.cfg.loop.mark_stale_fatal_s
+        check_s = self.cfg.loop.mark_watchdog_interval_s
+        log.info(
+            "Mark-feed watchdog started (warn=%ds, fatal=%ds, check every %ds)",
+            warn_s, fatal_s, check_s,
+        )
+        last_resub: dict[str, float] = {}
+        while not self._stopped:
+            await asyncio.sleep(check_s)
+            if self.executor is None or self.paper is None:
+                continue
+            for name in list(self.executor.symbols.keys()):
+                market_id = self.executor.symbols[name]["market_id"]
+                age = self.executor.mark_age_seconds(name)
+                if age is None:
+                    # Never seen a non-zero mark — startup check already
+                    # gated on this, so reaching None here mid-run means
+                    # the value was wiped. Treat as fatal staleness.
+                    msg = (f"Mark for {name} (market_id={market_id}) has "
+                           f"never been observed since bridge start — "
+                           f"exiting for Docker to restart with fresh WS.")
+                    log.error(msg)
+                    try:
+                        await notify.notify_error(msg)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(2)
+                    sys.exit(1)
+                if age >= fatal_s:
+                    msg = (f"Mark for {name} (market_id={market_id}) stale "
+                           f"for {age:.0f}s (>= fatal {fatal_s}s). Exiting "
+                           f"for Docker to restart with fresh WS.")
+                    log.error(msg)
+                    try:
+                        await notify.notify_error(msg)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(2)
+                    sys.exit(1)
+                elif age >= warn_s:
+                    now_mono = time.monotonic()
+                    if now_mono - last_resub.get(name, 0.0) >= 60:
+                        log.warning(
+                            "%s mark stale %.0fs (>= warn %ds). Re-subscribing market_id=%d.",
+                            name, age, warn_s, market_id,
+                        )
+                        try:
+                            await self.paper.track_market(market_id=market_id)
+                        except Exception as exc:
+                            log.error("%s re-track_market failed: %s", name, exc)
+                        last_resub[name] = now_mono
 
     async def daily_summary_loop(self):
         """Send one Telegram daily summary every 24h (anchored to first call)."""

@@ -6,6 +6,7 @@ base_amount the PaperClient needs and submits market orders.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -53,6 +54,12 @@ class PaperExecutor:
         self.paper = paper
         self.symbols = symbols
         self.positions: dict[str, OpenPosition] = {}   # symbol -> OpenPosition
+        # Mark-feed freshness tracking. Pure diagnostic — does NOT affect
+        # what get_mark_price returns. Watchdog uses mark_age_seconds() to
+        # detect a silently-dead Lighter WS trade subscription (see incident
+        # 2026-05-23, position #16). Timestamp updates only when value changes.
+        self._mark_value: dict[int, float] = {}
+        self._mark_change_monotonic: dict[int, float] = {}
 
     def get_mark_price(self, symbol: str) -> Optional[float]:
         """Current best-known price for `symbol`.
@@ -70,12 +77,36 @@ class PaperExecutor:
             return None
         last = getattr(config, "last_trade_price", None)
         if last is not None and float(last) > 0:
-            return float(last)
+            val = float(last)
+            # Freshness bookkeeping — only update timestamp on actual value
+            # changes. A healthy WS for an active market like ZEC/SOL will
+            # tick value through here many times per minute.
+            prior = self._mark_value.get(market_id)
+            if prior is None or prior != val:
+                self._mark_value[market_id] = val
+                self._mark_change_monotonic[market_id] = time.monotonic()
+            return val
         # Last-resort fallback: stale pos.mark_price is still better than nothing
         pos = self.paper.get_position(market_id)
         if pos is not None and pos.size != 0:
             return float(pos.mark_price)
         return None
+
+    def mark_age_seconds(self, symbol: str) -> Optional[float]:
+        """Seconds since this symbol's mark value last changed.
+
+        Pure diagnostic for the watchdog. Returns None if we have never
+        recorded a non-zero mark for this symbol. Does NOT block trading.
+        """
+        sym_cfg = self.symbols.get(symbol)
+        if sym_cfg is None:
+            return None
+        # Poke get_mark_price first so any just-arrived update is captured.
+        _ = self.get_mark_price(symbol)
+        ts = self._mark_change_monotonic.get(sym_cfg["market_id"])
+        if ts is None:
+            return None
+        return time.monotonic() - ts
 
     def size_for_margin(self, symbol: str, ref_price: float) -> float:
         """Compute base_amount for a position with the symbol's margin × leverage."""

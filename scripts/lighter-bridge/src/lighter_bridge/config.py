@@ -52,6 +52,13 @@ class PineConfig:
 class LoopConfig:
     bar_poll_interval_s: int = 30
     position_check_interval_s: int = 5
+    # WS mark-feed watchdog thresholds (see incident 2026-05-23).
+    # warn_s: log + try re-subscribe; fatal_s: exit so Docker restarts WS.
+    # 180s warn is generous — ZEC/SOL trade ~14×/min, so a healthy WS
+    # will tick the value through every 5–10s in practice.
+    mark_stale_warn_s: int = 180
+    mark_stale_fatal_s: int = 300
+    mark_watchdog_interval_s: int = 30
 
 
 @dataclass
