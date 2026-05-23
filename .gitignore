@@ -46,3 +46,11 @@ scripts/scalping/*.db-journal
 scripts/scalping/__pycache__/
 scripts/scalping/src/**/__pycache__/
 scripts/scalping/src/*.egg-info/
+
+# scalping analysis data (sweep outputs, regenerable)
+scripts/scalping/analysis/data/*.db
+scripts/scalping/analysis/data/*.db-journal
+
+# Local diagnostic artifacts (not source)
+Screenshot*.png
+*.png.bak
