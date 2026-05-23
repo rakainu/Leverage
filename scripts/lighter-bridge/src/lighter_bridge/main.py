@@ -120,8 +120,11 @@ class Bridge:
         # Wait briefly so the order book has data before signaling
         await asyncio.sleep(2)
 
-        # Telegram startup ping
-        await notify.notify_startup(self.cfg)
+        # Restore any open positions from prior run (orphans of a crash/restart)
+        restored = await self.restore_open_positions()
+
+        # Telegram startup ping (includes restored positions if any)
+        await notify.notify_startup(self.cfg, restored=restored or None)
 
         # Kick off async tasks
         tasks = []
@@ -318,26 +321,47 @@ class Bridge:
                         asyncio.create_task(notify.notify_close(
                             symbol, pos.side, pos.entry_price, exit_p,
                             pnl, decision.reason, duration, pos.max_state,
+                            starting_collateral=self.cfg.initial_collateral_usdc,
                         ))
             await asyncio.sleep(self.cfg.loop.position_check_interval_s)
 
+    def _equity_breakdown(self) -> tuple[float, float, float]:
+        """Return (realized_pnl, unrealized_pnl, total_equity).
+
+        realized_pnl  = sum of closed-trade PnL from DB
+        unrealized_pnl = sum of pnl_at_mark over open positions
+        total_equity   = initial_collateral + realized + unrealized
+        """
+        stats = self.db.summary()
+        realized = float(stats.get("net_pnl") or 0.0)
+        unrealized = 0.0
+        if self.executor is not None:
+            for sym in list(self.executor.positions.keys()):
+                v = self.executor.pnl_at_mark(sym)
+                if v is not None:
+                    unrealized += float(v)
+        equity = float(self.cfg.initial_collateral_usdc) + realized + unrealized
+        return realized, unrealized, equity
+
     async def heartbeat_loop(self):
-        """Every 5 minutes, snapshot account state to DB and log a summary line."""
+        """Every 5 minutes, snapshot total equity (collateral + realized + unrealized)."""
         last_seen_at = time.time()
         while not self._stopped:
             await asyncio.sleep(300)
             if self.executor is None:
                 continue
             try:
-                s = self.executor.account_summary()
-                cum_pnl = s["portfolio_value"] - self.cfg.initial_collateral_usdc
-                self.db.snapshot_account(s["collateral"], s["portfolio_value"],
-                                         s["open_positions"], cum_pnl)
-                log.info("HEARTBEAT  portfolio=$%.2f  cum_pnl=$%+.2f  open=%d",
-                         s["portfolio_value"], cum_pnl, s["open_positions"])
+                realized, unrealized, equity = self._equity_breakdown()
+                total_pnl = equity - self.cfg.initial_collateral_usdc
+                free_basis = self.cfg.initial_collateral_usdc + realized
+                n_open = len(self.executor.positions)
+                self.db.snapshot_account(free_basis, equity, n_open, total_pnl)
+                log.info(
+                    "HEARTBEAT  equity=$%.2f  realized=$%+.2f  unrealized=$%+.2f  open=%d",
+                    equity, realized, unrealized, n_open,
+                )
                 last_seen_at = time.time()
             except Exception as exc:
-                # Don't crash the heartbeat — alert if we go silent for > 30 min
                 log.error("Heartbeat error: %s", exc, exc_info=True)
                 if time.time() - last_seen_at > 1800:
                     asyncio.create_task(notify.notify_error(
@@ -346,19 +370,124 @@ class Bridge:
 
     async def daily_summary_loop(self):
         """Send one Telegram daily summary every 24h (anchored to first call)."""
-        # Initial wait: 60 min after startup, then every 24h.
-        # Keeps the timing stable across restarts.
         await asyncio.sleep(3600)
         while not self._stopped:
             try:
                 stats = self.db.summary()
-                if self.executor is not None:
-                    s = self.executor.account_summary()
-                    stats["portfolio_value"] = s["portfolio_value"]
-                await notify.notify_daily(stats)
+                _, _, equity = self._equity_breakdown()
+                stats["portfolio_value"] = equity
+                await notify.notify_daily(stats, starting_collateral=self.cfg.initial_collateral_usdc)
             except Exception as exc:
                 log.error("Daily summary error: %s", exc, exc_info=True)
             await asyncio.sleep(86400)
+
+    async def restore_open_positions(self) -> list[OpenPosition]:
+        """Reconstruct any orphaned open positions from the DB after a restart.
+
+        For each trade_log row with closed_at IS NULL:
+          - Replay 5m candles from opened_at to now to derive trail_high
+            (lowest low for shorts, highest high for longs).
+          - Submit a matching paper order so PaperClient holds the same
+            position and a future close order can flatten it cleanly.
+            (PaperClient's own PnL accounting is sidestepped — we track
+            realized/unrealized via the DB and OpenPosition entry price.)
+          - Inject the OpenPosition into self.executor.positions and register
+            its trade_id so the state machine + close hook work normally.
+
+        Returns the list of restored positions.
+        """
+        if self.executor is None or self.paper is None or self.api is None:
+            return []
+        open_rows = self.db.get_open_trades()
+        if not open_rows:
+            return []
+
+        log.info("Restoring %d open position(s) from trade_log...", len(open_rows))
+        candle_api = lighter.CandlestickApi(self.api)
+        restored: list[OpenPosition] = []
+
+        for row in open_rows:
+            symbol = row["symbol"]
+            if symbol not in self.executor.symbols:
+                log.warning(
+                    "  skipping orphan trade #%d (%s): symbol not enabled in config",
+                    row["id"], symbol,
+                )
+                continue
+            sym_cfg = self.executor.symbols[symbol]
+            side = row["side"]
+            opened_at_iso = row["opened_at"]
+            try:
+                opened_at_unix = datetime.fromisoformat(opened_at_iso).timestamp()
+            except Exception:
+                log.warning("  trade #%d has unparseable opened_at=%r, skipping", row["id"], opened_at_iso)
+                continue
+
+            now_unix = int(time.time())
+            try:
+                resp = await candle_api.candles(
+                    market_id=sym_cfg["market_id"],
+                    resolution="5m",
+                    start_timestamp=int(opened_at_unix),
+                    end_timestamp=now_unix,
+                    count_back=500,
+                )
+                cd = resp.to_dict()
+                candles = cd.get("c") or []
+            except Exception as exc:
+                log.error(
+                    "  %s: candle replay failed for trade #%d (%s) — using entry as trail_high",
+                    symbol, row["id"], exc,
+                )
+                candles = []
+
+            entry_price = float(row["entry_price"])
+            if side == "short":
+                extremes = [float(c["l"]) for c in candles]
+                trail_high = min(extremes) if extremes else entry_price
+            else:
+                extremes = [float(c["h"]) for c in candles]
+                trail_high = max(extremes) if extremes else entry_price
+
+            order_side = (
+                lighter.PaperOrderSide.BUY if side == "long" else lighter.PaperOrderSide.SELL
+            )
+            try:
+                result = await self.paper.create_paper_order(lighter.PaperOrderRequest(
+                    market_id=sym_cfg["market_id"],
+                    side=order_side,
+                    base_amount=float(row["base_amount"]),
+                ))
+                rehydration_price = float(result.avg_price)
+            except Exception as exc:
+                log.error(
+                    "  %s: rehydration paper-open failed for trade #%d (%s) — skipping",
+                    symbol, row["id"], exc,
+                )
+                continue
+
+            pos = OpenPosition(
+                symbol=symbol,
+                market_id=sym_cfg["market_id"],
+                side=side,
+                entry_price=entry_price,
+                base_amount=float(row["base_amount"]),
+                margin_usdt=float(row["margin_usdt"]),
+                leverage=float(row["leverage"]),
+                opened_at=opened_at_unix,
+                notional=float(row["notional"]),
+                trail_high=trail_high,
+            )
+            self.executor.positions[symbol] = pos
+            self.trade_ids[symbol] = int(row["id"])
+            restored.append(pos)
+            log.info(
+                "  restored #%d %s %s entry=$%.4f size=%g trail_high=$%.4f rehydrated@$%.4f",
+                row["id"], symbol, side.upper(), entry_price, pos.base_amount,
+                trail_high, rehydration_price,
+            )
+
+        return restored
 
 
 async def amain(config_path: str):

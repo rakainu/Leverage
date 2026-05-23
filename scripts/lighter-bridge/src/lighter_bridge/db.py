@@ -102,6 +102,19 @@ class TradeLogDB:
         )
         self.conn.commit()
 
+    def get_open_trades(self) -> list[dict]:
+        """Return all trades with closed_at IS NULL, used by startup restoration."""
+        cur = self.conn.execute("""
+            SELECT id, symbol, side, entry_price, margin_usdt, leverage,
+                   base_amount, notional, opened_at, bar_time_open,
+                   slope_pct, body_atr_ratio
+            FROM trade_log
+            WHERE closed_at IS NULL
+            ORDER BY id
+        """)
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+
     def summary(self) -> dict:
         """Quick KPI summary for status checks."""
         c = self.conn.execute("""
