@@ -62,7 +62,11 @@ symbols:
     leverage: 30
     margin_mode: isolated
     sl_policy: p2_step_stop
-    # sl_loss_usdt: 82.50   # uncomment to switch ZEC to wide-SL variant
+    # Activated 2026-05-23 after live evidence: narrow $32.50 SL produced
+    # -$48 net over 17 trades on BloFin demo (10 SL hits avg -$32) while
+    # the same strategy on Lighter with $80 SL ran profitable. Engine
+    # sweep showed PF>=2.83 across SL $42-$95, recommendation $82.50.
+    sl_loss_usdt: 82.50
 
   # SOL — 0.3x margin scaling. Filter changes apply (no SOL-specific override).
   # Effective: SL $3.90, BE $3.60, lock_activate $5.40, lock_profit $4.50,
