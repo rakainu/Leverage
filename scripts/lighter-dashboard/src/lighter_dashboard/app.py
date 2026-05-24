@@ -15,6 +15,7 @@ auth code here.
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -32,11 +33,17 @@ _STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
 
 
 def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
-    app = FastAPI(title="Lighter Dashboard")
     db = DashboardDB(cfg.db_path)
     mark_cache = marks if marks is not None else MarkCache(
         cfg.lighter_host, cfg.symbols, ttl=cfg.mark_cache_ttl_s
     )
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        await mark_cache.close()
+
+    app = FastAPI(title="Lighter Dashboard", lifespan=lifespan)
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
     if _STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")

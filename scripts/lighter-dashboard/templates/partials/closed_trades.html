@@ -9,7 +9,7 @@
         <td class="{{ 'neg' if t.side == 'short' else 'pos' }}">{{ t.side }}</td>
         <td>{{ "%.4f"|format(t.entry_price) }}</td>
         <td>{{ "%.4f"|format(t.exit_price) if t.exit_price is not none else "—" }}</td>
-        <td class="{{ 'pos' if (t.pnl_usdt or 0) >= 0 else 'neg' }}">{{ "%+.2f"|format(t.pnl_usdt) }}</td>
+        <td class="{{ 'pos' if (t.pnl_usdt or 0) >= 0 else 'neg' }}">{{ "%+.2f"|format(t.pnl_usdt) if t.pnl_usdt is not none else "—" }}</td>
         <td class="mut">{{ t.exit_reason }}</td>
       </tr>
       {% endfor %}
