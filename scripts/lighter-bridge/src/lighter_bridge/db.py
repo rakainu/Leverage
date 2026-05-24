@@ -61,6 +61,9 @@ class TradeLogDB:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.path))
+        # WAL mode: lock-free concurrent reads for the dashboard process.
+        # Strategy-neutral — affects only write persistence, not trading logic.
+        self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.executescript(SCHEMA)
         self.conn.commit()
         log.info("DB ready at %s", self.path)
