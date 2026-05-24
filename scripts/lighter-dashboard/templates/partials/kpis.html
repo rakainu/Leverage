@@ -1,4 +1,7 @@
-<div class="grid grid-cols-5 gap-3">
+<div class="grid grid-cols-5 gap-3"
+     hx-get="/panel/kpis?window={{ window }}"
+     hx-trigger="every {{ poll_s }}s"
+     hx-swap="outerHTML">
   <div class="panel">
     <div class="label">Equity</div>
     <div class="text-2xl font-bold">${{ "%.2f"|format(equity) }}</div>
@@ -8,10 +11,16 @@
     <div class="label">Open positions</div>
     <div class="text-2xl font-bold">{{ n_open }}</div>
   </div>
-  <div class="panel">
+  <div class="panel" style="position:relative;">
+    <div class="seg" style="position:absolute; top:12px; right:12px;">
+      {% for w, ltr in [('day','D'), ('week','W'), ('month','M')] %}
+      <a class="seg-btn {{ 'on' if window == w else '' }}"
+         hx-get="/panel/kpis?window={{ w }}" hx-target="closest .grid" hx-swap="outerHTML">{{ ltr }}</a>
+      {% endfor %}
+    </div>
     <div class="label">Realized</div>
     <div class="text-2xl font-bold {{ 'pos' if realized >= 0 else 'neg' }}">${{ "%+.2f"|format(realized) }}</div>
-    <div class="mut">{{ n_closed }} trades · {{ "%.0f"|format(win_rate) }}% win</div>
+    <div class="mut">{{ realized_n }} trades · {{ "%.0f"|format(realized_win_pct) }}% win</div>
   </div>
   <div class="panel">
     <div class="label">Profit factor</div>

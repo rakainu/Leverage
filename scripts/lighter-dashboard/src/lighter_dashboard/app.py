@@ -16,6 +16,7 @@ auth code here.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -30,6 +31,10 @@ from .marks import MarkCache
 
 _TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 _STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
+
+# Selectable realized-PnL windows -> lookback in days.
+_REALIZED_WINDOWS = {"day": 1, "week": 7, "month": 30}
+_SIGNAL_LOOKBACK_HOURS = 12
 
 
 def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
@@ -67,22 +72,29 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
         )
 
     @app.get("/panel/kpis", response_class=HTMLResponse)
-    async def panel_kpis(request: Request):
-        pnls = db.closed_pnls()
+    async def panel_kpis(request: Request, window: str = "day"):
+        if window not in _REALIZED_WINDOWS:
+            window = "day"
+        pnls = db.closed_pnls()                       # all-time: equity, PF, drawdown
         positions = await _open_positions_with_pnl()
-        realized = sum(pnls)
+        realized_all = sum(pnls)
         unrealized = sum(p["upnl"] or 0 for p in positions)
-        equity = cfg.initial_collateral_usdc + realized + unrealized
+        equity = cfg.initial_collateral_usdc + realized_all + unrealized
         snaps = [s["portfolio_value"] for s in db.snapshots()] + [equity]
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(days=_REALIZED_WINDOWS[window])).isoformat()
+        win_net, win_n, win_wins = db.realized_since(cutoff)
         ctx = {
             "equity": equity,
             "equity_pct": (equity / cfg.initial_collateral_usdc - 1) * 100,
             "n_open": len(positions),
-            "realized": realized,
-            "n_closed": len(pnls),
-            "win_rate": stats.win_rate(pnls) * 100,
+            "realized": win_net,
+            "realized_n": win_n,
+            "realized_win_pct": (win_wins / win_n * 100) if win_n else 0,
+            "window": window,
             "profit_factor": stats.profit_factor(pnls),
             "max_dd": stats.max_drawdown(snaps),
+            "poll_s": cfg.live_ms // 1000,
         }
         return templates.TemplateResponse(request, "partials/kpis.html", ctx)
 
@@ -119,9 +131,11 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
 
     @app.get("/panel/signals", response_class=HTMLResponse)
     async def panel_signals(request: Request):
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(hours=_SIGNAL_LOOKBACK_HOURS)).isoformat()
         return templates.TemplateResponse(
             request, "partials/signals.html",
-            {"signals": db.signals(limit=30)},
+            {"signals": db.signals(limit=50, since_iso=cutoff)},
         )
 
     @app.get("/panel/equity", response_class=HTMLResponse)

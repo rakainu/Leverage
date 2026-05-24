@@ -36,6 +36,23 @@ def test_kpis_partial(fixture_db):
     assert "Equity" in r.text
 
 
+def test_kpis_window_param_persists(fixture_db):
+    app = create_app(_cfg(fixture_db), marks=_StubMarks())
+    client = TestClient(app)
+    r = client.get("/panel/kpis?window=week")
+    assert r.status_code == 200
+    # self-poll URL carries the chosen window forward, and the W button is active
+    assert "/panel/kpis?window=week" in r.text
+
+
+def test_kpis_bad_window_falls_back_to_day(fixture_db):
+    app = create_app(_cfg(fixture_db), marks=_StubMarks())
+    client = TestClient(app)
+    r = client.get("/panel/kpis?window=bogus")
+    assert r.status_code == 200
+    assert "/panel/kpis?window=day" in r.text
+
+
 def test_positions_partial_shows_open(fixture_db):
     app = create_app(_cfg(fixture_db), marks=_StubMarks())
     client = TestClient(app)

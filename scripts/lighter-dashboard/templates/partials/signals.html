@@ -1,6 +1,6 @@
 <div class="panel">
-  <div class="label mb-2">Signal log</div>
-  <div class="scroll-6">
+  <div class="label label--rule mb-2">Signal log</div>
+  <div class="scroll-4">
     {% for s in signals %}
     <div class="py-1" style="font-size:14px;">
       <span class="mut">{{ s.bar_time[11:16] if s.bar_time else "" }}</span>

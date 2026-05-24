@@ -65,13 +65,35 @@ class DashboardDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def signals(self, limit: int = 30) -> list[dict]:
+    def realized_since(self, cutoff_iso: str) -> tuple[float, int, int]:
+        """(net_pnl, n_trades, wins) for trades closed at/after cutoff_iso.
+
+        closed_at is stored as an ISO-8601 UTC string, so a lexicographic
+        >= comparison is a correct chronological filter.
+        """
         with self._conn() as c:
-            rows = c.execute(
-                "SELECT symbol, side, bar_time, outcome, slope_pct, detected_at "
-                "FROM signal_log ORDER BY id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            r = c.execute(
+                "SELECT COALESCE(SUM(pnl_usdt),0) net, COUNT(*) n, "
+                "COALESCE(SUM(CASE WHEN pnl_usdt > 0 THEN 1 ELSE 0 END),0) wins "
+                "FROM trade_log WHERE pnl_usdt IS NOT NULL AND closed_at >= ?",
+                (cutoff_iso,),
+            ).fetchone()
+        return float(r["net"]), int(r["n"]), int(r["wins"])
+
+    def signals(self, limit: int = 30, since_iso: str | None = None) -> list[dict]:
+        with self._conn() as c:
+            if since_iso is not None:
+                rows = c.execute(
+                    "SELECT symbol, side, bar_time, outcome, slope_pct, detected_at "
+                    "FROM signal_log WHERE detected_at >= ? ORDER BY id DESC LIMIT ?",
+                    (since_iso, limit),
+                ).fetchall()
+            else:
+                rows = c.execute(
+                    "SELECT symbol, side, bar_time, outcome, slope_pct, detected_at "
+                    "FROM signal_log ORDER BY id DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
         return [dict(r) for r in rows]
 
     def snapshots(self) -> list[dict]:

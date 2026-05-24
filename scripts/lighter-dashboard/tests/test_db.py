@@ -44,6 +44,27 @@ def test_signals(fixture_db):
     assert rows[0]["outcome"] == "fired"
 
 
+def test_signals_since_filters(fixture_db):
+    db = DashboardDB(fixture_db)
+    # fixture signal detected 2026-05-23; a future cutoff filters it out
+    assert db.signals(limit=10, since_iso="2999-01-01T00:00:00+00:00") == []
+    # a past cutoff keeps it
+    assert len(db.signals(limit=10, since_iso="2000-01-01T00:00:00+00:00")) == 1
+
+
+def test_realized_since_counts_window(fixture_db):
+    db = DashboardDB(fixture_db)
+    # past cutoff -> both closed trades (+200 win, -35 loss = 165 net, 1 win)
+    net, n, wins = db.realized_since("2000-01-01T00:00:00+00:00")
+    assert n == 2 and round(net, 2) == 165.0 and wins == 1
+
+
+def test_realized_since_future_cutoff_empty(fixture_db):
+    db = DashboardDB(fixture_db)
+    net, n, wins = db.realized_since("2999-01-01T00:00:00+00:00")
+    assert (net, n, wins) == (0.0, 0, 0)
+
+
 def test_snapshots(fixture_db):
     db = DashboardDB(fixture_db)
     rows = db.snapshots()

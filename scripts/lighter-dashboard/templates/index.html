@@ -30,6 +30,17 @@
       content:""; width:3px; height:14px; border-radius:2px; flex:none;
       background:linear-gradient(180deg,#34d399,#06b6d4);
     }
+    /* Section headings get a divider rule beneath them */
+    .label--rule { border-bottom:1px solid #2a3242; padding-bottom:9px; }
+    /* Segmented Day/Week/Month toggle */
+    .seg { display:inline-flex; gap:3px; }
+    .seg-btn {
+      font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px;
+      color:#9aa6b8; background:#10141c; border:1px solid #252b38;
+      cursor:pointer; text-decoration:none; user-select:none;
+    }
+    .seg-btn:hover { color:#e5e7eb; border-color:#33405a; }
+    .seg-btn.on { color:#08111a; background:linear-gradient(180deg,#34d399,#06b6d4); border-color:transparent; }
     table { font-size:14px; }
     th {
       color:#cbd5e1; font-weight:600; text-align:left;
@@ -38,12 +49,14 @@
     }
     td, th { padding:6px 8px; }
     .pos { color:#34d399; } .neg { color:#f87171; } .mut { color:#9aa6b8; }
-    /* Scrollable panel body sized to ~6 rows, with a sticky table header */
-    .scroll-6 { max-height:220px; overflow-y:auto; }
-    .scroll-6::-webkit-scrollbar { width:8px; }
-    .scroll-6::-webkit-scrollbar-track { background:transparent; }
-    .scroll-6::-webkit-scrollbar-thumb { background:#2f3645; border-radius:4px; }
-    .scroll-6::-webkit-scrollbar-thumb:hover { background:#3c4456; }
+    /* Scrollable panel bodies (~6 rows for trades, ~4 for signals) */
+    .scroll-6, .scroll-4 { overflow-y:auto; }
+    .scroll-6 { max-height:220px; }
+    .scroll-4 { max-height:128px; }
+    .scroll-6::-webkit-scrollbar, .scroll-4::-webkit-scrollbar { width:8px; }
+    .scroll-6::-webkit-scrollbar-track, .scroll-4::-webkit-scrollbar-track { background:transparent; }
+    .scroll-6::-webkit-scrollbar-thumb, .scroll-4::-webkit-scrollbar-thumb { background:#2f3645; border-radius:4px; }
+    .scroll-6::-webkit-scrollbar-thumb:hover, .scroll-4::-webkit-scrollbar-thumb:hover { background:#3c4456; }
     .scroll-6 thead th { position:sticky; top:0; background:#161a23; z-index:1; }
   </style>
 </head>
@@ -56,8 +69,9 @@
     <span class="label">{{ cfg.symbols.keys()|join(' · ') }}</span>
   </header>
 
-  <!-- A: KPI strip (live) -->
-  <div hx-get="/panel/kpis" hx-trigger="load, every {{ cfg.live_ms // 1000 }}s" class="mb-4"></div>
+  <!-- A: KPI strip (live). Loads once; the returned fragment self-polls and
+       carries the selected Realized window (day/week/month) forward. -->
+  <div hx-get="/panel/kpis?window=day" hx-trigger="load" class="mb-4"></div>
 
   <!-- B: Equity curve (static) -->
   <div hx-get="/panel/equity" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s" class="mb-4"></div>
