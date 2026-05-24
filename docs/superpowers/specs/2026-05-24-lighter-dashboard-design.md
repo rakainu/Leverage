@@ -130,10 +130,11 @@ as the bridge.
 ## Access & auth
 
 - Public HTTPS via the existing Traefik reverse proxy + Let's Encrypt.
-- Subdomain `lighter.<domain>` — exact domain confirmed at deploy (one DNS
-  record + a Traefik label).
-- Traefik **basic-auth** middleware: one username + password Rich sets. Blocks
-  crawlers and casual access to private trade data.
+- Subdomain **`lighter.agentneo.cloud`** — one Cloudflare DNS record (Rich sets
+  up when prompted) + a Traefik label.
+- Traefik **basic-auth** middleware. Username `radk9`. Password stored only as a
+  bcrypt/htpasswd hash on the VPS (in the dashboard's Traefik config / `.env`) —
+  **never committed to the repo in plaintext**.
 
 ## Visual direction
 
@@ -167,7 +168,8 @@ as the bridge.
 - Traefik labels for routing + basic-auth + TLS.
 - The bridge's WAL change deployed via the existing bind-mount + restart flow.
 
-## Open items (confirmed at deploy, not blockers)
+## Open items (resolved)
 
-- Exact subdomain/domain for the Traefik route.
-- Basic-auth username/password (Rich sets).
+- Domain: `lighter.agentneo.cloud`. Cloudflare DNS record added by Rich when the
+  deploy step prompts for it.
+- Basic-auth: username `radk9`; password hashed at deploy, stored on VPS only.
