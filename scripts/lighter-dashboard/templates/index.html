@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lighter Dashboard</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background:#0f1115; color:#e5e7eb; font-size:15px; }
+    .panel { background:#1a1d24; border:1px solid #2a2e38; border-radius:10px; padding:16px; }
+    .label { font-size:11px; letter-spacing:1px; color:#6b7280; text-transform:uppercase; }
+    table { font-size:14px; }
+    th { color:#6b7280; font-weight:500; text-align:left; }
+    td, th { padding:4px 8px; }
+    .pos { color:#10b981; } .neg { color:#ef4444; } .mut { color:#94a3b8; }
+  </style>
+</head>
+<body class="p-5">
+  <header class="flex items-center justify-between mb-5">
+    <h1 class="text-xl font-bold">Lighter <span class="mut font-normal">paper bridge</span></h1>
+    <span class="label">{{ cfg.symbols.keys()|join(' · ') }}</span>
+  </header>
+
+  <!-- A: KPI strip (live) -->
+  <div hx-get="/panel/kpis" hx-trigger="load, every {{ cfg.live_ms // 1000 }}s" class="mb-4"></div>
+
+  <!-- B: Equity curve (static) -->
+  <div hx-get="/panel/equity" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s" class="mb-4"></div>
+
+  <div class="grid grid-cols-3 gap-4 mb-4">
+    <!-- C: Open positions (live) -->
+    <div hx-get="/panel/positions" hx-trigger="load, every {{ cfg.live_ms // 1000 }}s"></div>
+    <!-- D: Closed trades (static) -->
+    <div class="col-span-2" hx-get="/panel/closed" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s"></div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-4">
+    <!-- E: Exit reasons --><div hx-get="/panel/exits" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s"></div>
+    <!-- F: Per-symbol --><div hx-get="/panel/symbols" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s"></div>
+    <!-- G: Signals --><div hx-get="/panel/signals" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s"></div>
+  </div>
+</body>
+</html>

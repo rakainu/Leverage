@@ -1,0 +1,21 @@
+<div class="panel">
+  <div class="label mb-2">Open positions</div>
+  {% if positions %}
+    {% for p in positions %}
+    <div class="mb-2 p-2 rounded" style="background:#0f1115;">
+      <div class="flex justify-between">
+        <span class="{{ 'neg' if p.side == 'short' else 'pos' }} font-semibold">{{ p.symbol }} {{ p.side|upper }}</span>
+        <span class="{{ 'pos' if (p.upnl or 0) >= 0 else 'neg' }}">
+          {{ "${:+,.2f}".format(p.upnl) if p.upnl is not none else "—" }}
+        </span>
+      </div>
+      <div class="mut" style="font-size:13px;">
+        entry ${{ "%.4f"|format(p.entry_price) }} ·
+        mark {{ "${:.4f}".format(p.mark) if p.mark is not none else "stale" }}
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="mut">No open positions</div>
+  {% endif %}
+</div>
