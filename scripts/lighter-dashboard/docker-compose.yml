@@ -1,0 +1,30 @@
+services:
+  lighter-dashboard:
+    build: .
+    image: lighter-dashboard:latest
+    container_name: lighter-dashboard
+    restart: unless-stopped
+    volumes:
+      # Read-write mount REQUIRED for WAL sidecar files (-wal/-shm).
+      # The app enforces read-only at the SQLite layer (PRAGMA query_only=ON).
+      - /docker/lighter-paper/data:/app/data
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lighter-dash.rule=Host(`lighter.agentneo.cloud`)"
+      - "traefik.http.routers.lighter-dash.entrypoints=websecure"
+      - "traefik.http.routers.lighter-dash.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.lighter-dash.middlewares=lighter-auth"
+      - "traefik.http.middlewares.lighter-auth.basicauth.usersfile=/auth/lighter.htpasswd"
+      - "traefik.http.services.lighter-dash.loadbalancer.server.port=8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  traefik:
+    external: true
+    name: traefik-mncm_default
