@@ -26,9 +26,11 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     TZ=America/Sao_Paulo
 
-# Healthcheck: DB file exists + has been written to recently.
-# `find` exits 0 if a file modified in the last 10 min exists.
+# Healthcheck: DB written to recently. In WAL mode (enabled for the
+# dashboard's concurrent reads) writes land in the -wal sidecar and the
+# main .db mtime only advances on checkpoint, so we accept either file
+# being fresh. The 5-min heartbeat snapshot guarantees a write < 10 min.
 HEALTHCHECK --interval=5m --timeout=15s --start-period=2m --retries=3 \
-    CMD find /app/data/lighter_paper.db -mmin -10 -type f | grep -q . || exit 1
+    CMD find /app/data/lighter_paper.db /app/data/lighter_paper.db-wal -mmin -10 -type f 2>/dev/null | grep -q . || exit 1
 
 CMD ["python", "-u", "run_bridge.py", "--config", "config.yaml"]
