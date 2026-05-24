@@ -1,0 +1,13 @@
+<div class="panel">
+  <div class="label mb-2">Signal log</div>
+  {% for s in signals %}
+  <div class="py-1" style="font-size:14px;">
+    <span class="mut">{{ s.bar_time[11:16] if s.bar_time else "" }}</span>
+    {{ s.symbol }} {{ s.side }}
+    <span class="{{ 'pos' if s.outcome == 'fired' else ('mut' if s.outcome == 'expired' else 'neg') }}">{{ s.outcome }}</span>
+    {% if s.slope_pct is not none %}<span class="mut">· slope {{ "%.2f"|format(s.slope_pct) }}</span>{% endif %}
+  </div>
+  {% else %}
+  <div class="mut">No signals yet</div>
+  {% endfor %}
+</div>

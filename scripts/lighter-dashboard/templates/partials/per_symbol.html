@@ -1,0 +1,15 @@
+<div class="panel">
+  <div class="label mb-2">Per-symbol stats</div>
+  <table class="w-full">
+    <thead><tr><th>sym</th><th>n</th><th>win%</th><th>net</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.symbol }}</td><td>{{ r.n }}</td>
+        <td>{{ "%.0f"|format(r.win_pct) }}%</td>
+        <td class="{{ 'pos' if (r.net or 0) >= 0 else 'neg' }}">${{ "%+.0f"|format(r.net) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

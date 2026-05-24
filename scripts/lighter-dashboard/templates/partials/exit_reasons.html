@@ -1,0 +1,11 @@
+<div class="panel">
+  <div class="label mb-2">Exit reasons</div>
+  {% for r in mix %}
+  <div class="flex justify-between py-1">
+    <span>{{ r.exit_reason }}</span>
+    <span class="{{ 'pos' if (r.net or 0) >= 0 else 'neg' }}">{{ r.n }} · ${{ "%+.0f"|format(r.net) }}</span>
+  </div>
+  {% else %}
+  <div class="mut">No closed trades yet</div>
+  {% endfor %}
+</div>

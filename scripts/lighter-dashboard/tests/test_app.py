@@ -42,3 +42,17 @@ def test_positions_partial_shows_open(fixture_db):
     r = client.get("/panel/positions")
     assert r.status_code == 200
     assert "SOL" in r.text             # the one open trade
+
+
+import pytest
+
+
+@pytest.mark.parametrize("path", [
+    "/panel/closed", "/panel/exits", "/panel/symbols",
+    "/panel/signals", "/panel/equity",
+])
+def test_all_panels_render(fixture_db, path):
+    app = create_app(_cfg(fixture_db), marks=_StubMarks())
+    client = TestClient(app)
+    r = client.get(path)
+    assert r.status_code == 200
