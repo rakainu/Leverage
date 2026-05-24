@@ -9,7 +9,7 @@
           {{ "${:+,.2f}".format(p.upnl) if p.upnl is not none else "—" }}
         </span>
       </div>
-      <div class="mut" style="font-size:13px;">
+      <div class="mut" style="font-size:14px;">
         entry ${{ "%.4f"|format(p.entry_price) }} ·
         mark {{ "${:.4f}".format(p.mark) if p.mark is not none else "stale" }}
       </div>
