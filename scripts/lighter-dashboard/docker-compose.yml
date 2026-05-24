@@ -8,23 +8,15 @@ services:
       # Read-write mount REQUIRED for WAL sidecar files (-wal/-shm).
       # The app enforces read-only at the SQLite layer (PRAGMA query_only=ON).
       - /docker/lighter-paper/data:/app/data
-    networks:
-      - traefik
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.lighter-dash.rule=Host(`lighter.agentneo.cloud`)"
-      - "traefik.http.routers.lighter-dash.entrypoints=websecure"
-      - "traefik.http.routers.lighter-dash.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.lighter-dash.middlewares=lighter-auth"
-      - "traefik.http.middlewares.lighter-auth.basicauth.usersfile=/auth/lighter.htpasswd"
-      - "traefik.http.services.lighter-dash.loadbalancer.server.port=8080"
+    # Traefik on this host runs in network_mode: host and routes via its FILE
+    # provider (/docker/traefik-mncm/config/lighter.yml), not docker labels.
+    # So we publish a loopback-only host port; Traefik reaches it at
+    # 127.0.0.1:8092 and terminates TLS + basic-auth in front. Binding to
+    # 127.0.0.1 keeps the app off the public interface except via Traefik.
+    ports:
+      - "127.0.0.1:8092:8080"
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-
-networks:
-  traefik:
-    external: true
-    name: traefik-mncm_default

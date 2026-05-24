@@ -1,0 +1,29 @@
+# Traefik dynamic (file-provider) config for the Lighter dashboard.
+#
+# Deploy: copy this to the Traefik config dir on srv1370094:
+#   scp this file -> /docker/traefik-mncm/config/lighter.yml
+# Traefik (network_mode: host, --providers.file.directory=/config --providers.file.watch=true)
+# hot-reloads it. The dashboard container publishes 127.0.0.1:8092 -> :8080.
+#
+# Basic-auth credentials live in /docker/traefik-mncm/config/lighter.htpasswd
+# (radk9 + bcrypt hash, generated on the VPS — never committed here).
+http:
+  routers:
+    lighter-dashboard:
+      rule: "Host(`lighter.agentneo.cloud`)"
+      entryPoints:
+        - websecure
+      service: lighter-dashboard
+      middlewares:
+        - lighter-auth
+      tls:
+        certResolver: letsencrypt
+  services:
+    lighter-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8092"
+  middlewares:
+    lighter-auth:
+      basicAuth:
+        usersFile: "/config/lighter.htpasswd"
