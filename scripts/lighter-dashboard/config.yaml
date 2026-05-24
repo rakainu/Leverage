@@ -1,0 +1,11 @@
+# Lighter dashboard config
+db_path: "data/lighter_paper.db"        # bridge DB (mounted in container)
+lighter_host: "https://mainnet.zklighter.elliot.ai"
+initial_collateral_usdc: 2000
+symbols:                                  # name -> market_id
+  ZEC: 90
+  SOL: 2
+refresh:
+  live_ms: 3000                           # KPI + positions poll interval
+  static_ms: 15000                        # tables + charts poll interval
+mark_cache_ttl_s: 2.0
