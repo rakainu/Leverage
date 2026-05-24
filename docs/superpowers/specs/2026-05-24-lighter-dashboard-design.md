@@ -50,14 +50,21 @@ fully isolated from the trading bridge.
 
 ### Isolation guarantees
 
-- The bridge's SQLite DB is bind-mounted **read-only** (`:ro`) into the
-  dashboard container — it physically cannot write to trade data.
 - The dashboard makes its **own** Lighter public REST calls for live marks. It
   never calls into the bridge process: no shared memory, no shared event loop,
   no IPC.
 - If the dashboard crashes or hangs, the bridge is unaffected and keeps trading.
 - The dashboard is a separate container with its own lifecycle; it can be
   restarted/redeployed without touching the bridge.
+
+**Read-only enforcement (revised during planning):** WAL mode requires any
+reader to write the `-wal`/`-shm` sidecar files, so a strict read-only (`:ro`)
+filesystem mount is incompatible with WAL. Instead, the data directory is
+mounted read-write and read-only is enforced at the SQLite **connection** level:
+every dashboard connection runs `PRAGMA query_only = ON;` and the code only
+issues `SELECT`. A `query_only` connection rejects any write with an error, so
+the dashboard remains functionally unable to mutate trade data while keeping
+WAL's lock-free concurrent reads.
 
 ### One bridge change: WAL mode
 
