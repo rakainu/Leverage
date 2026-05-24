@@ -8,6 +8,10 @@ services:
       # Read-write mount REQUIRED for WAL sidecar files (-wal/-shm).
       # The app enforces read-only at the SQLite layer (PRAGMA query_only=ON).
       - /docker/lighter-paper/data:/app/data
+      # Bind-mount source + templates so visual/code tweaks deploy via
+      # scp + `docker compose restart`, no image rebuild needed.
+      - ./src:/app/src
+      - ./templates:/app/templates
     # Traefik on this host runs in network_mode: host and routes via its FILE
     # provider (/docker/traefik-mncm/config/lighter.yml), not docker labels.
     # So we publish a loopback-only host port; Traefik reaches it at

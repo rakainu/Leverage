@@ -1,18 +1,20 @@
 <div class="panel">
   <div class="label mb-2">Recent closed trades</div>
-  <table class="w-full">
-    <thead><tr><th>id</th><th>sym</th><th>side</th><th>entry</th><th>exit</th><th>pnl</th><th>reason</th></tr></thead>
-    <tbody>
-      {% for t in trades %}
-      <tr>
-        <td>{{ t.id }}</td><td>{{ t.symbol }}</td>
-        <td class="{{ 'neg' if t.side == 'short' else 'pos' }}">{{ t.side }}</td>
-        <td>{{ "%.4f"|format(t.entry_price) }}</td>
-        <td>{{ "%.4f"|format(t.exit_price) if t.exit_price is not none else "—" }}</td>
-        <td class="{{ 'pos' if (t.pnl_usdt or 0) >= 0 else 'neg' }}">{{ "%+.2f"|format(t.pnl_usdt) if t.pnl_usdt is not none else "—" }}</td>
-        <td class="mut">{{ t.exit_reason }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="scroll-6">
+    <table class="w-full">
+      <thead><tr><th>id</th><th>sym</th><th>side</th><th>entry</th><th>exit</th><th>pnl</th><th>reason</th></tr></thead>
+      <tbody>
+        {% for t in trades %}
+        <tr>
+          <td>{{ t.id }}</td><td>{{ t.symbol }}</td>
+          <td class="{{ 'neg' if t.side == 'short' else 'pos' }}">{{ t.side }}</td>
+          <td>{{ "%.4f"|format(t.entry_price) }}</td>
+          <td>{{ "%.4f"|format(t.exit_price) if t.exit_price is not none else "—" }}</td>
+          <td class="{{ 'pos' if (t.pnl_usdt or 0) >= 0 else 'neg' }}">{{ "%+.2f"|format(t.pnl_usdt) if t.pnl_usdt is not none else "—" }}</td>
+          <td class="mut">{{ t.exit_reason }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
