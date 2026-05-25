@@ -52,10 +52,17 @@ class PineConfig:
 class LoopConfig:
     bar_poll_interval_s: int = 30
     position_check_interval_s: int = 5
-    # WS mark-feed watchdog thresholds (see incident 2026-05-23).
-    # warn_s: log + try re-subscribe; fatal_s: exit so Docker restarts WS.
-    # 180s warn is generous — ZEC/SOL trade ~14×/min, so a healthy WS
-    # will tick the value through every 5–10s in practice.
+    # WS mark-feed watchdog thresholds (see incidents 2026-05-23 / 2026-05-25).
+    # The Lighter SDK's per-market order-book listener has no reconnect: when a
+    # socket drops, its task dies silently and that symbol's mark freezes. The
+    # watchdog heals it in-process:
+    #   reconnect_s: rebuild JUST that symbol's WS (stop_tracking + track_market)
+    #                — also triggered immediately if the listener task is dead.
+    #   warn_s:      informational log threshold below reconnect.
+    #   fatal_s:     last resort — exit so Docker restarts the whole process
+    #                (only reached if in-process reconnect keeps failing).
+    # ZEC/SOL trade ~14×/min, so a healthy WS ticks the mid every 5–10s.
+    mark_reconnect_s: int = 60
     mark_stale_warn_s: int = 180
     mark_stale_fatal_s: int = 300
     mark_watchdog_interval_s: int = 30

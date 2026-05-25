@@ -419,26 +419,93 @@ class Bridge:
             raise RuntimeError(f"WS mark feed dead for {not_ready}")
         log.info("Mark feed verified live for all symbols.")
 
+    def _listener_dead(self, market_id: int) -> bool:
+        """True if the SDK's per-market order-book WS listener is gone or its
+        task has finished.
+
+        Lighter's PaperOrderBookListener opens one socket per market with no
+        reconnect (live.py): on a dropped connection the task ends and the
+        exception is swallowed by its done-callback, leaving the listener
+        registered but inert. A finished/absent task is the deterministic
+        signal that the socket is dead and the mark will freeze — caught
+        faster than waiting for the value to age out.
+        """
+        if self.paper is None:
+            return False
+        listener = self.paper._live_listeners.get(market_id)
+        if listener is None:
+            return True  # not tracked at all → needs (re)subscribe
+        task = getattr(listener, "_task", None)
+        return task is None or task.done()
+
+    @staticmethod
+    def _watchdog_action(age: float | None, dead: bool,
+                         reconnect_s: int, fatal_s: int) -> str:
+        """Pure decision for the mark-feed watchdog. Returns one of:
+          "fatal"     — mark aged past fatal_s; reconnect has failed, give up.
+          "reconnect" — listener task dead, or mark stale past reconnect_s.
+          "ok"        — feed healthy.
+
+        Fatal takes priority: by the time age >= fatal_s the in-process
+        reconnect has been retried every tick from reconnect_s onward and
+        still hasn't produced a fresh mark, so a clean process restart is the
+        correct last resort.
+        """
+        if age is not None and age >= fatal_s:
+            return "fatal"
+        if dead or age is None or age >= reconnect_s:
+            return "reconnect"
+        return "ok"
+
+    async def _reconnect_market(self, name: str, market_id: int,
+                                retries: int = 2) -> bool:
+        """Rebuild a single symbol's order-book WS in place.
+
+        stop_tracking() pops + stops the dead listener (without this, the
+        SDK's track_market() early-returns as a no-op because the dead
+        listener is still registered — the latent bug that made the old
+        warn-level re-subscribe do nothing). track_market() then opens a
+        fresh socket and re-snapshots the book. The existing order_books /
+        market_configs entries survive the swap; the new initial snapshot
+        replaces the stale book cleanly. Other symbols are untouched.
+        """
+        for attempt in range(1, retries + 1):
+            try:
+                await self.paper.stop_tracking(market_id)
+            except Exception as exc:
+                log.warning("%s: stop_tracking failed (attempt %d): %s",
+                            name, attempt, exc)
+            try:
+                await self.paper.track_market(market_id=market_id)
+                return True
+            except Exception as exc:
+                log.error("%s: track_market failed (attempt %d/%d): %s",
+                          name, attempt, retries, exc)
+                await asyncio.sleep(min(2 ** attempt, 5))
+        return False
+
     async def mark_freshness_loop(self):
-        """Watchdog: detect when the Lighter WS trade subscription has gone
-        silent for an enabled symbol and remediate.
+        """Watchdog + self-healing supervisor for the Lighter mark feed.
 
         Pure infrastructure. Does NOT block, modify, gate, or filter any
-        trades. The state machine continues to tick on whatever
-        get_mark_price returns. This loop only:
-          - logs WARN when mark value has been unchanged >= warn_s
-          - attempts re-subscribe (cheap remediation) at most once per 60s
-          - exits the process when stale >= fatal_s (Docker restart policy
-            then rebuilds the WS connection cleanly)
+        trades — the state machine keeps ticking on whatever get_mark_price
+        returns. Per check tick, for each symbol:
+          - reconnect JUST that symbol's WS in place when its listener task is
+            dead, or its mark has been frozen past reconnect_s (heals in
+            ~under a minute, without touching the other symbol);
+          - as a last resort, exit the process when the mark ages past fatal_s
+            (only reached if in-process reconnect keeps failing), so Docker
+            rebuilds everything cleanly.
         """
+        reconnect_s = self.cfg.loop.mark_reconnect_s
         warn_s = self.cfg.loop.mark_stale_warn_s
         fatal_s = self.cfg.loop.mark_stale_fatal_s
         check_s = self.cfg.loop.mark_watchdog_interval_s
         log.info(
-            "Mark-feed watchdog started (warn=%ds, fatal=%ds, check every %ds)",
-            warn_s, fatal_s, check_s,
+            "Mark-feed watchdog started (reconnect=%ds, warn=%ds, fatal=%ds, "
+            "check every %ds)", reconnect_s, warn_s, fatal_s, check_s,
         )
-        last_resub: dict[str, float] = {}
+        last_reconnect: dict[str, float] = {}
         while not self._stopped:
             await asyncio.sleep(check_s)
             if self.executor is None or self.paper is None:
@@ -446,43 +513,46 @@ class Bridge:
             for name in list(self.executor.symbols.keys()):
                 market_id = self.executor.symbols[name]["market_id"]
                 age = self.executor.mark_age_seconds(name)
-                if age is None:
-                    # Never seen a non-zero mark — startup check already
-                    # gated on this, so reaching None here mid-run means
-                    # the value was wiped. Treat as fatal staleness.
-                    msg = (f"Mark for {name} (market_id={market_id}) has "
-                           f"never been observed since bridge start — "
-                           f"exiting for Docker to restart with fresh WS.")
-                    log.error(msg)
-                    try:
-                        await notify.notify_error(msg)
-                    except Exception:
-                        pass
-                    await asyncio.sleep(2)
-                    sys.exit(1)
-                if age >= fatal_s:
-                    msg = (f"Mark for {name} (market_id={market_id}) stale "
-                           f"for {age:.0f}s (>= fatal {fatal_s}s). Exiting "
-                           f"for Docker to restart with fresh WS.")
-                    log.error(msg)
-                    try:
-                        await notify.notify_error(msg)
-                    except Exception:
-                        pass
-                    await asyncio.sleep(2)
-                    sys.exit(1)
-                elif age >= warn_s:
+                dead = self._listener_dead(market_id)
+                action = self._watchdog_action(age, dead, reconnect_s, fatal_s)
+
+                if action == "reconnect":
                     now_mono = time.monotonic()
-                    if now_mono - last_resub.get(name, 0.0) >= 60:
-                        log.warning(
-                            "%s mark stale %.0fs (>= warn %ds). Re-subscribing market_id=%d.",
-                            name, age, warn_s, market_id,
-                        )
-                        try:
-                            await self.paper.track_market(market_id=market_id)
-                        except Exception as exc:
-                            log.error("%s re-track_market failed: %s", name, exc)
-                        last_resub[name] = now_mono
+                    if now_mono - last_reconnect.get(name, 0.0) >= 25:
+                        if dead:
+                            reason = "WS listener task dead"
+                        elif age is None:
+                            reason = "mark never recorded since last reconnect"
+                        else:
+                            reason = f"mark stale {age:.0f}s (>= {reconnect_s}s)"
+                        log.warning("%s: %s — reconnecting market_id=%d",
+                                    name, reason, market_id)
+                        ok = await self._reconnect_market(name, market_id)
+                        last_reconnect[name] = now_mono
+                        if ok:
+                            log.info("%s: WS reconnect OK", name)
+                        else:
+                            log.error(
+                                "%s: WS reconnect failed; fatal restart will "
+                                "fire if mark stays stale past %ds.",
+                                name, fatal_s,
+                            )
+                    # Re-evaluate next tick; don't fall through to fatal on the
+                    # same tick we just rebuilt the socket.
+                    continue
+
+                if action == "fatal":
+                    msg = (f"Mark for {name} (market_id={market_id}) stale "
+                           f"for {age:.0f}s (>= fatal {fatal_s}s) despite "
+                           f"in-process reconnect. Exiting for Docker to "
+                           f"restart with fresh WS.")
+                    log.error(msg)
+                    try:
+                        await notify.notify_error(msg)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(2)
+                    sys.exit(1)
 
     async def daily_summary_loop(self):
         """Send one Telegram daily summary every 24h (anchored to first call)."""
