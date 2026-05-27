@@ -6,8 +6,8 @@ connection:
   host: "https://mainnet.zklighter.elliot.ai"
   initial_collateral_usdc: 2000        # $2k paper account
 
-# Symbols. SOL market_id=2 verified (old bridge). BTC/ETH IDs MUST be confirmed via
-# smoke_test.py against Lighter before enabling — do not guess a market_id.
+# Market IDs verified via Lighter OrderApi 2026-05-27: SOL=2, BTC=1, ETH=0. (ZEC=90
+# excluded — Z-Fade is a loser on ZEC at every ADX threshold.)
 symbols:
   SOL:
     market_id: 2
@@ -15,13 +15,13 @@ symbols:
     margin_usdt: 250                   # $250 x 30 = $7,500 notional (matches backtest)
     leverage: 30
   BTC:
-    market_id: 0                       # TODO verify via smoke_test, then enable
-    enabled: false
+    market_id: 1
+    enabled: true
     margin_usdt: 250
     leverage: 30
   ETH:
-    market_id: 0                       # TODO verify via smoke_test, then enable
-    enabled: false
+    market_id: 0
+    enabled: true
     margin_usdt: 250
     leverage: 30
 

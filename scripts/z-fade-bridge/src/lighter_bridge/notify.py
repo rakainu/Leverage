@@ -31,7 +31,7 @@ import aiohttp
 log = logging.getLogger(__name__)
 
 
-SENDER_TAG = "LIGHTER-BRIDGE"
+SENDER_TAG = "Z-FADE"
 _TG_BASE = "https://api.telegram.org/bot{token}/sendMessage"
 
 # Threshold below which a close is treated as "near-zero" (yellow dot)
