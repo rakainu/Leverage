@@ -421,7 +421,13 @@ def run_backtest(df: pd.DataFrame, p: TrailParams,
                 new_pending.append((sig_i, side))
                 continue
             overshoot = ema_v * (RETEST_OVERSHOOT_PCT / 100.0)
-            if side == "long":
+            if entry_mode == "limit_ema":
+                # Resting limit at the EMA fills whenever price REACHES it, with no
+                # overshoot cap — including bars that gap straight through (the
+                # falling knives a market-on-clean-retest entry skips). This is the
+                # adverse-selection cost of passive entry, modeled honestly.
+                touched = lows[i] <= ema_v if side == "long" else highs[i] >= ema_v
+            elif side == "long":
                 touched = lows[i] <= ema_v and lows[i] >= ema_v - overshoot
             else:
                 touched = highs[i] >= ema_v and highs[i] <= ema_v + overshoot

@@ -86,6 +86,12 @@ def part_b_calibration():
     check("lie overstates net by > $25k vs honest",
           k_lie["net_pnl"] - k_hon["net_pnl"] > 25000)
 
+    # limit_ema (resting limit at EMA, no overshoot cap) must fill MORE trades than
+    # market entry — it captures the gap-through fills a clean-retest market entry skips.
+    _, t_lim = run_backtest(df, P, filters=F, entry_mode="limit_ema")
+    check("limit_ema fills more trades than market entry (no overshoot cap)",
+          kpis(t_lim)["n"] > k_hon["n"])
+
 
 if __name__ == "__main__":
     part_a_unit()
