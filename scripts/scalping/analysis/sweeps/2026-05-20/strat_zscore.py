@@ -48,6 +48,10 @@ class ZParams:
     use_adx: bool = False        # only fade when ADX <= adx_max (ranging, not trending)
     adx_len: int = 14
     adx_max: float = 30.0
+    # "market" = enter next_open when CLOSE's z crosses the threshold (original).
+    # "limit"  = rest a limit at the z-band; fills on any intrabar TOUCH at the band
+    #            price (more fills, better entry — but eats trend-throughs honestly).
+    entry_mode: str = "market"
 
 
 def run(df: pd.DataFrame, p: ZParams, max_lookahead: int = 288):
@@ -55,6 +59,7 @@ def run(df: pd.DataFrame, p: ZParams, max_lookahead: int = 288):
     mean = c.rolling(p.window).mean()
     std = c.rolling(p.window).std(ddof=1)          # ta.stdev(.., false) = sample
     z = ((c - mean) / std.replace(0, np.nan)).values
+    mean_v = mean.values; std_v = std.values
     rsiv = rsi(c, p.rsi_len)
     bb_basis = c.rolling(p.bb_len).mean()
     bb_std = c.rolling(p.bb_len).std(ddof=0)        # BB default = population
@@ -76,16 +81,30 @@ def run(df: pd.DataFrame, p: ZParams, max_lookahead: int = 288):
             i += 1; continue
         bb_ok = (not p.use_bb) or bb_width[i] > p.bb_width_min
         regime_ok = (not p.use_adx) or (not np.isnan(adxv[i]) and adxv[i] <= p.adx_max)
-        side = None
+        side = None; entry = None
         if bb_ok and regime_ok:
-            long_ok = z[i] < -p.z_thresh and ((not p.use_rsi) or rsiv[i] < p.rsi_os) and ((not p.use_ema) or cl[i] > ema[i])
-            short_ok = z[i] > p.z_thresh and ((not p.use_rsi) or rsiv[i] > p.rsi_ob) and ((not p.use_ema) or cl[i] < ema[i])
-            if long_ok: side = "long"
-            elif short_ok: side = "short"
+            rsi_lo = (not p.use_rsi) or rsiv[i] < p.rsi_os
+            rsi_hi = (not p.use_rsi) or rsiv[i] > p.rsi_ob
+            ema_lo = (not p.use_ema) or cl[i] > ema[i]
+            ema_hi = (not p.use_ema) or cl[i] < ema[i]
+            if p.entry_mode == "limit":
+                band_lo = mean_v[i] - p.z_thresh * std_v[i]   # z = -thresh price level
+                band_hi = mean_v[i] + p.z_thresh * std_v[i]
+                if l[i] <= band_lo and rsi_lo and ema_lo:
+                    side = "long"; entry = float(band_lo)      # resting buy limit fill @ band
+                elif h[i] >= band_hi and rsi_hi and ema_hi:
+                    side = "short"; entry = float(band_hi)
+            else:  # market: close's z beyond threshold, fill next open
+                if z[i] < -p.z_thresh and rsi_lo and ema_lo:
+                    side = "long"
+                elif z[i] > p.z_thresh and rsi_hi and ema_hi:
+                    side = "short"
+                if side is not None:
+                    entry = float(o[i + 1])
         if side is None:
             i += 1; continue
 
-        entry = float(o[i + 1]); a = float(atr[i]); last_entry = i
+        a = float(atr[i]); last_entry = i
         if side == "long":
             sl = entry - a * p.sl_atr; tp = entry + a * p.tp_atr
         else:
