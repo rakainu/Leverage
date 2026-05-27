@@ -192,6 +192,8 @@ def fetch_ohlcv(
 SYMBOL_MAP = {
     "SOL": ("SOL/USDT:USDT", "blofin"),
     "ZEC": ("ZEC/USDT:USDT", "blofin"),
+    "BTC": ("BTC/USDT:USDT", "blofin"),
+    "ETH": ("ETH/USDT:USDT", "blofin"),
 }
 
 
