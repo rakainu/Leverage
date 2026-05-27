@@ -21,7 +21,11 @@ symbols:
     leverage: 30
   ETH:
     market_id: 0
-    enabled: true
+    enabled: false                     # DISABLED 2026-05-27: market_id=0 WS reconnect
+                                        # fails (empty error) -> mark freezes -> fatal
+                                        # restart loop. SOL/BTC reconnect fine. Investigate
+                                        # the market-0 stop_tracking/track_market path
+                                        # before re-enabling (ETH was marginal: PF 1.04).
     margin_usdt: 250
     leverage: 30
 

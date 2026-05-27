@@ -9,6 +9,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./src:/app/src
+      - ./config.yaml:/app/config.yaml
     logging:
       driver: json-file
       options:

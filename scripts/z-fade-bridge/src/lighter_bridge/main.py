@@ -412,8 +412,10 @@ class Bridge:
                 await self.paper.track_market(market_id=market_id)
                 return True
             except Exception as exc:
-                log.error("%s: track_market failed (attempt %d/%d): %s",
-                          name, attempt, retries, exc)
+                # repr + traceback: bare str(exc) is empty for some SDK errors
+                # (e.g. the market_id=0 / ETH reconnect failure, 2026-05-27).
+                log.error("%s: track_market failed (attempt %d/%d): %r",
+                          name, attempt, retries, exc, exc_info=True)
                 await asyncio.sleep(min(2 ** attempt, 5))
         return False
 
