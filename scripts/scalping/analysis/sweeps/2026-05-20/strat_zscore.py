@@ -19,6 +19,7 @@ from engine import load_symbol, calc_ema, calc_atr
 from strategy import kpis
 from strat_vwaprsi import rsi
 from strat_emavwap import split_oos
+from strat_bbmr import adx
 
 NOTIONAL = 7500.0
 SL_SLIP_PCT = 0.0006
@@ -43,6 +44,10 @@ class ZParams:
     tp_atr: float = 3.0
     cooldown: int = 5
     commission_pct: float = 0.0
+    # --- Per-symbol suitability (regime) gate ---
+    use_adx: bool = False        # only fade when ADX <= adx_max (ranging, not trending)
+    adx_len: int = 14
+    adx_max: float = 30.0
 
 
 def run(df: pd.DataFrame, p: ZParams, max_lookahead: int = 288):
@@ -56,6 +61,7 @@ def run(df: pd.DataFrame, p: ZParams, max_lookahead: int = 288):
     bb_width = ((2 * p.bb_mult * bb_std) / bb_basis).values  # (upper-lower)/basis
     ema = calc_ema(c, p.ema_len).values
     atr = calc_atr(df, p.atr_len).values
+    adxv = adx(df, p.adx_len) if p.use_adx else None
     o = df["Open"].values; h = df["High"].values; l = df["Low"].values; cl = c.values
     ts = df.index
     n = len(df)
@@ -69,8 +75,9 @@ def run(df: pd.DataFrame, p: ZParams, max_lookahead: int = 288):
         if i - last_entry < p.cooldown:
             i += 1; continue
         bb_ok = (not p.use_bb) or bb_width[i] > p.bb_width_min
+        regime_ok = (not p.use_adx) or (not np.isnan(adxv[i]) and adxv[i] <= p.adx_max)
         side = None
-        if bb_ok:
+        if bb_ok and regime_ok:
             long_ok = z[i] < -p.z_thresh and ((not p.use_rsi) or rsiv[i] < p.rsi_os) and ((not p.use_ema) or cl[i] > ema[i])
             short_ok = z[i] > p.z_thresh and ((not p.use_rsi) or rsiv[i] > p.rsi_ob) and ((not p.use_ema) or cl[i] < ema[i])
             if long_ok: side = "long"
