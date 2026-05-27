@@ -21,6 +21,7 @@ Visual conventions:
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import os
@@ -76,20 +77,27 @@ async def send(text: str) -> bool:
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
-    try:
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=10),
-        ) as session:
-            async with session.post(url, json=payload) as resp:
-                if resp.status != 200:
-                    body = await resp.text()
-                    log.warning("Telegram send failed: HTTP %d %s", resp.status, body[:200])
-                    return False
-                log.info("Telegram sent (%d chars)", len(full))
-                return True
-    except Exception as exc:
-        log.warning("Telegram send exception: %s", exc)
-        return False
+    # Retry transient connection/timeout failures so an entry/exit alert is never
+    # dropped on a single hiccup (observed 2026-05-27: intermittent empty-message
+    # send exceptions, esp. the first send right after startup). HTTP errors (e.g.
+    # 400 bad HTML) are content problems — don't retry those.
+    for attempt in range(1, 4):
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        log.warning("Telegram send failed: HTTP %d %s", resp.status, body[:200])
+                        return False
+                    log.info("Telegram sent (%d chars)", len(full))
+                    return True
+        except Exception as exc:
+            log.warning("Telegram send exception (attempt %d/3): %r", attempt, exc)
+            if attempt < 3:
+                await asyncio.sleep(1.0 * attempt)
+    return False
 
 
 # ----- Helpers -----
