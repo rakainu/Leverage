@@ -237,8 +237,20 @@ def _pnl_at_price(side: str, entry: float, price: float, p: TrailParams) -> floa
 
 
 def simulate_trade(side: str, entry_price: float, bars: list,
-                   p: TrailParams, ordering: str = "avg") -> SimResult:
-    """Replay one trade through the state machine. `bars`: list of (ts, o, h, l, c)."""
+                   p: TrailParams, ordering: str = "avg",
+                   fav_mode: str = "extreme") -> SimResult:
+    """Replay one trade through the state machine. `bars`: list of (ts, o, h, l, c).
+
+    fav_mode controls the favorable price the protective state machine (BE / lock /
+    trail / TP-ceiling) is allowed to "see" per bar:
+      "extreme" — use the bar HIGH (long) / LOW (short). Optimistic: assumes the
+                  state machine captured the best intrabar tick. The live bridge
+                  samples the order-book MID every 5s and never sees that wick, so
+                  this overstates how often BE/lock arm and understates full stops.
+      "close"   — use the bar CLOSE for advancement + TP. Realistic floor: only
+                  end-of-bar favorable progress arms protection. The adverse SL
+                  check ALWAYS uses the bar extreme (a stop fills on any tick).
+    """
     if not bars:
         return SimResult(exit_reason="unresolved", exit_price=entry_price)
 
@@ -290,8 +302,11 @@ def simulate_trade(side: str, entry_price: float, bars: list,
 
         for i, bar in enumerate(bars):
             _, b_o, b_h, b_l, b_c = bar[:5]
-            adv = b_l if side == "long" else b_h
-            fav = b_h if side == "long" else b_l
+            adv = b_l if side == "long" else b_h          # adverse extreme — SL always fills on any tick
+            if fav_mode == "close":
+                fav = b_c                                  # realistic: only end-of-bar favorable progress arms protection
+            else:
+                fav = b_h if side == "long" else b_l       # optimistic: best intrabar tick
 
             # TP ceiling (first thing checked per bar — favorable extreme)
             peak = _pnl_at_price(side, entry_price, fav, p)
@@ -349,9 +364,30 @@ def simulate_trade(side: str, entry_price: float, bars: list,
 
 def run_backtest(df: pd.DataFrame, p: TrailParams,
                  filters: Optional[EntryFilters] = None,
-                 max_lookahead_bars: int = 288) -> tuple[list[Trade], pd.DataFrame]:
+                 max_lookahead_bars: int = 288,
+                 entry_mode: str = "next_open",
+                 fav_advance: str = "close") -> tuple[list[Trade], pd.DataFrame]:
     """Bar-walk loop matching live bridge: Pine signal -> pending queue -> EMA retest
     -> slope gate -> optional filters -> position lock -> trail state machine.
+
+    DEFAULTS ARE HONEST (calibrated to the live Lighter bridge, 2026-05-27). Two
+    optimism bugs once inflated this engine's ZEC 180d net from a realistic -$7.8k
+    to a fantasy +$29.3k — see project_v3_entry_fill_phantom. Do NOT revert these
+    defaults to reproduce old sweep numbers; the old numbers were fiction.
+
+    entry_mode — assumed FILL price on the retest bar:
+      "next_open"— fill at the next bar's open (DEFAULT; matches live market order
+                   placed when the bar closes; live entry slippage measured ~0).
+      "close"    — fill at the retest bar's close (near-identical to next_open).
+      "ema"      — fill at the exact EMA(9). THE ORIGINAL LIE: an unfillable limit
+                   at the dip. Kept only to reproduce the historical fantasy.
+
+    fav_advance — favorable price the protective state machine may "see" per bar:
+      "close"    — bar close only (DEFAULT; realistic — live samples the mid every
+                   5s and never catches the intrabar wick). SL still fills on the
+                   adverse extreme.
+      "extreme"  — bar high/low. OPTIMISTIC: pretends the SM caught the best tick,
+                   arming BE/lock far too often. Second source of the old fantasy.
     """
     if "buy_sig" not in df.columns:
         df = prepare_dataframe(df)
@@ -409,12 +445,18 @@ def run_backtest(df: pd.DataFrame, p: TrailParams,
                 if not filters.passes(ts[i], float(slope[i]), float(body_a[i]), _adx):
                     continue
 
-            # Fire entry at EMA(9) price
-            entry_price = float(ema_v)
+            # Fire entry at the assumed fill price (see entry_mode docstring)
+            if entry_mode == "close":
+                entry_price = float(closes[i])
+            elif entry_mode == "next_open":
+                entry_price = float(opens[i + 1]) if i + 1 < n else float(closes[i])
+            else:  # "ema" — original idealized limit fill
+                entry_price = float(ema_v)
             j_end = min(i + 1 + max_lookahead_bars, n)
             bars = [(int(ts[j].timestamp()), opens[j], highs[j], lows[j], closes[j])
                     for j in range(i + 1, j_end)]
-            res = simulate_trade(side, entry_price, bars, p, ordering="avg")
+            res = simulate_trade(side, entry_price, bars, p, ordering="avg",
+                                 fav_mode=fav_advance)
 
             notional_in = p.margin_usdt * p.leverage
             notional_out = (res.exit_price / entry_price) * notional_in
