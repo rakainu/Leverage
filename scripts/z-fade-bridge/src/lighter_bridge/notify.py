@@ -41,6 +41,7 @@ _EXIT_REASON_EMOJI = {
     "trail_sl":   "🎯",
     "sl_be":      "🛡️",
     "sl":         "🛑",
+    "tp":         "💎",
     "tp_ceiling": "💎",
 }
 
@@ -48,6 +49,7 @@ _EXIT_REASON_LABEL = {
     "trail_sl":   "trail stop",
     "sl_be":      "break-even stop",
     "sl":         "initial stop",
+    "tp":         "ATR target",
     "tp_ceiling": "TP ceiling",
 }
 
@@ -147,13 +149,12 @@ async def notify_startup(cfg, restored: Optional[list] = None) -> None:
         f"Paper collateral: ${cfg.initial_collateral_usdc:,.0f}",
         f"Symbols: {', '.join(cfg.symbols.keys())}",
         (
-            f"Entry: slope≥{cfg.entry.min_abs_slope_pct:.2f}%  "
-            f"body{cfg.entry.block_body_band}  noSun"
+            f"Entry: fade |z|≥{cfg.strat.z_thresh:.1f} (win {cfg.strat.window})  "
+            f"RSI {'on' if cfg.strat.use_rsi else 'off'}  "
+            f"ADX≤{cfg.strat.adx_max:.0f}"
         ),
         (
-            f"Exits: SL=${cfg.exits.sl_loss_usdt:.0f}  "
-            f"BE=${cfg.exits.breakeven_usdt:.0f}  "
-            f"trail_dist=${cfg.exits.trail_distance_usdt:.0f}"
+            f"Exits: ATR stop {cfg.exits.sl_atr:.2f}×  /  target {cfg.exits.tp_atr:.2f}×"
         ),
     ]
     if restored:
