@@ -1,0 +1,16 @@
+services:
+  z-fade-bridge:
+    build: .
+    image: z-fade-bridge:latest
+    container_name: z-fade-bridge
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

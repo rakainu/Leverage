@@ -1,0 +1,65 @@
+# Z-Fade paper bridge config — z-score mean-reversion fade.
+# Validated config from sweeps/2026-05-20/strat_zscore.py (boundary + multi-symbol
+# + walk-forward). Parallel to the (dead) V3 lighter-bridge; do not disturb it.
+
+connection:
+  host: "https://mainnet.zklighter.elliot.ai"
+  initial_collateral_usdc: 2000        # $2k paper account
+
+# Symbols. SOL market_id=2 verified (old bridge). BTC/ETH IDs MUST be confirmed via
+# smoke_test.py against Lighter before enabling — do not guess a market_id.
+symbols:
+  SOL:
+    market_id: 2
+    enabled: true
+    margin_usdt: 250                   # $250 x 30 = $7,500 notional (matches backtest)
+    leverage: 30
+  BTC:
+    market_id: 0                       # TODO verify via smoke_test, then enable
+    enabled: false
+    margin_usdt: 250
+    leverage: 30
+  ETH:
+    market_id: 0                       # TODO verify via smoke_test, then enable
+    enabled: false
+    margin_usdt: 250
+    leverage: 30
+
+# Z-Fade strategy (validated): fade |z|>=3 extremes, RSI confirm, BB-width floor,
+# ADX<=40 regime gate, EMA trend filter OFF.
+strategy:
+  timeframe: "5m"
+  window: 80
+  z_thresh: 3.0
+  rsi_len: 14
+  rsi_os: 30
+  rsi_ob: 70
+  use_rsi: true
+  bb_len: 20
+  bb_mult: 2.0
+  bb_width_min: 0.02
+  use_bb: true
+  ema_len: 200
+  use_ema: false
+  adx_len: 14
+  adx_max: 40.0
+  use_adx: true
+  atr_len: 14
+  cooldown_bars: 5
+
+# Exits: fixed ATR stop / target (run past the mean — the winning shape).
+exits:
+  sl_atr: 1.5
+  tp_atr: 3.0
+
+loop:
+  bar_poll_interval_s: 30
+  position_check_interval_s: 5
+  mark_reconnect_s: 60
+  mark_stale_warn_s: 180
+  mark_stale_fatal_s: 300
+  mark_watchdog_interval_s: 30
+
+log:
+  level: "INFO"
+  db_path: "data/zfade_paper.db"
