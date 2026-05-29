@@ -33,6 +33,12 @@ from . import notify
 from .signals import prepare, evaluate_entry
 from .indicators import calc_atr
 from .state_machine import step as state_step
+from .sdk_patches import apply_order_book_patches
+
+# Install the efficient order-book merge before any PaperClient is created.
+# Fixes the SDK order-book consumer monopolising the event loop (>20s) and
+# tripping the WS keepalive timeout — the 2026-05-28/29 reconnect storm.
+apply_order_book_patches()
 
 
 # UTF-8 stdout for Windows
@@ -83,6 +89,7 @@ class Bridge:
         for name, s in enabled.items():
             log.info("%s: subscribing to live order book (market_id=%d)", name, s.market_id)
             await self.paper.track_market(market_id=s.market_id)
+            self._arm_death_log(name, s.market_id)
             self.last_entry_idx[name] = -10**9
 
         # Build the executor with sizing config
@@ -129,6 +136,7 @@ class Bridge:
         tasks.append(asyncio.create_task(self.heartbeat_loop()))
         tasks.append(asyncio.create_task(self.daily_summary_loop()))
         tasks.append(asyncio.create_task(self.mark_freshness_loop()))
+        tasks.append(asyncio.create_task(self.loop_lag_loop()))
         log.info(
             "Bridge running. %d bar-feed tasks + position checker + heartbeat + "
             "daily summary + mark-feed watchdog.", len(self.feeds),
@@ -163,7 +171,10 @@ class Bridge:
         """Called by BarFeed every time a new closed bar lands."""
         is_bootstrap = symbol not in self.bars
 
-        # Enrich with Z-Fade indicators (z-score, RSI, BB-width, ADX, ATR)
+        # Enrich with Z-Fade indicators (z-score, RSI, BB-width, ADX, ATR).
+        # Runs ~1.2s on the bootstrap window and far less on incremental bars;
+        # the WS reconnect storm was NOT this (ruled out via instrumentation) —
+        # it was the SDK order-book merge (see sdk_patches.py).
         enriched = prepare(df, self.cfg.strat)
         self.bars[symbol] = enriched
 
@@ -320,6 +331,27 @@ class Bridge:
                         f"Heartbeat silent for >30m: {exc}"
                     ))
 
+    async def loop_lag_loop(self):
+        """DIAGNOSTIC (pure measurement, no behavior change): sleep a fixed 1.0s
+        and log whenever the loop wakes late. A late wake = the event loop was
+        blocked by synchronous work for that long; a block >= ~20s is exactly
+        what trips the websockets keepalive ping timeout that kills the
+        order-book listeners. Correlate LOOP-LAG spikes with LISTENER-DEATH
+        timestamps to confirm (or rule out) loop starvation as the cause of the
+        2026-05-28 reconnect storm.
+        """
+        interval = 1.0
+        worst = 0.0
+        while not self._stopped:
+            t0 = time.monotonic()
+            await asyncio.sleep(interval)
+            lag = (time.monotonic() - t0) - interval
+            if lag > worst:
+                worst = lag
+            if lag > 2.0:
+                log.warning("LOOP-LAG event loop blocked for %.1fs (worst so far %.1fs)",
+                            lag, worst)
+
     async def _verify_mark_feed_live(self, enabled: dict, deadline_s: int):
         """Block until every enabled symbol has reported a non-zero mark price,
         or fail fast. Refusing to start blind is intentional — see incident
@@ -351,6 +383,40 @@ class Bridge:
                 pass
             raise RuntimeError(f"WS mark feed dead for {not_ready}")
         log.info("Mark feed verified live for all symbols.")
+
+    def _arm_death_log(self, name: str, market_id: int) -> None:
+        """DIAGNOSTIC (pure logging, no behavior change): when this market's
+        order-book listener task ends, log WHY — clean server close (no
+        exception), an exception (e.g. keepalive ping timeout), or a cancel
+        from our own stop_tracking — plus a snapshot of every listener's
+        alive/dead state at that instant, to tell a common-cause drop apart
+        from a reconnect-induced one. Investigating the 2026-05-28 reconnect
+        storm: stable sockets live for >22m, but the bridge's die every ~6-7m.
+        """
+        if self.paper is None:
+            return
+        listener = self.paper._live_listeners.get(market_id)
+        task = getattr(listener, "_task", None) if listener else None
+        if task is None:
+            return
+
+        def _cb(t) -> None:
+            try:
+                if t.cancelled():
+                    cause = "CANCELLED (our stop_tracking)"
+                else:
+                    exc = t.exception()
+                    cause = "CLEAN_CLOSE (no exception)" if exc is None else f"{type(exc).__name__}: {exc!r}"
+            except Exception as e:  # noqa: BLE001
+                cause = f"EXC_READ_FAIL: {e!r}"
+            snapshot = {
+                n: ("dead" if self._listener_dead(fcfg.cfg.market_id) else "alive")
+                for n, fcfg in self.feeds.items()
+            }
+            log.warning("LISTENER-DEATH %s(mkt%d) cause=%s all_listeners=%s",
+                        name, market_id, cause, snapshot)
+
+        task.add_done_callback(_cb)
 
     def _listener_dead(self, market_id: int) -> bool:
         """True if the SDK's per-market order-book WS listener is gone or its
@@ -410,6 +476,7 @@ class Bridge:
                             name, attempt, exc)
             try:
                 await self.paper.track_market(market_id=market_id)
+                self._arm_death_log(name, market_id)
                 return True
             except Exception as exc:
                 # repr + traceback: bare str(exc) is empty for some SDK errors
