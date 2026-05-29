@@ -1,0 +1,52 @@
+# Pro V3 SOL scale-out paper bridge — validated config (FINDINGS.md 2026-05-29).
+# Real Pro V3 [SMRT Algo] webhooks (NOT the HA-flip replica) + EMA9 retest +
+# ATR scale-out exits, paper on Lighter (zero-fee). Separate DB + container from
+# the running replica/trail bridge.
+
+connection:
+  host: "https://mainnet.zklighter.elliot.ai"
+  initial_collateral_usdc: 2000
+
+signal_source: webhook        # real Pro V3 webhooks, not the replica
+exit_model: scaleout
+
+symbols:
+  SOL:                        # SOL only — ZEC had no edge (FINDINGS.md)
+    market_id: 2
+    enabled: true
+    margin_usdt: 250
+    leverage: 30
+
+# Entry: same EMA9 retest gate the validated backtest used.
+entry:
+  timeframe: "5m"
+  min_abs_slope_pct: 0.12
+  block_body_band: [0.3, 0.6]
+  block_weekdays: [6]
+  ema_period: 9
+  retest_overshoot_pct: 0.2
+  slope_lookback_bars: 3
+  retest_timeout_bars: 6
+
+# Scale-out exits (interior-optimum region from the SL sweep).
+scaleout:
+  sl_atr: 3.5
+  tp_atr: [1.0, 2.0, 3.0]
+  ratios: [0.34, 0.33, 0.33]
+  be_after_tp1: true
+  atr_period: 14
+
+webhook:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  path: "/webhook/pro-v3"
+  secret: "CHANGE_ME_VIA_ENV"   # overridden by BRIDGE_SECRET at deploy
+
+loop:
+  bar_poll_interval_s: 30
+  position_check_interval_s: 5
+
+log:
+  level: "INFO"
+  db_path: "data/pro_v3_scaleout.db"

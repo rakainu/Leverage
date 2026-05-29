@@ -49,6 +49,26 @@ class PineConfig:
 
 
 @dataclass
+class ScaleOutConfig:
+    """ATR scale-out exit params (validated Pro V3 SOL config, 2026-05-29)."""
+    sl_atr: float = 3.5
+    tp_atr: tuple = (1.0, 2.0, 3.0)
+    ratios: tuple = (0.34, 0.33, 0.33)
+    be_after_tp1: bool = True
+    atr_period: int = 14
+
+
+@dataclass
+class WebhookConfig:
+    """Inbound Pro V3 webhook listener (signal_source == 'webhook')."""
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8080
+    path: str = "/webhook/pro-v3"
+    secret: str = ""
+
+
+@dataclass
 class LoopConfig:
     bar_poll_interval_s: int = 30
     position_check_interval_s: int = 5
@@ -80,10 +100,15 @@ class BridgeConfig:
     initial_collateral_usdc: float
     symbols: dict[str, SymbolConfig]
     entry: EntryConfig
-    exits: ExitConfig
+    exits: Optional[ExitConfig] = None         # required only for exit_model == "trail"
     pine: PineConfig = field(default_factory=PineConfig)
     loop: LoopConfig = field(default_factory=LoopConfig)
     log: LogConfig = field(default_factory=LogConfig)
+    # Strategy mode switches (default = legacy replica + trail bridge behavior)
+    signal_source: str = "replica"             # "replica" | "webhook"
+    exit_model: str = "trail"                  # "trail" | "scaleout"
+    scaleout: ScaleOutConfig = field(default_factory=ScaleOutConfig)
+    webhook: WebhookConfig = field(default_factory=WebhookConfig)
 
 
 def load_config(path: str | Path) -> BridgeConfig:
@@ -113,10 +138,27 @@ def load_config(path: str | Path) -> BridgeConfig:
         retest_timeout_bars=int(raw["entry"].get("retest_timeout_bars", 6)),
     )
 
-    exits = ExitConfig(**{k: float(v) for k, v in raw["exits"].items()})
+    exits = ExitConfig(**{k: float(v) for k, v in raw["exits"].items()}) if raw.get("exits") else None
     pine = PineConfig(**raw.get("pine", {}))
     loop = LoopConfig(**raw.get("loop", {}))
     log_cfg = LogConfig(**raw.get("log", {}))
+
+    signal_source = raw.get("signal_source", "replica")
+    exit_model = raw.get("exit_model", "trail")
+
+    so_raw = dict(raw.get("scaleout", {}))
+    if "tp_atr" in so_raw:
+        so_raw["tp_atr"] = tuple(so_raw["tp_atr"])
+    if "ratios" in so_raw:
+        so_raw["ratios"] = tuple(so_raw["ratios"])
+    scaleout = ScaleOutConfig(**so_raw)
+
+    webhook = WebhookConfig(**raw.get("webhook", {}))
+
+    if exit_model == "trail" and exits is None:
+        raise ValueError("exit_model 'trail' requires an 'exits:' config block")
+    if signal_source == "webhook" and not webhook.enabled:
+        webhook.enabled = True
 
     return BridgeConfig(
         host=raw["connection"]["host"],
@@ -127,4 +169,8 @@ def load_config(path: str | Path) -> BridgeConfig:
         pine=pine,
         loop=loop,
         log=log_cfg,
+        signal_source=signal_source,
+        exit_model=exit_model,
+        scaleout=scaleout,
+        webhook=webhook,
     )

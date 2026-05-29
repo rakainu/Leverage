@@ -212,6 +212,49 @@ class PaperExecutor:
             success=True,
         )
 
+    async def reduce_position(self, symbol: str, base_to_close: float,
+                              reason: str) -> Optional[FillResult]:
+        """Partially close `base_to_close` of the open position (scale-out).
+
+        Submits an opposite market order for the partial size, decrements
+        pos.base_amount, and removes the position once it is fully flat.
+        Returns the FillResult (avg_price = the partial exit price), or None.
+        """
+        pos = self.positions.get(symbol)
+        if pos is None:
+            return None
+        size = min(base_to_close, pos.base_amount)
+        mc = self.paper.market_configs.get(pos.market_id)
+        if mc:
+            size = round(size, mc.size_decimals)
+        if size <= 0:
+            return None
+        # If what's left would be below the exchange minimum, close it all so we
+        # never strand an untradeable dust position.
+        remaining_after = pos.base_amount - size
+        if mc and 0 < remaining_after < mc.min_base_amount:
+            size = pos.base_amount
+            remaining_after = 0.0
+
+        close_side = lighter.PaperOrderSide.SELL if pos.side == "long" else lighter.PaperOrderSide.BUY
+        log.info("%s: REDUCE %s %.4f/%.4f (reason=%s)", symbol, pos.side.upper(),
+                 size, pos.base_amount, reason)
+        try:
+            result = await self.paper.create_paper_order(lighter.PaperOrderRequest(
+                market_id=pos.market_id, side=close_side, base_amount=size,
+            ))
+        except Exception as exc:
+            log.error("%s: reduce order failed: %s", symbol, exc, exc_info=True)
+            return None
+
+        exit_price = float(result.avg_price)
+        pos.base_amount = round(pos.base_amount - float(result.filled_size), 8)
+        if pos.base_amount <= (mc.min_base_amount if mc else 0) or remaining_after == 0.0:
+            del self.positions[symbol]
+            log.info("%s: fully closed via scale-out", symbol)
+        return FillResult(filled_size=float(result.filled_size), avg_price=exit_price,
+                          total_fee=float(result.total_fee), success=True)
+
     def pnl_at_mark(self, symbol: str) -> Optional[float]:
         """Current unrealized PnL in USDT for the open position on `symbol`."""
         pos = self.positions.get(symbol)

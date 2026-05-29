@@ -35,6 +35,9 @@ from .signals import (
     passes_entry_filters, prepare,
 )
 from .state_machine import step as state_step
+from . import scaleout as so
+# NOTE: webhook.py (fastapi/uvicorn) is imported lazily in start() only when
+# webhook mode is enabled, so the trail/replica bridge never needs those deps.
 
 
 # UTF-8 stdout for Windows
@@ -68,6 +71,12 @@ class Bridge:
         self.trade_ids: dict[str, int] = {}        # symbol -> DB row id while open
         self.db = TradeLogDB(cfg.log.db_path)
         self._stopped = False
+        # --- scale-out / webhook mode state (unused in legacy trail/replica mode) ---
+        self.signal_queue: "asyncio.Queue[InboundSignal]" = asyncio.Queue()
+        self.scale: dict[str, so.ScaleOutState] = {}   # symbol -> exit state
+        self.orig_base: dict[str, float] = {}          # symbol -> original base_amount
+        self.realized: dict[str, float] = {}           # symbol -> realized pnl so far
+        self.legs: dict[str, list] = {}                # symbol -> [(frac, exit_px, reason)]
 
     async def start(self):
         log.info("=" * 70)
@@ -79,10 +88,16 @@ class Bridge:
         log.info("Entry: slope>=%.2f%%  body_band=%s  block_weekdays=%s",
                  self.cfg.entry.min_abs_slope_pct, self.cfg.entry.block_body_band,
                  self.cfg.entry.block_weekdays)
-        log.info("Exits: SL=$%.0f BE=$%.0f lock_act=$%.0f trail_act=$%.0f trail_dist=$%.0f",
-                 self.cfg.exits.sl_loss_usdt, self.cfg.exits.breakeven_usdt,
-                 self.cfg.exits.lock_profit_activate_usdt,
-                 self.cfg.exits.trail_activate_usdt, self.cfg.exits.trail_distance_usdt)
+        log.info("Signal source: %s | Exit model: %s", self.cfg.signal_source, self.cfg.exit_model)
+        if self.cfg.exit_model == "scaleout":
+            sc = self.cfg.scaleout
+            log.info("Scale-out: SL=%.2f×ATR TP=%s×ATR ratios=%s BE-after-TP1=%s",
+                     sc.sl_atr, sc.tp_atr, sc.ratios, sc.be_after_tp1)
+        else:
+            log.info("Exits: SL=$%.0f BE=$%.0f lock_act=$%.0f trail_act=$%.0f trail_dist=$%.0f",
+                     self.cfg.exits.sl_loss_usdt, self.cfg.exits.breakeven_usdt,
+                     self.cfg.exits.lock_profit_activate_usdt,
+                     self.cfg.exits.trail_activate_usdt, self.cfg.exits.trail_distance_usdt)
 
         # Lighter client + paper client
         self.api = lighter.ApiClient(configuration=lighter.Configuration(host=self.cfg.host))
@@ -140,6 +155,18 @@ class Bridge:
         tasks.append(asyncio.create_task(self.heartbeat_loop()))
         tasks.append(asyncio.create_task(self.daily_summary_loop()))
         tasks.append(asyncio.create_task(self.mark_freshness_loop()))
+        # Webhook signal source (real Pro V3) — listener + queue consumer.
+        if self.cfg.webhook.enabled:
+            from .webhook import build_app, run_server   # lazy: fastapi/uvicorn only in webhook mode
+            known = {n for n, s in enabled.items()}
+            app = build_app(self.signal_queue, self.cfg.webhook.secret, known,
+                            self.cfg.webhook.path)
+            tasks.append(asyncio.create_task(
+                run_server(app, self.cfg.webhook.host, self.cfg.webhook.port)))
+            tasks.append(asyncio.create_task(self.webhook_consumer_loop()))
+            log.info("Webhook listener on %s:%d%s (symbols=%s)",
+                     self.cfg.webhook.host, self.cfg.webhook.port,
+                     self.cfg.webhook.path, sorted(known))
         log.info(
             "Bridge running. %d bar-feed tasks + position checker + heartbeat + "
             "daily summary + mark-feed watchdog.", len(self.feeds),
@@ -196,8 +223,9 @@ class Bridge:
                      symbol, n_buy, n_sell, len(enriched), last_ts)
             return  # don't fire on historical signals — only NEW bars trigger entries
 
-        # NEW signal on the just-closed bar?
-        if bool(last["buy_sig"]):
+        # NEW signal on the just-closed bar? (replica source only; webhook mode
+        # gets its signals from the inbound Pro V3 queue, not the HA-flip replica)
+        if self.cfg.signal_source != "webhook" and bool(last["buy_sig"]):
             self.pending[symbol].append(PendingSignal(symbol, "long", last_ts, len(enriched) - 1))
             log.info("%s: NEW BUY signal @ %s  (close=%.4f)", symbol, last_ts, last["Close"])
             self.db.log_signal(symbol=symbol, side="long",
@@ -205,7 +233,7 @@ class Bridge:
                                ema9=float(last["ema9"]), slope_pct=float(last["slope_pct"]),
                                body_atr_ratio=float(last["body_atr_ratio"]),
                                detected_at=datetime.now(timezone.utc).isoformat())
-        if bool(last["sell_sig"]):
+        if self.cfg.signal_source != "webhook" and bool(last["sell_sig"]):
             self.pending[symbol].append(PendingSignal(symbol, "short", last_ts, len(enriched) - 1))
             log.info("%s: NEW SELL signal @ %s  (close=%.4f)", symbol, last_ts, last["Close"])
             self.db.log_signal(symbol=symbol, side="short",
@@ -285,6 +313,20 @@ class Bridge:
                 adx_at_entry=float(last.get("adx", 0)),
             )
             self.trade_ids[symbol] = trade_id
+            # Arm scale-out exit state (no-op in trail mode)
+            if self.cfg.exit_model == "scaleout":
+                atr_v = float(last.get("atr14", 0.0) or 0.0)
+                sc = self.cfg.scaleout
+                params = so.ScaleOutParams(sl_atr=sc.sl_atr, tp_atr=tuple(sc.tp_atr),
+                                           ratios=tuple(sc.ratios), be_after_tp1=sc.be_after_tp1)
+                self.scale[symbol] = so.init_levels(sig.side, pos.entry_price, atr_v, params)
+                self.orig_base[symbol] = pos.base_amount
+                self.realized[symbol] = 0.0
+                self.legs[symbol] = []
+                stx = self.scale[symbol]
+                log.info("%s: scale-out armed entry=%.4f ATR=%.4f SL=%.4f TP=%s",
+                         symbol, pos.entry_price, atr_v, stx.sl_price,
+                         [round(x, 4) for x in stx.tp_px])
             # Telegram alert (fire-and-forget)
             asyncio.create_task(notify.notify_open(pos))
             self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(sig.detected_at_bar_ts),
@@ -295,6 +337,81 @@ class Bridge:
             new_pending = [p for p in new_pending if p.side != sig.side]
         self.pending[symbol] = new_pending
 
+    async def webhook_consumer_loop(self):
+        """Drain inbound Pro V3 webhooks into the EMA9-retest pending queue."""
+        log.info("Webhook consumer started")
+        while not self._stopped:
+            sig = await self.signal_queue.get()
+            symbol = sig.symbol_key
+            if symbol not in self.pending:
+                log.warning("webhook: %s not enabled — dropping", symbol)
+                continue
+            df = self.bars.get(symbol)
+            if df is None or len(df) == 0:
+                log.warning("webhook: %s has no bars yet — dropping %s signal", symbol, sig.side)
+                continue
+            ts = df.index[-1]
+            self.pending[symbol].append(PendingSignal(symbol, sig.side, ts, len(df) - 1))
+            log.info("%s: PRO V3 %s webhook -> pending (anchor bar %s)", symbol, sig.side, ts)
+            self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(ts),
+                               outcome="detected",
+                               detected_at=datetime.now(timezone.utc).isoformat())
+            # Check retest against the latest closed bar immediately (matches the
+            # replica path, which runs process_pending right after enqueue).
+            await self.process_pending(symbol, df)
+
+    async def _scaleout_tick(self, symbol: str, pos, mark: float):
+        """One scale-out evaluation for an open position; executes partial closes."""
+        st = self.scale.get(symbol)
+        if st is None:
+            return
+        sc = self.cfg.scaleout
+        params = so.ScaleOutParams(sl_atr=sc.sl_atr, tp_atr=tuple(sc.tp_atr),
+                                   ratios=tuple(sc.ratios), be_after_tp1=sc.be_after_tp1)
+        decision = so.step(st, mark, params)
+        if decision.be_moved:
+            log.info("%s: TP1 hit -> stop moved to breakeven $%.4f", symbol, st.entry_price)
+        for frac, reason in decision.closes:
+            res = await self.executor.reduce_position(symbol, frac * self.orig_base[symbol], reason)
+            if res is None:
+                continue
+            exit_p, filled = res.avg_price, res.filled_size
+            leg_pnl = ((exit_p - pos.entry_price) if pos.side == "long"
+                       else (pos.entry_price - exit_p)) * filled
+            self.realized[symbol] = self.realized.get(symbol, 0.0) + leg_pnl
+            self.legs[symbol].append((frac, exit_p, reason))
+            log.info("%s: %s leg %.4f @ $%.4f  pnl=$%+.2f", symbol, reason, filled, exit_p, leg_pnl)
+        if decision.done or not self.executor.is_open(symbol):
+            self._finalize_scaleout(symbol, pos)
+
+    def _finalize_scaleout(self, symbol: str, pos):
+        legs = self.legs.get(symbol, [])
+        total_pnl = self.realized.get(symbol, 0.0)
+        if legs:
+            tot = sum(f for f, _, _ in legs)
+            wavg = sum(f * px for f, px, _ in legs) / tot if tot > 0 else pos.entry_price
+            last_reason = legs[-1][2]
+        else:
+            wavg, last_reason = pos.entry_price, "unknown"
+        max_tp = self.scale[symbol].max_tp_reached if symbol in self.scale else 0
+        tid = self.trade_ids.get(symbol)
+        if tid is not None:
+            self.db.update_trade_close(
+                tid, exit_price=wavg, initial_sl=None,
+                exit_reason=f"scaleout:{last_reason}", pnl_usdt=total_pnl,
+                pnl_pct_account=total_pnl / self.cfg.initial_collateral_usdc * 100,
+                duration_secs=int(time.time() - pos.opened_at), max_state=max_tp,
+                closed_at=datetime.now(timezone.utc).isoformat())
+            del self.trade_ids[symbol]
+        log.info("%s: scale-out CLOSED total_pnl=$%+.2f legs=%d avg_exit=$%.4f max_tp=%d",
+                 symbol, total_pnl, len(legs), wavg, max_tp)
+        asyncio.create_task(notify.notify_close(
+            symbol, pos.side, pos.entry_price, wavg, total_pnl,
+            f"scaleout:{last_reason}", int(time.time() - pos.opened_at), max_tp,
+            starting_collateral=self.cfg.initial_collateral_usdc))
+        for d in (self.scale, self.orig_base, self.realized, self.legs):
+            d.pop(symbol, None)
+
     async def position_check_loop(self):
         """Tick every N seconds — run state machine on each open position."""
         log.info("Position checker started (every %ds)", self.cfg.loop.position_check_interval_s)
@@ -302,6 +419,9 @@ class Bridge:
             for symbol, pos in list(self.executor.positions.items()):
                 mark = self.executor.get_mark_price(symbol)
                 if mark is None:
+                    continue
+                if self.cfg.exit_model == "scaleout":
+                    await self._scaleout_tick(symbol, pos, mark)
                     continue
                 decision = state_step(pos, mark, self.cfg.exits)
                 if decision.close:
