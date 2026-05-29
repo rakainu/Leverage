@@ -1,6 +1,7 @@
 """Config loader. Parses config.yaml into typed dataclasses."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -154,6 +155,9 @@ def load_config(path: str | Path) -> BridgeConfig:
     scaleout = ScaleOutConfig(**so_raw)
 
     webhook = WebhookConfig(**raw.get("webhook", {}))
+    # BRIDGE_SECRET env overrides the yaml secret (so it's never committed).
+    if os.environ.get("BRIDGE_SECRET"):
+        webhook.secret = os.environ["BRIDGE_SECRET"]
 
     if exit_model == "trail" and exits is None:
         raise ValueError("exit_model 'trail' requires an 'exits:' config block")

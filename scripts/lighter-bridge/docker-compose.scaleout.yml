@@ -1,0 +1,34 @@
+# Pro V3 SOL scale-out PAPER bridge — separate container from the running
+# replica/trail lighter-bridge. Shares the image + ./data dir but writes its own
+# DB (pro_v3_scaleout.db) and listens for real Pro V3 webhooks on :8080.
+#
+# Deploy:  docker compose -f docker-compose.scaleout.yml up -d --build
+# Requires BRIDGE_SECRET in .env (overrides the yaml webhook secret).
+services:
+  pro-v3-scaleout:
+    build: .
+    image: lighter-bridge:latest
+    container_name: pro-v3-scaleout
+    restart: unless-stopped
+    env_file:
+      - .env                       # BRIDGE_SECRET, Telegram, Lighter creds
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./config.scaleout.yaml:/app/config.scaleout.yaml:ro
+    # Webhook bound to localhost; Traefik routes the public HTTPS endpoint to it
+    # (file-provider entry, same pattern as the Lighter dashboard).
+    ports:
+      - "127.0.0.1:8094:8080"
+    command: ["python", "-u", "run_bridge.py", "--config", "config.scaleout.yaml"]
+    healthcheck:
+      test: ["CMD-SHELL", "find /app/data/pro_v3_scaleout.db /app/data/pro_v3_scaleout.db-wal -mmin -10 -type f 2>/dev/null | grep -q . || exit 1"]
+      interval: 5m
+      timeout: 15s
+      start_period: 2m
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
