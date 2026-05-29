@@ -150,12 +150,19 @@ async def notify_startup(cfg, restored: Optional[list] = None) -> None:
             f"Entry: slope≥{cfg.entry.min_abs_slope_pct:.2f}%  "
             f"body{cfg.entry.block_body_band}  noSun"
         ),
-        (
+    ]
+    if getattr(cfg, "exit_model", "trail") == "scaleout":
+        sc = cfg.scaleout
+        lines.append(
+            f"Exits: scale-out SL={sc.sl_atr:g}×ATR  "
+            f"TP={sc.tp_atr}×ATR  ratios={sc.ratios}  BE-after-TP1"
+        )
+    else:
+        lines.append(
             f"Exits: SL=${cfg.exits.sl_loss_usdt:.0f}  "
             f"BE=${cfg.exits.breakeven_usdt:.0f}  "
             f"trail_dist=${cfg.exits.trail_distance_usdt:.0f}"
-        ),
-    ]
+        )
     if restored:
         lines.append("")
         lines.append(f"<b>♻️ Restored {len(restored)} open position(s):</b>")

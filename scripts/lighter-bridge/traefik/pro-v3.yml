@@ -1,0 +1,18 @@
+# Traefik dynamic (file-provider) config for the Pro V3 scale-out webhook.
+# Deploy: scp -> /docker/traefik-mncm/config/pro-v3.yml  (Traefik hot-reloads)
+# The pro-v3-scaleout container publishes 127.0.0.1:8094 -> :8080.
+# No basic-auth: the webhook authenticates via the `secret` field in the JSON body.
+http:
+  routers:
+    pro-v3-scaleout:
+      rule: "Host(`pro-v3.agentneo.cloud`)"
+      entryPoints:
+        - websecure
+      service: pro-v3-scaleout
+      tls:
+        certResolver: letsencrypt
+  services:
+    pro-v3-scaleout:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8094"
