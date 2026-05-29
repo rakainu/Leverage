@@ -1,0 +1,3 @@
+# Live DB snapshots (reproducible via scp from VPS; change constantly)
+*.db
+__pycache__/
