@@ -1,0 +1,23 @@
+# Pro V3 scale-out dashboard — second container, same image as lighter-dashboard,
+# pointed at pro_v3_scaleout.db. Publishes loopback 127.0.0.1:8093; Traefik routes
+# pro-v3-dash.agentneo.cloud -> here (TLS + basic-auth in front).
+#   docker compose -f docker-compose.scaleout.yml up -d --build
+services:
+  pro-v3-dashboard:
+    build: .
+    image: lighter-dashboard:latest
+    container_name: pro-v3-dashboard
+    restart: unless-stopped
+    volumes:
+      - /docker/lighter-paper/data:/app/data   # read-only enforced via PRAGMA query_only
+      - ./src:/app/src
+      - ./templates:/app/templates
+      - ./config.scaleout.yaml:/app/config.scaleout.yaml:ro
+    command: ["python", "-u", "run_dashboard.py", "--config", "config.scaleout.yaml", "--host", "0.0.0.0", "--port", "8080"]
+    ports:
+      - "127.0.0.1:8093:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

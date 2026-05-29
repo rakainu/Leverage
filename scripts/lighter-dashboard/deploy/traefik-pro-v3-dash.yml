@@ -1,0 +1,24 @@
+# Traefik dynamic (file-provider) config for the Pro V3 scale-out dashboard.
+# Deploy: scp -> /docker/traefik-mncm/config/pro-v3-dash.yml  (Traefik hot-reloads)
+# Container publishes 127.0.0.1:8093 -> :8080. Basic-auth reuses the existing
+# /config/lighter.htpasswd (radk9). Own middleware name to avoid cross-file clashes.
+http:
+  routers:
+    pro-v3-dashboard:
+      rule: "Host(`pro-v3-dash.agentneo.cloud`)"
+      entryPoints:
+        - websecure
+      service: pro-v3-dashboard
+      middlewares:
+        - pro-v3-auth
+      tls:
+        certResolver: letsencrypt
+  services:
+    pro-v3-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8093"
+  middlewares:
+    pro-v3-auth:
+      basicAuth:
+        usersFile: "/config/lighter.htpasswd"

@@ -1,0 +1,12 @@
+# Dashboard config for the Pro V3 SOL scale-out paper bridge.
+# Same code as the Lighter dashboard, pointed at the scale-out bridge's DB
+# (both DBs live in /docker/lighter-paper/data, mounted into the container).
+db_path: "data/pro_v3_scaleout.db"
+lighter_host: "https://mainnet.zklighter.elliot.ai"
+initial_collateral_usdc: 2000
+symbols:                                  # name -> market_id
+  SOL: 2
+refresh:
+  live_ms: 3000
+  static_ms: 15000
+mark_cache_ttl_s: 2.0
