@@ -1,0 +1,77 @@
+//@version=6
+// Volatility Compression -> Expansion (squeeze), 1h, LONG+SHORT — 2026-05-30
+// Bollinger(20,2) inside Keltner(20,1.5*ATR) = compression. On release after >=10
+// squeezed bars, enter in the direction of momentum (close vs basis), ride the
+// expansion with a trailing stop. Designed for a SOL/ETH/ZEC/HYPE basket on
+// Lighter zero-fee perps (also survives BloFin fees).
+//
+// Portfolio backtest (honest Python engine, 4 coins, Lighter zero-fee, 180d, 1h):
+//   PF 1.76 | WR 34% | avgR +0.43 | maxDD 17.3% (1% risk) | n=192 | t-stat 2.45
+//   OOS PF 1.81 | walk-forward 3/3 folds positive | BloFin-fees PF 1.54.
+// Low win rate by design — edge comes from riding the occasional big expansion.
+// Python engine (scripts/scalping/analysis/lighter_strat_2026-05-30) is the source
+// of truth; TV fills won't match bar-for-bar. Run one instance per coin's 1h chart.
+
+strategy("Squeeze Expansion 1h", overlay=true, default_qty_type=strategy.percent_of_equity,
+         default_qty_value=100, process_orders_on_close=true, calc_on_every_tick=false,
+         initial_capital=1000, commission_type=strategy.commission.percent, commission_value=0.0)
+
+bbLen     = input.int(20,   "BB / KC / basis length")
+bbMult    = input.float(2.0, "BB mult", step=0.1)
+kcMult    = input.float(1.5, "KC mult (x ATR)", step=0.1)
+atrLen    = input.int(14,   "ATR length")
+minSqueeze= input.int(10,   "Min squeezed bars before release")
+slAtr     = input.float(1.5, "Initial stop (x ATR)", step=0.25)
+trailAtr  = input.float(3.0, "Trail distance (x ATR, from best close)", step=0.25)
+maxBars   = input.int(48,   "Time stop (bars)")
+
+basis = ta.sma(close, bbLen)
+dev   = ta.stdev(close, bbLen)
+atrv  = ta.atr(atrLen)
+upperBB = basis + bbMult * dev
+lowerBB = basis - bbMult * dev
+upperKC = basis + kcMult * atrv
+lowerKC = basis - kcMult * atrv
+squeezeOn = upperBB < upperKC and lowerBB > lowerKC
+
+var int sqRun = 0
+sqRun := squeezeOn ? sqRun + 1 : 0
+released = not squeezeOn and sqRun[1] >= minSqueeze   // squeeze just ended after enough bars
+longSig  = released and close > basis
+shortSig = released and close < basis
+
+// --- manual trailing stop state ---
+var float stopLevel = na
+var float bestClose = na
+
+entryMsgL = '{"strategy":"squeeze_exp","symbol":"' + syminfo.ticker + '","action":"buy","type":"market","tf":"1h"}'
+entryMsgS = '{"strategy":"squeeze_exp","symbol":"' + syminfo.ticker + '","action":"sell","type":"market","tf":"1h"}'
+closeMsg  = '{"strategy":"squeeze_exp","symbol":"' + syminfo.ticker + '","action":"close"}'
+
+if longSig and strategy.position_size == 0
+    strategy.entry("L", strategy.long, alert_message=entryMsgL)
+    stopLevel := close - slAtr * atrv
+    bestClose := close
+if shortSig and strategy.position_size == 0
+    strategy.entry("S", strategy.short, alert_message=entryMsgS)
+    stopLevel := close + slAtr * atrv
+    bestClose := close
+
+// update trailing stop off the CLOSE only (matches engine: no intrabar wick arming)
+if strategy.position_size > 0
+    bestClose := math.max(bestClose, close)
+    stopLevel := math.max(stopLevel, bestClose - trailAtr * atrv)
+    strategy.exit("Lx", from_entry="L", stop=stopLevel, alert_message=closeMsg)
+    if bar_index - strategy.opentrades.entry_bar_index(0) >= maxBars
+        strategy.close("L", comment="time", alert_message=closeMsg)
+if strategy.position_size < 0
+    bestClose := math.min(bestClose, close)
+    stopLevel := math.min(stopLevel, bestClose + trailAtr * atrv)
+    strategy.exit("Sx", from_entry="S", stop=stopLevel, alert_message=closeMsg)
+    if bar_index - strategy.opentrades.entry_bar_index(0) >= maxBars
+        strategy.close("S", comment="time", alert_message=closeMsg)
+
+plot(basis, "Basis", color=color.gray)
+bgcolor(squeezeOn ? color.new(color.orange, 85) : na, title="Squeeze on")
+plotshape(longSig and strategy.position_size == 0, "Long release", shape.triangleup, location.belowbar, color.green, size=size.tiny)
+plotshape(shortSig and strategy.position_size == 0, "Short release", shape.triangledown, location.abovebar, color.red, size=size.tiny)
