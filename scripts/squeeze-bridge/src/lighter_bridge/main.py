@@ -829,18 +829,22 @@ class Bridge:
     def _watchdog_action(age: float | None, dead: bool,
                          reconnect_s: int, fatal_s: int) -> str:
         """Pure decision for the mark-feed watchdog. Returns one of:
-          "fatal"     — mark aged past fatal_s; reconnect has failed, give up.
-          "reconnect" — listener task dead, or mark stale past reconnect_s.
-          "ok"        — feed healthy.
+          "fatal"     — listener task dead AND still no fresh mark past fatal_s.
+          "reconnect" — listener task dead (rebuild that one symbol's WS).
+          "ok"        — feed healthy, OR market merely quiet.
 
-        Fatal takes priority: by the time age >= fatal_s the in-process
-        reconnect has been retried every tick from reconnect_s onward and
-        still hasn't produced a fresh mark, so a clean process restart is the
-        correct last resort.
+        IMPORTANT (2026-05-30 fix): mark "age" is time-since-the-mid-VALUE-changed,
+        not time-since-the-last-WS-message. A low-volatility symbol (e.g. ZEC on
+        Lighter) can hold a constant mid for many minutes while its WS is perfectly
+        healthy — that is indistinguishable from a dead feed by age alone. So we
+        only act on the RELIABLE failure signal: the SDK listener task actually
+        ending (`dead`, = task.done(); Lighter's listener ends on a dropped socket).
+        A quiet-but-alive feed is "ok" — never reconnect-churn or fatal-restart the
+        whole multi-coin bridge just because one symbol isn't moving.
         """
-        if age is not None and age >= fatal_s:
-            return "fatal"
-        if dead or age is None or age >= reconnect_s:
+        if dead:
+            if age is not None and age >= fatal_s:
+                return "fatal"
             return "reconnect"
         return "ok"
 
