@@ -52,6 +52,12 @@ notify:
 loop:
   bar_poll_interval_s: 60      # 1h bars — poll once a minute is plenty
   position_check_interval_s: 5 # stop check on the live mark every 5s
+  # Lighter per-market WS listeners die periodically; in-process reconnect heals
+  # them. Give reconnect ~15 min of attempts before the nuclear full-process
+  # restart (harmless mark gap on a 1h strategy). Reduces restart churn.
+  mark_reconnect_s: 60
+  mark_stale_warn_s: 300
+  mark_stale_fatal_s: 900
 
 log:
   level: "INFO"
