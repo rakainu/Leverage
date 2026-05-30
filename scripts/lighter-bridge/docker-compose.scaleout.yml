@@ -12,6 +12,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env                       # BRIDGE_SECRET, Telegram, Lighter creds
+    environment:
+      # Distinguish this bridge's Telegram DMs from the trail bridge (shared bot+chat).
+      TELEGRAM_SENDER_TAG: "PRO-V3"
     volumes:
       - ./data:/app/data
       - ./src:/app/src

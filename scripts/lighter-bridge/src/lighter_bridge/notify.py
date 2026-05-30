@@ -31,7 +31,10 @@ import aiohttp
 log = logging.getLogger(__name__)
 
 
-SENDER_TAG = "LIGHTER-BRIDGE"
+# Per-bridge identity. Both the trail bridge and the pro-v3 bridge share one bot +
+# chat, so without a distinct tag their DMs are indistinguishable. Override per
+# container via TELEGRAM_SENDER_TAG (e.g. "PRO-V3", "LIGHTER-TRAIL").
+SENDER_TAG = os.environ.get("TELEGRAM_SENDER_TAG", "LIGHTER-BRIDGE")
 _TG_BASE = "https://api.telegram.org/bot{token}/sendMessage"
 
 # Threshold below which a close is treated as "near-zero" (yellow dot)

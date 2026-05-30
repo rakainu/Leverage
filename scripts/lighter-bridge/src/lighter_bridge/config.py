@@ -97,6 +97,18 @@ class LogConfig:
 
 
 @dataclass
+class NotifyConfig:
+    """Per-type Telegram toggles. Default all-on = legacy behavior.
+    Set a flag false to silence that message class for a given bridge.
+    (Error/crash alerts are intentionally NOT toggleable — silent failures are
+    worse than a ping.)"""
+    startup: bool = True       # "Bridge UP" ping on every (re)start — noisy when iterating
+    open: bool = True          # entry alerts
+    close: bool = True         # exit alerts
+    daily: bool = True         # daily KPI summary
+
+
+@dataclass
 class BridgeConfig:
     host: str
     initial_collateral_usdc: float
@@ -111,6 +123,7 @@ class BridgeConfig:
     exit_model: str = "trail"                  # "trail" | "scaleout"
     scaleout: ScaleOutConfig = field(default_factory=ScaleOutConfig)
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
+    notify: NotifyConfig = field(default_factory=NotifyConfig)
 
 
 def load_config(path: str | Path) -> BridgeConfig:
@@ -161,6 +174,8 @@ def load_config(path: str | Path) -> BridgeConfig:
     if os.environ.get("BRIDGE_SECRET"):
         webhook.secret = os.environ["BRIDGE_SECRET"]
 
+    notify = NotifyConfig(**raw.get("notify", {}))
+
     if exit_model == "trail" and exits is None:
         raise ValueError("exit_model 'trail' requires an 'exits:' config block")
     if signal_source == "webhook" and not webhook.enabled:
@@ -179,4 +194,5 @@ def load_config(path: str | Path) -> BridgeConfig:
         exit_model=exit_model,
         scaleout=scaleout,
         webhook=webhook,
+        notify=notify,
     )

@@ -8,7 +8,8 @@ connection:
   initial_collateral_usdc: 2000
 
 signal_source: webhook        # real Pro V3 webhooks, not the replica
-exit_model: pro_v3            # exits driven by Pro V3's own TP1/2/3 + SL alerts (verbatim)
+exit_model: scaleout         # bridge-computed single TP + single stop from entry±ATR
+                             # (no TV exit alerts needed — one TP line, one stop line)
 
 symbols:
   SOL:                        # SOL only — ZEC had no edge (FINDINGS.md)
@@ -30,11 +31,15 @@ entry:
   slope_lookback_bars: 3
   retest_timeout_bars: 6
 
-# Exits: Pro V3's own TP1/TP2/TP3 + SL (verbatim, event-driven via webhooks).
-# `ratios` = fraction of the ORIGINAL position closed at TP1 / TP2 / TP3 (tp3 & sl
-# always flatten the remainder). The sl_atr/tp_atr fields are unused in pro_v3 mode.
+# Exits: ONE take-profit + ONE stop, both computed by the bridge at fill from ATR(14).
+# R:R sweep on real Pro V3 SOL signals (sweep_rr.py, 2026-05-30): 4.0xATR stop + 1.5:1 TP
+# was the sweet spot — net/PF beat the dead 1:1 in both entry timings, positive OOS.
+#   SL = entry -/+ 4.0 * ATR ; TP = entry +/- (1.5 * 4.0) * ATR = 6.0 * ATR ; all-out at TP.
 scaleout:
-  ratios: [1.0, 0.0, 0.0]      # ALL at TP1 (pure scalp). SL/Stop Line flattens if TP1 not hit.
+  sl_atr: 4.0                  # wide stop — the load-bearing parameter (FINDINGS + sweep_rr)
+  tp_atr: [6.0, 6.0, 6.0]      # single TP at 1.5:1 (6.0xATR); tp2/tp3 unused (all-out at TP1)
+  ratios: [1.0, 0.0, 0.0]      # ALL at TP1 (pure scalp). Stop flattens if TP not hit first.
+  be_after_tp1: false          # irrelevant with all-out, kept explicit
 
 webhook:
   enabled: true
@@ -42,6 +47,15 @@ webhook:
   port: 8080
   path: "/webhook/pro-v3"
   secret: "CHANGE_ME_VIA_ENV"   # overridden by BRIDGE_SECRET at deploy
+
+# Telegram: this bridge shares one bot+chat with the trail bridge. Silence the
+# restart "Bridge UP" spam; keep entry/exit/daily. Identity set via TELEGRAM_SENDER_TAG
+# env in the compose (= "PRO-V3") so its DMs are distinguishable from the trail bridge.
+notify:
+  startup: false               # no "Bridge UP" ping on every restart
+  open: true                   # entry alerts
+  close: true                  # exit alerts
+  daily: true                  # daily summary
 
 loop:
   bar_poll_interval_s: 30

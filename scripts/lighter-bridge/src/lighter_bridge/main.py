@@ -152,7 +152,8 @@ class Bridge:
         restored = await self.restore_open_positions()
 
         # Telegram startup ping (includes restored positions if any)
-        await notify.notify_startup(self.cfg, restored=restored or None)
+        if self.cfg.notify.startup:
+            await notify.notify_startup(self.cfg, restored=restored or None)
 
         # Kick off async tasks
         tasks = []
@@ -341,7 +342,8 @@ class Bridge:
                              "(close %s of original)", symbol, pos.entry_price,
                              tuple(self.cfg.scaleout.ratios))
             # Telegram alert (fire-and-forget)
-            asyncio.create_task(notify.notify_open(pos))
+            if self.cfg.notify.open:
+                asyncio.create_task(notify.notify_open(pos))
             self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(sig.detected_at_bar_ts),
                                outcome="fired", ema9=ema_v, slope_pct=slope_v,
                                body_atr_ratio=body_v,
@@ -471,7 +473,8 @@ class Bridge:
                            slope_pct=float(last.get("slope_pct", 0)),
                            body_atr_ratio=float(last.get("body_atr_ratio", 0)),
                            detected_at=now)
-        asyncio.create_task(notify.notify_open(pos))
+        if self.cfg.notify.open:
+            asyncio.create_task(notify.notify_open(pos))
 
     async def _scaleout_tick(self, symbol: str, pos, mark: float):
         """One scale-out evaluation for an open position; executes partial closes."""
@@ -520,10 +523,11 @@ class Bridge:
             del self.trade_ids[symbol]
         log.info("%s: CLOSED (%s) total_pnl=$%+.2f legs=%d avg_exit=$%.4f max_tp=%d",
                  symbol, reason, total_pnl, len(legs), wavg, max_tp)
-        asyncio.create_task(notify.notify_close(
-            symbol, pos.side, pos.entry_price, wavg, total_pnl,
-            reason, int(time.time() - pos.opened_at), max_tp,
-            starting_collateral=self.cfg.initial_collateral_usdc))
+        if self.cfg.notify.close:
+            asyncio.create_task(notify.notify_close(
+                symbol, pos.side, pos.entry_price, wavg, total_pnl,
+                reason, int(time.time() - pos.opened_at), max_tp,
+                starting_collateral=self.cfg.initial_collateral_usdc))
         for d in (self.scale, self.orig_base, self.realized, self.legs, self.tp_seen):
             d.pop(symbol, None)
 
@@ -564,11 +568,12 @@ class Bridge:
                         )
                         del self.trade_ids[symbol]
                         # Telegram close alert
-                        asyncio.create_task(notify.notify_close(
-                            symbol, pos.side, pos.entry_price, exit_p,
-                            pnl, decision.reason, duration, pos.max_state,
-                            starting_collateral=self.cfg.initial_collateral_usdc,
-                        ))
+                        if self.cfg.notify.close:
+                            asyncio.create_task(notify.notify_close(
+                                symbol, pos.side, pos.entry_price, exit_p,
+                                pnl, decision.reason, duration, pos.max_state,
+                                starting_collateral=self.cfg.initial_collateral_usdc,
+                            ))
             await asyncio.sleep(self.cfg.loop.position_check_interval_s)
 
     def _equity_breakdown(self) -> tuple[float, float, float]:
@@ -799,7 +804,8 @@ class Bridge:
                 stats = self.db.summary()
                 _, _, equity = self._equity_breakdown()
                 stats["portfolio_value"] = equity
-                await notify.notify_daily(stats, starting_collateral=self.cfg.initial_collateral_usdc)
+                if self.cfg.notify.daily:
+                    await notify.notify_daily(stats, starting_collateral=self.cfg.initial_collateral_usdc)
             except Exception as exc:
                 log.error("Daily summary error: %s", exc, exc_info=True)
             await asyncio.sleep(86400)
