@@ -1,0 +1,58 @@
+# Squeeze (volatility compression -> expansion) PAPER bridge — Lighter zero-fee.
+# Native signals (no webhooks): computes BB-in-KC squeeze on its own 1h candle
+# feed for the 4-coin basket, long+short, risk-based sizing, ATR trailing exit.
+# Validated config: scripts/scalping/analysis/lighter_strat_2026-05-30 (STRATEGY.md)
+#   portfolio PF 1.76 | OOS 1.81 | walk-forward 3/3 | maxDD 13.3% @ 0.75% risk.
+#
+# Deploy:  docker compose -f docker-compose.squeeze.yml up -d --build
+# Separate DB (squeeze.db) + container from any other bridge.
+
+connection:
+  host: "https://mainnet.zklighter.elliot.ai"
+  initial_collateral_usdc: 1000        # paper starting equity (matches backtest)
+
+signal_source: squeeze                 # native squeeze signal computation
+exit_model: atr_trail                  # initial ATR stop + ATR trailing stop + time stop
+
+symbols:                               # market_ids confirmed live on Lighter mainnet
+  SOL:  { market_id: 2,  enabled: true, margin_usdt: 250, leverage: 20 }   # margin/lev
+  ETH:  { market_id: 0,  enabled: true, margin_usdt: 250, leverage: 20 }   # are nominal —
+  ZEC:  { market_id: 90, enabled: true, margin_usdt: 250, leverage: 20 }   # sizing is
+  HYPE: { market_id: 24, enabled: true, margin_usdt: 250, leverage: 20 }   # risk-based
+
+# Squeeze params + risk-based sizing (the strategy's real knobs)
+squeeze:
+  bb_len: 20
+  bb_mult: 2.0
+  kc_mult: 1.5
+  min_squeeze: 10        # >=10 squeezed bars before a release counts
+  sl_atr: 1.5            # initial hard stop = entry -/+ 1.5*ATR
+  trail_atr: 3.0         # trailing stop = 3*ATR behind best close
+  max_bars: 48           # time stop (48h on 1h)
+  atr_period: 14
+  risk_frac: 0.0075      # 0.75% of equity to the hard stop per trade (backtest DD 13.3%)
+  max_leverage: 20.0     # notional cap
+
+# Entry block is required by the loader but unused by the squeeze path.
+entry:
+  timeframe: "1h"
+  min_abs_slope_pct: 0.0
+  require_retest: false
+  ema_period: 9
+  retest_overshoot_pct: 0.2
+  slope_lookback_bars: 3
+  retest_timeout_bars: 6
+
+notify:
+  startup: false         # no "Bridge UP" spam on restart
+  open: true
+  close: true
+  daily: true
+
+loop:
+  bar_poll_interval_s: 60      # 1h bars — poll once a minute is plenty
+  position_check_interval_s: 5 # stop check on the live mark every 5s
+
+log:
+  level: "INFO"
+  db_path: "data/squeeze.db"

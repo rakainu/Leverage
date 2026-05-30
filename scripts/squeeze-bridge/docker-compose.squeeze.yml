@@ -1,0 +1,31 @@
+# Squeeze PAPER bridge — native multi-coin squeeze on Lighter (zero-fee).
+# Own image, own DB (data/squeeze.db), own container. No inbound port (native
+# signals, no webhook). Telegram tagged SQUEEZE to distinguish its DMs.
+#
+# Deploy:  docker compose -f docker-compose.squeeze.yml up -d --build
+services:
+  squeeze-bridge:
+    build: .
+    image: squeeze-bridge:latest
+    container_name: squeeze-bridge
+    restart: unless-stopped
+    env_file:
+      - .env                         # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    environment:
+      TELEGRAM_SENDER_TAG: "SQUEEZE"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./config.squeeze.yaml:/app/config.squeeze.yaml:ro
+    command: ["python", "-u", "run_bridge.py", "--config", "config.squeeze.yaml"]
+    healthcheck:
+      test: ["CMD-SHELL", "find /app/data/squeeze.db /app/data/squeeze.db-wal -mmin -15 -type f 2>/dev/null | grep -q . || exit 1"]
+      interval: 5m
+      timeout: 15s
+      start_period: 3m
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,15 @@
+# Dashboard config for the Squeeze 4-coin paper bridge.
+# Same dashboard code as lighter-dashboard, pointed at the squeeze bridge's DB
+# (/docker/squeeze-paper/data/squeeze.db, mounted into the container).
+db_path: "data/squeeze.db"
+lighter_host: "https://mainnet.zklighter.elliot.ai"
+initial_collateral_usdc: 1000
+symbols:                                  # name -> market_id (live Lighter ids)
+  SOL: 2
+  ETH: 0
+  ZEC: 90
+  HYPE: 24
+refresh:
+  live_ms: 3000
+  static_ms: 15000
+mark_cache_ttl_s: 2.0

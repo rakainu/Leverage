@@ -1,0 +1,25 @@
+# Traefik dynamic (file-provider) config for the Squeeze dashboard.
+# Deploy: scp -> /docker/traefik-mncm/config/squeeze-dash.yml  (Traefik hot-reloads)
+# Container publishes 127.0.0.1:8095 -> :8080. Basic-auth reuses the existing
+# /config/lighter.htpasswd (radk9). Own middleware name to avoid cross-file clashes.
+# Requires DNS: squeeze.agentneo.cloud -> 46.202.146.30 (or a *.agentneo.cloud wildcard).
+http:
+  routers:
+    squeeze-dashboard:
+      rule: "Host(`squeeze.agentneo.cloud`)"
+      entryPoints:
+        - websecure
+      service: squeeze-dashboard
+      middlewares:
+        - squeeze-auth
+      tls:
+        certResolver: letsencrypt
+  services:
+    squeeze-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8095"
+  middlewares:
+    squeeze-auth:
+      basicAuth:
+        usersFile: "/config/lighter.htpasswd"
