@@ -34,7 +34,7 @@ entry:
 # `ratios` = fraction of the ORIGINAL position closed at TP1 / TP2 / TP3 (tp3 & sl
 # always flatten the remainder). The sl_atr/tp_atr fields are unused in pro_v3 mode.
 scaleout:
-  ratios: [0.5, 0.25, 0.25]   # 50% at TP1, 25% at TP2, 25% (remainder) at TP3
+  ratios: [1.0, 0.0, 0.0]      # ALL at TP1 (pure scalp). SL/Stop Line flattens if TP1 not hit.
 
 webhook:
   enabled: true
