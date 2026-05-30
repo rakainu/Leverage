@@ -77,6 +77,7 @@ class Bridge:
         self.orig_base: dict[str, float] = {}          # symbol -> original base_amount
         self.realized: dict[str, float] = {}           # symbol -> realized pnl so far
         self.legs: dict[str, list] = {}                # symbol -> [(frac, exit_px, reason)]
+        self.tp_seen: dict[str, set] = {}              # symbol -> {tp levels already closed} (pro_v3 mode)
 
     async def start(self):
         log.info("=" * 70)
@@ -89,10 +90,16 @@ class Bridge:
                  self.cfg.entry.min_abs_slope_pct, self.cfg.entry.block_body_band,
                  self.cfg.entry.block_weekdays)
         log.info("Signal source: %s | Exit model: %s", self.cfg.signal_source, self.cfg.exit_model)
+        log.info("Entry: EMA9 retest=%s%s", self.cfg.entry.require_retest,
+                 "" if self.cfg.entry.min_abs_slope_pct or self.cfg.entry.block_body_band
+                 or self.cfg.entry.block_weekdays else " (no extra filters)")
         if self.cfg.exit_model == "scaleout":
             sc = self.cfg.scaleout
             log.info("Scale-out: SL=%.2f×ATR TP=%s×ATR ratios=%s BE-after-TP1=%s",
                      sc.sl_atr, sc.tp_atr, sc.ratios, sc.be_after_tp1)
+        elif self.cfg.exit_model == "pro_v3":
+            log.info("Exits: Pro V3 TP1/2/3 + SL (verbatim), close %s of original",
+                     tuple(self.cfg.scaleout.ratios))
         else:
             log.info("Exits: SL=$%.0f BE=$%.0f lock_act=$%.0f trail_act=$%.0f trail_dist=$%.0f",
                      self.cfg.exits.sl_loss_usdt, self.cfg.exits.breakeven_usdt,
@@ -313,20 +320,26 @@ class Bridge:
                 adx_at_entry=float(last.get("adx", 0)),
             )
             self.trade_ids[symbol] = trade_id
-            # Arm scale-out exit state (no-op in trail mode)
-            if self.cfg.exit_model == "scaleout":
-                atr_v = float(last.get("atr14", 0.0) or 0.0)
-                sc = self.cfg.scaleout
-                params = so.ScaleOutParams(sl_atr=sc.sl_atr, tp_atr=tuple(sc.tp_atr),
-                                           ratios=tuple(sc.ratios), be_after_tp1=sc.be_after_tp1)
-                self.scale[symbol] = so.init_levels(sig.side, pos.entry_price, atr_v, params)
+            # Arm exit tracking (no-op in trail mode)
+            if self.cfg.exit_model in ("scaleout", "pro_v3"):
                 self.orig_base[symbol] = pos.base_amount
                 self.realized[symbol] = 0.0
                 self.legs[symbol] = []
-                stx = self.scale[symbol]
-                log.info("%s: scale-out armed entry=%.4f ATR=%.4f SL=%.4f TP=%s",
-                         symbol, pos.entry_price, atr_v, stx.sl_price,
-                         [round(x, 4) for x in stx.tp_px])
+                self.tp_seen[symbol] = set()
+                if self.cfg.exit_model == "scaleout":
+                    atr_v = float(last.get("atr14", 0.0) or 0.0)
+                    sc = self.cfg.scaleout
+                    params = so.ScaleOutParams(sl_atr=sc.sl_atr, tp_atr=tuple(sc.tp_atr),
+                                               ratios=tuple(sc.ratios), be_after_tp1=sc.be_after_tp1)
+                    self.scale[symbol] = so.init_levels(sig.side, pos.entry_price, atr_v, params)
+                    stx = self.scale[symbol]
+                    log.info("%s: scale-out armed entry=%.4f ATR=%.4f SL=%.4f TP=%s",
+                             symbol, pos.entry_price, atr_v, stx.sl_price,
+                             [round(x, 4) for x in stx.tp_px])
+                else:  # pro_v3 — exits come from Pro V3's TP1/2/3 + SL webhooks
+                    log.info("%s: Pro V3 exits armed entry=%.4f — awaiting TP1/2/3 + SL "
+                             "(close %s of original)", symbol, pos.entry_price,
+                             tuple(self.cfg.scaleout.ratios))
             # Telegram alert (fire-and-forget)
             asyncio.create_task(notify.notify_open(pos))
             self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(sig.detected_at_bar_ts),
@@ -338,27 +351,127 @@ class Bridge:
         self.pending[symbol] = new_pending
 
     async def webhook_consumer_loop(self):
-        """Drain inbound Pro V3 webhooks into the EMA9-retest pending queue."""
+        """Drain inbound Pro V3 webhooks. buy/sell -> entry pipeline;
+        tp1/tp2/tp3/sl -> Pro V3 exit handler (event-driven, verbatim)."""
         log.info("Webhook consumer started")
         while not self._stopped:
             sig = await self.signal_queue.get()
-            symbol = sig.symbol_key
+            symbol, action = sig.symbol_key, sig.action
             if symbol not in self.pending:
-                log.warning("webhook: %s not enabled — dropping", symbol)
+                log.warning("webhook: %s not enabled — dropping %s", symbol, action)
                 continue
+
+            # ----- Pro V3 EXIT events -----
+            if action in ("tp1", "tp2", "tp3", "sl"):
+                await self._handle_exit_action(symbol, action)
+                continue
+            if action in ("reversal_buy", "reversal_sell"):
+                # Defensive: a reversal closes the current position; the matching
+                # buy/sell alert opens the new one through the normal entry gate.
+                await self._handle_exit_action(symbol, "sl")
+                continue
+
+            # ----- ENTRY events (buy/sell) -----
+            side = "long" if action == "buy" else "short"
             df = self.bars.get(symbol)
             if df is None or len(df) == 0:
-                log.warning("webhook: %s has no bars yet — dropping %s signal", symbol, sig.side)
+                log.warning("webhook: %s has no bars yet — dropping %s", symbol, action)
+                continue
+            if not self.cfg.entry.require_retest:
+                await self._open_on_signal(symbol, side, df)
                 continue
             ts = df.index[-1]
-            self.pending[symbol].append(PendingSignal(symbol, sig.side, ts, len(df) - 1))
-            log.info("%s: PRO V3 %s webhook -> pending (anchor bar %s)", symbol, sig.side, ts)
-            self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(ts),
+            self.pending[symbol].append(PendingSignal(symbol, side, ts, len(df) - 1))
+            log.info("%s: PRO V3 %s webhook -> pending (anchor bar %s)", symbol, side, ts)
+            self.db.log_signal(symbol=symbol, side=side, bar_time=str(ts),
                                outcome="detected",
                                detected_at=datetime.now(timezone.utc).isoformat())
-            # Check retest against the latest closed bar immediately (matches the
-            # replica path, which runs process_pending right after enqueue).
             await self.process_pending(symbol, df)
+
+    async def _handle_exit_action(self, symbol: str, action: str):
+        """Execute a Pro V3 exit webhook (tp1/tp2/tp3/sl) on the open position.
+
+        Scaling is the configured per-TP fraction of the ORIGINAL size
+        (scaleout.ratios, e.g. 50/25/25). tp3 and sl always flatten whatever
+        remains. No bridge-computed levels — Pro V3 owns the exit prices.
+        """
+        pos = self.executor.positions.get(symbol)
+        if pos is None:
+            log.info("%s: Pro V3 %s but no open position — ignoring", symbol, action)
+            return
+        seen = self.tp_seen.setdefault(symbol, set())
+        if action in seen:
+            log.info("%s: Pro V3 %s already processed — ignoring duplicate", symbol, action)
+            return
+        seen.add(action)
+
+        # tp3 / sl flatten the remainder; tp1/tp2 close their fraction of original.
+        if action in ("tp3", "sl"):
+            res = await self.executor.reduce_position(symbol, pos.base_amount, action)
+            if res is not None:
+                self._book_leg(symbol, pos, res, action)
+            self._finalize_scaleout(symbol, pos)
+            return
+
+        ratios = {"tp1": self.cfg.scaleout.ratios[0], "tp2": self.cfg.scaleout.ratios[1]}
+        res = await self.executor.reduce_position(symbol, ratios[action] * self.orig_base[symbol], action)
+        if res is not None:
+            self._book_leg(symbol, pos, res, action)
+        if not self.executor.is_open(symbol):
+            self._finalize_scaleout(symbol, pos)
+
+    def _book_leg(self, symbol: str, pos, res, reason: str):
+        exit_p, filled = res.avg_price, res.filled_size
+        leg_pnl = ((exit_p - pos.entry_price) if pos.side == "long"
+                   else (pos.entry_price - exit_p)) * filled
+        self.realized[symbol] = self.realized.get(symbol, 0.0) + leg_pnl
+        frac = round(filled / self.orig_base.get(symbol, filled), 4) if self.orig_base.get(symbol) else 1.0
+        self.legs.setdefault(symbol, []).append((frac, exit_p, reason))
+        log.info("%s: %s leg %.4f @ $%.4f  pnl=$%+.2f", symbol, reason, filled, exit_p, leg_pnl)
+
+    async def _open_on_signal(self, symbol: str, side: str, df: pd.DataFrame):
+        """Open a position immediately on a raw Pro V3 webhook (no retest/filters)."""
+        last = df.iloc[-1]
+        last_ts = df.index[-1]
+        now = datetime.now(timezone.utc).isoformat()
+        if self.executor.is_open(symbol):
+            log.info("%s: PRO V3 %s — position already open, skipping (one at a time)", symbol, side)
+            self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts),
+                               outcome="skipped_open", detected_at=now)
+            return
+        log.info("%s: PRO V3 %s webhook -> ENTER (raw signal)", symbol, side)
+        pos = await self.executor.open_position(symbol, side)
+        if pos is None:
+            log.error("%s: open_position failed for %s", symbol, side)
+            return
+        trade_id = self.db.log_trade(
+            symbol=symbol, side=side, entry_price=pos.entry_price,
+            margin_usdt=pos.margin_usdt, leverage=pos.leverage,
+            base_amount=pos.base_amount, notional=pos.notional,
+            opened_at=now, bar_time_open=str(last_ts),
+            slope_pct=float(last.get("slope_pct", 0)),
+            body_atr_ratio=float(last.get("body_atr_ratio", 0)),
+            adx_at_entry=float(last.get("adx", 0)),
+        )
+        self.trade_ids[symbol] = trade_id
+        atr_v = float(last.get("atr14", 0.0) or 0.0)
+        sc = self.cfg.scaleout
+        params = so.ScaleOutParams(sl_atr=sc.sl_atr, tp_atr=tuple(sc.tp_atr),
+                                   ratios=tuple(sc.ratios), be_after_tp1=sc.be_after_tp1)
+        self.scale[symbol] = so.init_levels(side, pos.entry_price, atr_v, params)
+        self.orig_base[symbol] = pos.base_amount
+        self.realized[symbol] = 0.0
+        self.legs[symbol] = []
+        stx = self.scale[symbol]
+        log.info("%s: scale-out armed entry=%.4f ATR=%.4f SL=%.4f TP=%s",
+                 symbol, pos.entry_price, atr_v, stx.sl_price,
+                 [round(x, 4) for x in stx.tp_px])
+        self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts),
+                           outcome="fired", ema9=float(last.get("ema9", 0)),
+                           slope_pct=float(last.get("slope_pct", 0)),
+                           body_atr_ratio=float(last.get("body_atr_ratio", 0)),
+                           detected_at=now)
+        asyncio.create_task(notify.notify_open(pos))
 
     async def _scaleout_tick(self, symbol: str, pos, mark: float):
         """One scale-out evaluation for an open position; executes partial closes."""
@@ -393,23 +506,25 @@ class Bridge:
             last_reason = legs[-1][2]
         else:
             wavg, last_reason = pos.entry_price, "unknown"
-        max_tp = self.scale[symbol].max_tp_reached if symbol in self.scale else 0
+        max_tp = (self.scale[symbol].max_tp_reached if symbol in self.scale
+                  else sum(1 for _, _, r in legs if r.startswith("tp")))
+        reason = f"{self.cfg.exit_model}:{last_reason}"
         tid = self.trade_ids.get(symbol)
         if tid is not None:
             self.db.update_trade_close(
                 tid, exit_price=wavg, initial_sl=None,
-                exit_reason=f"scaleout:{last_reason}", pnl_usdt=total_pnl,
+                exit_reason=reason, pnl_usdt=total_pnl,
                 pnl_pct_account=total_pnl / self.cfg.initial_collateral_usdc * 100,
                 duration_secs=int(time.time() - pos.opened_at), max_state=max_tp,
                 closed_at=datetime.now(timezone.utc).isoformat())
             del self.trade_ids[symbol]
-        log.info("%s: scale-out CLOSED total_pnl=$%+.2f legs=%d avg_exit=$%.4f max_tp=%d",
-                 symbol, total_pnl, len(legs), wavg, max_tp)
+        log.info("%s: CLOSED (%s) total_pnl=$%+.2f legs=%d avg_exit=$%.4f max_tp=%d",
+                 symbol, reason, total_pnl, len(legs), wavg, max_tp)
         asyncio.create_task(notify.notify_close(
             symbol, pos.side, pos.entry_price, wavg, total_pnl,
-            f"scaleout:{last_reason}", int(time.time() - pos.opened_at), max_tp,
+            reason, int(time.time() - pos.opened_at), max_tp,
             starting_collateral=self.cfg.initial_collateral_usdc))
-        for d in (self.scale, self.orig_base, self.realized, self.legs):
+        for d in (self.scale, self.orig_base, self.realized, self.legs, self.tp_seen):
             d.pop(symbol, None)
 
     async def position_check_loop(self):
@@ -423,6 +538,8 @@ class Bridge:
                 if self.cfg.exit_model == "scaleout":
                     await self._scaleout_tick(symbol, pos, mark)
                     continue
+                if self.cfg.exit_model == "pro_v3":
+                    continue  # exits are driven by Pro V3 TP/SL webhooks, not ticked
                 decision = state_step(pos, mark, self.cfg.exits)
                 if decision.close:
                     result = await self.executor.close_position(symbol, decision.reason)

@@ -151,11 +151,16 @@ async def notify_startup(cfg, restored: Optional[list] = None) -> None:
             f"body{cfg.entry.block_body_band}  noSun"
         ),
     ]
-    if getattr(cfg, "exit_model", "trail") == "scaleout":
+    _exit_model = getattr(cfg, "exit_model", "trail")
+    if _exit_model == "scaleout":
         sc = cfg.scaleout
         lines.append(
             f"Exits: scale-out SL={sc.sl_atr:g}×ATR  "
             f"TP={sc.tp_atr}×ATR  ratios={sc.ratios}  BE-after-TP1"
+        )
+    elif _exit_model == "pro_v3":
+        lines.append(
+            f"Exits: Pro V3 TP1/2/3 + SL (verbatim)  close {tuple(cfg.scaleout.ratios)}"
         )
     else:
         lines.append(

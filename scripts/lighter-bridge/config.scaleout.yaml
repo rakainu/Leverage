@@ -8,7 +8,7 @@ connection:
   initial_collateral_usdc: 2000
 
 signal_source: webhook        # real Pro V3 webhooks, not the replica
-exit_model: scaleout
+exit_model: pro_v3            # exits driven by Pro V3's own TP1/2/3 + SL alerts (verbatim)
 
 symbols:
   SOL:                        # SOL only — ZEC had no edge (FINDINGS.md)
@@ -17,24 +17,24 @@ symbols:
     margin_usdt: 250
     leverage: 30
 
-# Entry: same EMA9 retest gate the validated backtest used.
+# Entry: EMA9 retest only. Extra filters OFF (kept here, set to 0/empty so they're
+# easy to re-enable if Rich wants more selectivity later: slope 0.12 / body 0.3-0.6 / Sunday).
 entry:
   timeframe: "5m"
-  min_abs_slope_pct: 0.12
-  block_body_band: [0.3, 0.6]
-  block_weekdays: [6]
+  require_retest: true        # keep the EMA(9) retest entry
+  min_abs_slope_pct: 0.0      # OFF (was 0.12)
+  block_body_band: null       # OFF (was [0.3, 0.6])
+  block_weekdays: []          # OFF (was [6] = Sunday)
   ema_period: 9
   retest_overshoot_pct: 0.2
   slope_lookback_bars: 3
   retest_timeout_bars: 6
 
-# Scale-out exits (interior-optimum region from the SL sweep).
+# Exits: Pro V3's own TP1/TP2/TP3 + SL (verbatim, event-driven via webhooks).
+# `ratios` = fraction of the ORIGINAL position closed at TP1 / TP2 / TP3 (tp3 & sl
+# always flatten the remainder). The sl_atr/tp_atr fields are unused in pro_v3 mode.
 scaleout:
-  sl_atr: 3.5
-  tp_atr: [1.0, 2.0, 3.0]
-  ratios: [0.34, 0.33, 0.33]
-  be_after_tp1: true
-  atr_period: 14
+  ratios: [0.5, 0.25, 0.25]   # 50% at TP1, 25% at TP2, 25% (remainder) at TP3
 
 webhook:
   enabled: true

@@ -22,10 +22,14 @@ from fastapi.responses import JSONResponse
 log = logging.getLogger("webhook")
 
 
+ALLOWED_ACTIONS = {"buy", "sell", "tp1", "tp2", "tp3", "sl",
+                   "reversal_buy", "reversal_sell"}
+
+
 @dataclass
 class InboundSignal:
     symbol_key: str   # bridge symbol name, e.g. "SOL"
-    side: str         # "long" | "short"
+    action: str       # buy|sell|tp1|tp2|tp3|sl|reversal_buy|reversal_sell
 
 
 def _symbol_key(raw_symbol: str, known: set[str]) -> str | None:
@@ -54,16 +58,15 @@ def build_app(queue: "asyncio.Queue[InboundSignal]", secret: str,
         if secret and body.get("secret") != secret:
             return JSONResponse({"error": "invalid secret"}, status_code=401)
         action = str(body.get("action", "")).lower()
-        if action not in ("buy", "sell"):
+        if action not in ALLOWED_ACTIONS:
             return JSONResponse({"error": f"action '{action}' not allowed"}, status_code=400)
         key = _symbol_key(str(body.get("symbol", "")), known_symbols)
         if key is None:
             return JSONResponse({"error": f"symbol '{body.get('symbol')}' not enabled"},
                                 status_code=400)
-        side = "long" if action == "buy" else "short"
-        await queue.put(InboundSignal(symbol_key=key, side=side))
-        log.info("webhook: %s %s queued", key, side)
-        return {"queued": True, "symbol": key, "side": side}
+        await queue.put(InboundSignal(symbol_key=key, action=action))
+        log.info("webhook: %s %s queued", key, action)
+        return {"queued": True, "symbol": key, "action": action}
 
     return app
 

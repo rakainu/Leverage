@@ -27,6 +27,7 @@ class EntryConfig:
     retest_overshoot_pct: float
     slope_lookback_bars: int
     retest_timeout_bars: int
+    require_retest: bool = True   # False = take the raw Pro V3 webhook immediately (no retest/filters)
 
 
 @dataclass
@@ -137,6 +138,7 @@ def load_config(path: str | Path) -> BridgeConfig:
         retest_overshoot_pct=float(raw["entry"].get("retest_overshoot_pct", 0.2)),
         slope_lookback_bars=int(raw["entry"].get("slope_lookback_bars", 3)),
         retest_timeout_bars=int(raw["entry"].get("retest_timeout_bars", 6)),
+        require_retest=bool(raw["entry"].get("require_retest", True)),
     )
 
     exits = ExitConfig(**{k: float(v) for k, v in raw["exits"].items()}) if raw.get("exits") else None
