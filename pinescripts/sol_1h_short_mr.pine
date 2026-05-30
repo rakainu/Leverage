@@ -1,0 +1,67 @@
+//@version=6
+// SOL 1h Short-Only Mean-Reversion (z-score fade) — 2026-05-30
+// Fades overbought +2.5 sigma rips back to the 20-bar mean, only in non-trending
+// regimes (ADX <= 35). SHORT-ONLY (the long side loses on SOL — see research log).
+// Hard ATR stop, mean-reversion TP, 48-bar time stop. Maker limit entry at the
+// signal bar close.
+//
+// Backtest (honest Python engine, BloFin fees+slippage+funding, SOL 1h 180d):
+//   PF 1.50 | WR 59% | avgR +0.227 | maxDD 4.4% | n=59 | OOS PF 1.47
+//   Survives 2-3x cost stress (PF 1.32). CAVEAT: 59<80 trades, t-stat 1.51,
+//   does NOT generalize to BTC/ETH/ZEC -> treat as a PAPER forward-test hypothesis.
+//
+// NOTE: TradingView's strategy fills won't match the Python engine bar-for-bar;
+// the Python engine (scripts/scalping/analysis/sol_strategy_2026-05-30) is the
+// source of truth for the reported metrics. This script is for visual confirmation
+// and for emitting webhook alerts to the BloFin paper bridge.
+
+strategy("SOL 1h Short MR", overlay=true, default_qty_type=strategy.percent_of_equity,
+         default_qty_value=100, commission_type=strategy.commission.percent,
+         commission_value=0.06, slippage=3, process_orders_on_close=true,
+         calc_on_every_tick=false, initial_capital=1000)
+
+// ---------------- Inputs ----------------
+zLen      = input.int(20,   "Z-score / mean length")
+zEntry    = input.float(2.5, "Z entry threshold (sigma)", step=0.05)
+adxLen    = input.int(14,   "ADX length")
+adxMax    = input.float(35, "Max ADX (range-regime gate)", step=1)
+atrLen    = input.int(14,   "ATR length")
+slAtr     = input.float(2.0, "Stop = ATR x", step=0.25)
+maxBars   = input.int(48,   "Time stop (bars)")
+riskPct   = input.float(1.0, "Risk % of equity per trade", step=0.25)
+
+// ---------------- Indicators ----------------
+basis = ta.sma(close, zLen)
+dev   = ta.stdev(close, zLen)
+z     = dev == 0 ? 0.0 : (close - basis) / dev
+atrv  = ta.atr(atrLen)
+
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+
+// ---------------- Entry logic (SHORT ONLY) ----------------
+shortSignal = z >= zEntry and adx <= adxMax and not na(basis)
+
+slPrice = strategy.position_avg_price + slAtr * atrv   // hard stop above entry
+tpPrice = basis                                        // revert to the mean
+
+// Webhook payload for the BloFin paper bridge (entry carries its own SL/TP)
+alertMsg = '{"strategy":"sol_1h_short_mr","symbol":"SOL-USDT","action":"sell",' +
+           '"type":"limit","price":' + str.tostring(close, "#.####") +
+           ',"sl":' + str.tostring(close + slAtr * atrv, "#.####") +
+           ',"tp":' + str.tostring(basis, "#.####") + ',"tf":"1h"}'
+
+if shortSignal and strategy.position_size == 0
+    strategy.entry("S", strategy.short, limit=close, alert_message=alertMsg)
+
+// ---------------- Exits ----------------
+if strategy.position_size < 0
+    strategy.exit("X", from_entry="S", stop=slPrice, limit=tpPrice,
+                  alert_message='{"strategy":"sol_1h_short_mr","symbol":"SOL-USDT","action":"close"}')
+    // time stop
+    if bar_index - strategy.opentrades.entry_bar_index(0) >= maxBars
+        strategy.close("S", comment="time", alert_message='{"strategy":"sol_1h_short_mr","symbol":"SOL-USDT","action":"close"}')
+
+// ---------------- Visuals ----------------
+plot(basis, "Mean (TP)", color=color.new(color.blue, 0))
+bgcolor(adx <= adxMax ? color.new(color.green, 92) : na, title="Range regime")
+plotchar(shortSignal and strategy.position_size == 0, "Short signal", "▼", location.abovebar, color.red, size=size.tiny)
