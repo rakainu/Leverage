@@ -113,20 +113,21 @@ class WebhookConfig:
 class LoopConfig:
     bar_poll_interval_s: int = 30
     position_check_interval_s: int = 5
-    # WS mark-feed watchdog thresholds (see incidents 2026-05-23 / 2026-05-25).
-    # The Lighter SDK's per-market order-book listener has no reconnect: when a
-    # socket drops, its task dies silently and that symbol's mark freezes. The
-    # watchdog heals it in-process:
-    #   reconnect_s: rebuild JUST that symbol's WS (stop_tracking + track_market)
-    #                — also triggered immediately if the listener task is dead.
-    #   warn_s:      informational log threshold below reconnect.
-    #   fatal_s:     last resort — exit so Docker restarts the whole process
-    #                (only reached if in-process reconnect keeps failing).
-    # ZEC/SOL trade ~14×/min, so a healthy WS ticks the mid every 5–10s.
-    mark_reconnect_s: int = 60
+    # Mark price feed (REST order-book snapshot polling — NOT the WS delta
+    # stream). The Lighter SDK's WS order-book listener applies deltas by
+    # re-sorting the whole book on every message, which pegged a CPU core and
+    # starved the event loop (incident 2026-05-31). This strategy only samples
+    # the mid every position_check_interval_s, so a small periodic REST snapshot
+    # gives identical execution at ~zero CPU and removes the whole WS-lifecycle
+    # failure class (keepalive drops, reconnect churn, subscribe flakiness).
+    #   mark_poll_interval_s: how often to refresh each market's book snapshot.
+    #   mark_stale_warn_s:    informational log threshold (no successful poll).
+    #   mark_stale_fatal_s:   last resort — if a symbol with an OPEN position has
+    #                         had no successful poll past this, exit so Docker
+    #                         restarts the process with a clean client.
+    mark_poll_interval_s: int = 3
     mark_stale_warn_s: int = 180
     mark_stale_fatal_s: int = 300
-    mark_watchdog_interval_s: int = 30
 
 
 @dataclass
@@ -197,7 +198,10 @@ def load_config(path: str | Path) -> BridgeConfig:
 
     exits = ExitConfig(**{k: float(v) for k, v in raw["exits"].items()}) if raw.get("exits") else None
     pine = PineConfig(**raw.get("pine", {}))
-    loop = LoopConfig(**raw.get("loop", {}))
+    # Filter to known fields so a stale config key (e.g. a renamed/removed
+    # watchdog knob left in an old yaml) never breaks startup.
+    _loop_keys = set(LoopConfig.__dataclass_fields__)
+    loop = LoopConfig(**{k: v for k, v in raw.get("loop", {}).items() if k in _loop_keys})
     log_cfg = LogConfig(**raw.get("log", {}))
 
     signal_source = raw.get("signal_source", "replica")

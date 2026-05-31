@@ -126,17 +126,19 @@ class Bridge:
         self.paper = lighter.PaperClient(self.api,
                                          initial_collateral_usdc=self.cfg.initial_collateral_usdc)
 
-        # Subscribe to live order book for each enabled symbol. A single market
-        # whose WS subscription fails (e.g. Lighter has no stable book for it —
-        # BTC market_id=1 times out) must NOT kill the whole multi-coin bridge:
-        # skip it with a warning and trade the markets that did come up.
+        # Load each enabled market's order book via a REST snapshot (NOT a WS
+        # delta subscription — see LoopConfig for why). track_market_snapshot
+        # both loads the market_config (sizing depends on this) and pulls the
+        # first book snapshot. The mark is then kept fresh by mark_poll_loop().
+        # A single market whose snapshot fails (e.g. BTC market_id=1) must NOT
+        # kill the whole multi-coin bridge: skip it and trade the rest.
         configured = {n: s for n, s in self.cfg.symbols.items() if s.enabled}
         enabled: dict = {}
         for name, s in configured.items():
-            log.info("%s: subscribing to live order book (market_id=%d)", name, s.market_id)
-            ok = await self._subscribe_with_retry(name, s.market_id, retries=5)
+            log.info("%s: loading order-book snapshot (market_id=%d)", name, s.market_id)
+            ok = await self._snapshot_with_retry(name, s.market_id, retries=5)
             if not ok:
-                log.error("%s: order-book subscribe FAILED after retries (market_id=%d) — skipping",
+                log.error("%s: order-book snapshot FAILED after retries (market_id=%d) — skipping",
                           name, s.market_id)
                 continue
             enabled[name] = s
@@ -196,7 +198,7 @@ class Bridge:
         tasks.append(asyncio.create_task(self.position_check_loop()))
         tasks.append(asyncio.create_task(self.heartbeat_loop()))
         tasks.append(asyncio.create_task(self.daily_summary_loop()))
-        tasks.append(asyncio.create_task(self.mark_freshness_loop()))
+        tasks.append(asyncio.create_task(self.mark_poll_loop(enabled)))
         # Webhook signal source (real Pro V3) — listener + queue consumer.
         if self.cfg.webhook.enabled:
             from .webhook import build_app, run_server   # lazy: fastapi/uvicorn only in webhook mode
@@ -211,7 +213,8 @@ class Bridge:
                      self.cfg.webhook.path, sorted(known))
         log.info(
             "Bridge running. %d bar-feed tasks + position checker + heartbeat + "
-            "daily summary + mark-feed watchdog.", len(self.feeds),
+            "daily summary + mark poller (REST snapshot every %ds).",
+            len(self.feeds), self.cfg.loop.mark_poll_interval_s,
         )
 
         try:
@@ -952,7 +955,7 @@ class Bridge:
     async def _verify_mark_feed_live(self, enabled: dict, deadline_s: int):
         """Block until every enabled symbol has reported a non-zero mark price,
         or fail fast. Refusing to start blind is intentional — see incident
-        2026-05-23 (position #16 stuck on a never-updating WS).
+        2026-05-23 (position #16 stuck on a never-updating feed).
         """
         log.info("Verifying live mark feed for %d symbol(s) (deadline %ds)...",
                  len(enabled), deadline_s)
@@ -974,181 +977,87 @@ class Bridge:
                       not_ready, deadline_s)
             try:
                 await notify.notify_error(
-                    f"Bridge startup aborted: WS mark feed silent for {not_ready}"
+                    f"Bridge startup aborted: mark feed silent for {not_ready}"
                 )
             except Exception:
                 pass
-            raise RuntimeError(f"WS mark feed dead for {not_ready}")
+            raise RuntimeError(f"mark feed dead for {not_ready}")
         log.info("Mark feed verified live for all symbols.")
 
-    def _listener_dead(self, market_id: int) -> bool:
-        """True if the SDK's per-market order-book WS listener is gone or its
-        task has finished.
+    async def _snapshot_with_retry(self, name: str, market_id: int,
+                                   retries: int = 5) -> bool:
+        """Load a market's order book via a REST snapshot, with retries.
 
-        Lighter's PaperOrderBookListener opens one socket per market with no
-        reconnect (live.py): on a dropped connection the task ends and the
-        exception is swallowed by its done-callback, leaving the listener
-        registered but inert. A finished/absent task is the deterministic
-        signal that the socket is dead and the mark will freeze — caught
-        faster than waiting for the value to age out.
+        track_market_snapshot() loads the market_config (sizing depends on it)
+        AND pulls the first book snapshot — no WebSocket is opened. The mark is
+        kept fresh thereafter by mark_poll_loop(). Returns True once the book
+        has a usable mid, False if all attempts fail.
         """
-        if self.paper is None:
-            return False
-        listener = self.paper._live_listeners.get(market_id)
-        if listener is None:
-            return True  # not tracked at all → needs (re)subscribe
-        task = getattr(listener, "_task", None)
-        return task is None or task.done()
-
-    @staticmethod
-    def _watchdog_action(age: float | None, dead: bool,
-                         reconnect_s: int, fatal_s: int) -> str:
-        """Pure decision for the mark-feed watchdog. Returns one of:
-          "fatal"     — listener task dead AND still no fresh mark past fatal_s.
-          "reconnect" — listener task dead (rebuild that one symbol's WS).
-          "ok"        — feed healthy, OR market merely quiet.
-
-        IMPORTANT (2026-05-30 fix): mark "age" is time-since-the-mid-VALUE-changed,
-        not time-since-the-last-WS-message. A low-volatility symbol (e.g. ZEC on
-        Lighter) can hold a constant mid for many minutes while its WS is perfectly
-        healthy — that is indistinguishable from a dead feed by age alone. So we
-        only act on the RELIABLE failure signal: the SDK listener task actually
-        ending (`dead`, = task.done(); Lighter's listener ends on a dropped socket).
-        A quiet-but-alive feed is "ok" — never reconnect-churn or fatal-restart the
-        whole multi-coin bridge just because one symbol isn't moving.
-        """
-        if dead:
-            if age is not None and age >= fatal_s:
-                return "fatal"
-            return "reconnect"
-        return "ok"
-
-    async def _subscribe_with_retry(self, name: str, market_id: int,
-                                    retries: int = 5) -> bool:
-        """track_market with retries. Lighter's order-book listener.start() times
-        out intermittently when several markets are subscribed back-to-back; a
-        retry (after clearing any half-registered dead listener) almost always
-        succeeds. Returns True once subscribed, False if all attempts fail."""
         for attempt in range(1, retries + 1):
             try:
-                await self.paper.track_market(market_id=market_id)
-                if attempt > 1:
-                    log.info("%s: subscribed on attempt %d", name, attempt)
-                return True
+                await self.paper.track_market_snapshot(market_id=market_id)
+                book = self.paper.order_books.get(market_id)
+                if book is not None and book.mid_price:
+                    if attempt > 1:
+                        log.info("%s: snapshot OK on attempt %d", name, attempt)
+                    return True
+                raise RuntimeError("snapshot returned an empty/zero book")
             except Exception as exc:
-                log.warning("%s: subscribe attempt %d/%d failed (market_id=%d): %r",
+                log.warning("%s: snapshot attempt %d/%d failed (market_id=%d): %r",
                             name, attempt, retries, market_id, exc)
-                try:
-                    await self.paper.stop_tracking(market_id)   # clear dead listener before retry
-                except Exception:
-                    pass
                 await asyncio.sleep(min(2 * attempt, 8))
         return False
 
-    async def _reconnect_market(self, name: str, market_id: int,
-                                retries: int = 2) -> bool:
-        """Rebuild a single symbol's order-book WS in place.
+    async def mark_poll_loop(self, enabled: dict):
+        """Keep every market's mark fresh by polling a REST order-book snapshot.
 
-        stop_tracking() pops + stops the dead listener (without this, the
-        SDK's track_market() early-returns as a no-op because the dead
-        listener is still registered — the latent bug that made the old
-        warn-level re-subscribe do nothing). track_market() then opens a
-        fresh socket and re-snapshots the book. The existing order_books /
-        market_configs entries survive the swap; the new initial snapshot
-        replaces the stale book cleanly. Other symbols are untouched.
+        Pure infrastructure — does NOT gate, block, or filter any trade; the
+        state machine keeps ticking on whatever get_mark_price returns. This
+        REPLACES the old WS delta subscription + reconnect watchdog: the SDK's
+        WS path re-sorted the entire book on every delta message, pegging a CPU
+        core and starving the event loop (incident 2026-05-31). A small periodic
+        REST snapshot yields an identical mid at ~zero CPU and removes the whole
+        WS-lifecycle failure class (keepalive drops, reconnect churn, subscribe
+        flakiness).
+
+        Per tick all markets refresh concurrently (one slow market never delays
+        the others). We track each market's last SUCCESSFUL poll. As a last
+        resort, if a market with an OPEN position has had no successful poll past
+        fatal_s — so its SL/TP can't be checked on a fresh mark — exit so Docker
+        restarts with a clean client. A FLAT market that goes dark is logged but
+        never restarts the whole bridge.
         """
-        for attempt in range(1, retries + 1):
-            try:
-                await self.paper.stop_tracking(market_id)
-            except Exception as exc:
-                log.warning("%s: stop_tracking failed (attempt %d): %s",
-                            name, attempt, exc)
-            try:
-                await self.paper.track_market(market_id=market_id)
-                return True
-            except Exception as exc:
-                log.error("%s: track_market failed (attempt %d/%d): %s",
-                          name, attempt, retries, exc)
-                await asyncio.sleep(min(2 ** attempt, 5))
-        return False
-
-    async def mark_freshness_loop(self):
-        """Watchdog + self-healing supervisor for the Lighter mark feed.
-
-        Pure infrastructure. Does NOT block, modify, gate, or filter any
-        trades — the state machine keeps ticking on whatever get_mark_price
-        returns. Per check tick, for each symbol:
-          - reconnect JUST that symbol's WS in place when its listener task is
-            dead, or its mark has been frozen past reconnect_s (heals in
-            ~under a minute, without touching the other symbol);
-          - as a last resort, exit the process when the mark ages past fatal_s
-            (only reached if in-process reconnect keeps failing), so Docker
-            rebuilds everything cleanly.
-        """
-        reconnect_s = self.cfg.loop.mark_reconnect_s
+        poll_s = self.cfg.loop.mark_poll_interval_s
         warn_s = self.cfg.loop.mark_stale_warn_s
         fatal_s = self.cfg.loop.mark_stale_fatal_s
-        check_s = self.cfg.loop.mark_watchdog_interval_s
-        log.info(
-            "Mark-feed watchdog started (reconnect=%ds, warn=%ds, fatal=%ds, "
-            "check every %ds)", reconnect_s, warn_s, fatal_s, check_s,
-        )
-        last_reconnect: dict[str, float] = {}
+        log.info("Mark poller started (REST snapshot every %ds; warn=%ds fatal=%ds)",
+                 poll_s, warn_s, fatal_s)
+        last_ok: dict[str, float] = {name: time.monotonic() for name in enabled}
+        last_warn: dict[str, float] = {}
         while not self._stopped:
-            await asyncio.sleep(check_s)
+            await asyncio.sleep(poll_s)
             if self.executor is None or self.paper is None:
                 continue
-            for name in list(self.executor.symbols.keys()):
-                market_id = self.executor.symbols[name]["market_id"]
-                age = self.executor.mark_age_seconds(name)
-                dead = self._listener_dead(market_id)
-                action = self._watchdog_action(age, dead, reconnect_s, fatal_s)
-
-                if action == "reconnect":
-                    now_mono = time.monotonic()
-                    if now_mono - last_reconnect.get(name, 0.0) >= 25:
-                        if dead:
-                            reason = "WS listener task dead"
-                        elif age is None:
-                            reason = "mark never recorded since last reconnect"
-                        else:
-                            reason = f"mark stale {age:.0f}s (>= {reconnect_s}s)"
-                        log.warning("%s: %s — reconnecting market_id=%d",
-                                    name, reason, market_id)
-                        ok = await self._reconnect_market(name, market_id)
-                        last_reconnect[name] = now_mono
-                        if ok:
-                            log.info("%s: WS reconnect OK", name)
-                        else:
-                            log.error(
-                                "%s: WS reconnect failed; fatal restart will "
-                                "fire if mark stays stale past %ds.",
-                                name, fatal_s,
-                            )
-                    # Re-evaluate next tick; don't fall through to fatal on the
-                    # same tick we just rebuilt the socket.
+            names = list(self.executor.symbols.keys())
+            results = await asyncio.gather(
+                *(self.paper.refresh_order_book(self.executor.symbols[n]["market_id"])
+                  for n in names),
+                return_exceptions=True,
+            )
+            now_mono = time.monotonic()
+            for name, res in zip(names, results):
+                if not isinstance(res, Exception):
+                    last_ok[name] = now_mono
                     continue
-
-                if action == "fatal":
-                    # A stale mark only ENDANGERS something if that symbol has an
-                    # open position (its SL/TP can't be checked on a frozen mark).
-                    # If the symbol is FLAT, a chronically-flaky WS (e.g. HYPE on
-                    # Lighter keeps dropping + failing to reconnect) must NOT nuke
-                    # the whole multi-coin bridge and halt the healthy markets —
-                    # just keep retrying its socket in-process. Only the
-                    # full-process restart guarantees a fresh WS, so we reserve it
-                    # for the case where an open position is actually at risk.
-                    if not self.executor.is_open(name):
-                        log.warning(
-                            "%s: mark stale %.0fs (>= fatal %ds) but FLAT — not "
-                            "restarting the bridge; will keep reconnecting its WS.",
-                            name, age if age is not None else -1, fatal_s,
-                        )
-                        continue
-                    msg = (f"Mark for {name} (market_id={market_id}) stale "
-                           f"for {age:.0f}s (>= fatal {fatal_s}s) with an OPEN "
-                           f"position despite in-process reconnect. Exiting for "
-                           f"Docker to restart with fresh WS.")
+                stale = now_mono - last_ok.get(name, now_mono)
+                if stale >= warn_s and now_mono - last_warn.get(name, 0.0) >= 60:
+                    log.warning("%s: order-book snapshot failing for %.0fs: %r",
+                                name, stale, res)
+                    last_warn[name] = now_mono
+                if stale >= fatal_s and self.executor.is_open(name):
+                    msg = (f"Mark for {name} stale for {stale:.0f}s (>= fatal "
+                           f"{fatal_s}s) with an OPEN position — REST snapshot "
+                           f"polling keeps failing. Exiting for a clean restart.")
                     log.error(msg)
                     try:
                         await notify.notify_error(msg)
