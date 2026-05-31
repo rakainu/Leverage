@@ -1,0 +1,22 @@
+# Scalper dashboard — same image as lighter-dashboard, pointed at scalper.db.
+# Publishes loopback 127.0.0.1:8096; Traefik routes scalper.agentneo.cloud -> here.
+#   docker compose -f docker-compose.scalper.yml up -d --build
+services:
+  scalper-dashboard:
+    build: .
+    image: lighter-dashboard:latest
+    container_name: scalper-dashboard
+    restart: unless-stopped
+    volumes:
+      - /docker/scalper-paper/data:/app/data   # read-only enforced via PRAGMA query_only
+      - ./src:/app/src
+      - ./templates:/app/templates
+      - ./config.scalper.yaml:/app/config.scalper.yaml:ro
+    command: ["python", "-u", "run_dashboard.py", "--config", "config.scalper.yaml", "--host", "0.0.0.0", "--port", "8080"]
+    ports:
+      - "127.0.0.1:8096:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,63 @@
+# Scalper — regime-gated VWAP mean-reversion PAPER bridge (Lighter zero-fee).
+# Native signals (no webhooks): computes EMA-trend gate + VWAP z-score on its own
+# 15m candle feed for the 5-coin basket, long+short, FIXED notional, maker-limit
+# entry. Validated: scripts/scalping/analysis/scalp_search_2026-05-30/STRATEGY.md
+#   pooled PF 1.49 | 89% WR | 192 trades/wk | OOS 1.42 | walk-forward 4/4 |
+#   2x-slip 1.43 | all 5 coins PF>=1.33 | 10x = 0 liquidations.
+#
+# Deploy:  docker compose -f docker-compose.scalper.yml up -d --build
+# Separate DB (scalper.db) + container + Telegram bot ("Scalper") from other bridges.
+
+connection:
+  host: "https://mainnet.zklighter.elliot.ai"
+  initial_collateral_usdc: 1000        # paper starting equity
+
+signal_source: regime                  # native regime_mr signal computation
+exit_model: regime                     # fixed SL + TP (maker target) + time stop
+
+symbols:                               # market_ids on Lighter mainnet; $250 notional @ 10x
+  SOL:  { market_id: 2,  enabled: true, margin_usdt: 25, leverage: 10 }
+  ETH:  { market_id: 0,  enabled: true, margin_usdt: 25, leverage: 10 }
+  ZEC:  { market_id: 90, enabled: true, margin_usdt: 25, leverage: 10 }
+  HYPE: { market_id: 24, enabled: true, margin_usdt: 25, leverage: 10 }
+  BTC:  { market_id: 1,  enabled: true, margin_usdt: 25, leverage: 10 }   # verify id on VPS
+
+# regime_mr params (the strategy's real knobs — locked from the validated config)
+regime:
+  trend_len: 200          # EMA length for the higher-tf trend gate
+  slope_lb: 20            # slope = EMA - EMA.shift(20); sign sets the regime
+  z_period: 30            # z-score window for (Close - sessionVWAP)
+  z_entry: 1.5            # |z| threshold to fade
+  sl_atr: 2.0             # hard stop = entry -/+ 2.0*ATR
+  tp_frac: 0.3            # take-profit = 0.3 * |VWAP - limit entry|
+  max_bars: 12            # time stop (12 * 15m = 3h)
+  limit_atr: 0.25         # maker limit offset beyond close, in ATR
+  atr_period: 14
+  entry_valid_bars: 3     # cancel the resting limit if unfilled after 3 bars
+
+# Entry block: only `timeframe` is used by the regime path (drives the bar feed).
+entry:
+  timeframe: "15m"
+  min_abs_slope_pct: 0.0
+  require_retest: false
+  ema_period: 9
+  retest_overshoot_pct: 0.2
+  slope_lookback_bars: 3
+  retest_timeout_bars: 6
+
+notify:
+  startup: true          # "Scalper UP" ping on (re)start — fresh dedicated bot
+  open: true
+  close: true
+  daily: true
+
+loop:
+  bar_poll_interval_s: 30      # 15m bars — 30s poll catches new closes promptly
+  position_check_interval_s: 5 # SL/TP check on the live mark every 5s
+  mark_reconnect_s: 60         # rebuild a symbol's WS if its listener dies / mark freezes
+  mark_stale_warn_s: 300
+  mark_stale_fatal_s: 900      # last-resort full restart (harmless gap on a 15m strategy)
+
+log:
+  level: "INFO"
+  db_path: "data/scalper.db"

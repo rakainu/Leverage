@@ -1,0 +1,25 @@
+# Traefik dynamic (file-provider) config for the Scalper regime-MR dashboard.
+# Deploy: scp -> /docker/traefik-mncm/config/scalper-dash.yml  (Traefik hot-reloads)
+# Container publishes 127.0.0.1:8096 -> :8080. Basic-auth reuses the existing
+# /config/lighter.htpasswd (radk9). Own middleware name to avoid cross-file clashes.
+# Requires DNS: scalper.agentneo.cloud -> 46.202.146.30 (or a *.agentneo.cloud wildcard).
+http:
+  routers:
+    scalper-dashboard:
+      rule: "Host(`scalper.agentneo.cloud`)"
+      entryPoints:
+        - websecure
+      service: scalper-dashboard
+      middlewares:
+        - scalper-auth
+      tls:
+        certResolver: letsencrypt
+  services:
+    scalper-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8096"
+  middlewares:
+    scalper-auth:
+      basicAuth:
+        usersFile: "/config/lighter.htpasswd"

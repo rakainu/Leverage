@@ -1,0 +1,16 @@
+# Dashboard config for the Scalper regime-MR 5-coin paper bridge.
+# Same code as the Lighter dashboard, pointed at the scalper bridge's DB
+# (/docker/scalper-paper/data/scalper.db, mounted into the container).
+db_path: "data/scalper.db"
+lighter_host: "https://mainnet.zklighter.elliot.ai"
+initial_collateral_usdc: 1000
+symbols:                                  # name -> market_id (live Lighter ids)
+  SOL: 2
+  ETH: 0
+  ZEC: 90
+  HYPE: 24
+  BTC: 1
+refresh:
+  live_ms: 3000
+  static_ms: 15000
+mark_cache_ttl_s: 2.0
