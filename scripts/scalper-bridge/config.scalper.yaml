@@ -10,20 +10,20 @@
 
 connection:
   host: "https://mainnet.zklighter.elliot.ai"
-  initial_collateral_usdc: 1000        # paper starting equity
+  initial_collateral_usdc: 2000        # paper starting equity
 
 signal_source: regime                  # native regime_mr signal computation
 exit_model: regime                     # fixed SL + TP (maker target) + time stop
 
-symbols:                               # market_ids on Lighter mainnet; $250 notional @ 10x
-  SOL:  { market_id: 2,  enabled: true, margin_usdt: 25, leverage: 10 }
-  ETH:  { market_id: 0,  enabled: true, margin_usdt: 25, leverage: 10 }
-  ZEC:  { market_id: 90, enabled: true, margin_usdt: 25, leverage: 10 }
-  HYPE: { market_id: 24, enabled: true, margin_usdt: 25, leverage: 10 }
+symbols:                               # market_ids on Lighter mainnet; $6000 notional ($400 margin @ 15x)
+  SOL:  { market_id: 2,  enabled: true, margin_usdt: 400, leverage: 15 }
+  ETH:  { market_id: 0,  enabled: true, margin_usdt: 400, leverage: 15 }
+  ZEC:  { market_id: 90, enabled: true, margin_usdt: 400, leverage: 15 }
+  HYPE: { market_id: 24, enabled: true, margin_usdt: 400, leverage: 15 }
   # BTC (market_id=1) DISABLED: its Lighter order-book WS subscription times out
   # (no reliable mark feed). Backtest's weakest coin anyway (PF 1.38). Re-enable
   # if/when Lighter serves a stable BTC book. The other 4 cover the basket edge.
-  BTC:  { market_id: 1,  enabled: false, margin_usdt: 25, leverage: 10 }
+  BTC:  { market_id: 1,  enabled: false, margin_usdt: 400, leverage: 15 }
 
 # regime_mr params (the strategy's real knobs — locked from the validated config)
 regime:
