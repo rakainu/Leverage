@@ -1130,10 +1130,25 @@ class Bridge:
                     continue
 
                 if action == "fatal":
+                    # A stale mark only ENDANGERS something if that symbol has an
+                    # open position (its SL/TP can't be checked on a frozen mark).
+                    # If the symbol is FLAT, a chronically-flaky WS (e.g. HYPE on
+                    # Lighter keeps dropping + failing to reconnect) must NOT nuke
+                    # the whole multi-coin bridge and halt the healthy markets —
+                    # just keep retrying its socket in-process. Only the
+                    # full-process restart guarantees a fresh WS, so we reserve it
+                    # for the case where an open position is actually at risk.
+                    if not self.executor.is_open(name):
+                        log.warning(
+                            "%s: mark stale %.0fs (>= fatal %ds) but FLAT — not "
+                            "restarting the bridge; will keep reconnecting its WS.",
+                            name, age if age is not None else -1, fatal_s,
+                        )
+                        continue
                     msg = (f"Mark for {name} (market_id={market_id}) stale "
-                           f"for {age:.0f}s (>= fatal {fatal_s}s) despite "
-                           f"in-process reconnect. Exiting for Docker to "
-                           f"restart with fresh WS.")
+                           f"for {age:.0f}s (>= fatal {fatal_s}s) with an OPEN "
+                           f"position despite in-process reconnect. Exiting for "
+                           f"Docker to restart with fresh WS.")
                     log.error(msg)
                     try:
                         await notify.notify_error(msg)
