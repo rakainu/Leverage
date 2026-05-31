@@ -49,6 +49,9 @@
     }
     td, th { padding:6px 8px; }
     .pos { color:#34d399; } .neg { color:#f87171; } .mut { color:#9aa6b8; }
+    /* Pulsing dot on the Live status pill */
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+    .live-dot { animation: pulse 1.6s ease-in-out infinite; }
     /* Scrollable panel bodies (~6 rows for trades, ~4 for signals) */
     .scroll-6, .scroll-4 { overflow-y:auto; }
     .scroll-6 { max-height:220px; }
@@ -66,7 +69,10 @@
       <span style="background:linear-gradient(90deg,#34d399,#06b6d4); -webkit-background-clip:text; background-clip:text; color:transparent;">Lighter</span>
       <span class="mut font-normal text-base">paper bridge</span>
     </h1>
-    <span class="label">{{ cfg.symbols.keys()|join(' · ') }}</span>
+    <div class="flex items-center gap-4">
+      <div hx-get="/panel/status" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
+      <span class="label">{{ cfg.symbols.keys()|join(' · ') }}</span>
+    </div>
   </header>
 
   <!-- A: KPI strip (live). Loads once; the returned fragment self-polls and

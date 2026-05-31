@@ -103,3 +103,12 @@ class DashboardDB:
                 "FROM account_snapshot ORDER BY ts"
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def last_heartbeat_ts(self) -> str | None:
+        """Timestamp of the bridge's most recent heartbeat (account_snapshot,
+        written every ~5 min). Used for the live/stale status pill."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT ts FROM account_snapshot ORDER BY ts DESC LIMIT 1"
+            ).fetchone()
+        return row["ts"] if row else None

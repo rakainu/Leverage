@@ -37,6 +37,36 @@ _REALIZED_WINDOWS = {"day": 1, "week": 7, "month": 30}
 _SIGNAL_LOOKBACK_HOURS = 12
 
 
+def _short_age(secs: float) -> str:
+    """'45s ago' / '3m ago' / '1h 4m ago' for a heartbeat age."""
+    if secs < 60:
+        return f"{int(secs)}s ago"
+    mins = secs / 60
+    if mins < 60:
+        return f"{int(mins)}m ago"
+    hrs = mins / 60
+    return f"{int(hrs)}h {int(mins % 60)}m ago"
+
+
+def _heartbeat_status(iso: str | None) -> dict:
+    """Live/stale status from the bridge's last heartbeat. Fresh = a beat within
+    7 min (the bridge writes one every ~5 min, so this tolerates one miss)."""
+    if not iso:
+        return {"state": "starting", "ago": "", "ts": ""}
+    try:
+        dt = datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return {"state": "starting", "ago": "", "ts": iso}
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    secs = max(0.0, (datetime.now(timezone.utc) - dt).total_seconds())
+    return {
+        "state": "live" if secs < 420 else "stale",
+        "ago": _short_age(secs),
+        "ts": iso,
+    }
+
+
 def _fmt_close(iso: str | None) -> str:
     """Clock time a trade closed, as 'MM-DD HH:MM' in UTC, so a stall is obvious
     at a glance (compare the newest close time to now). Returns '—' if missing."""
@@ -127,6 +157,13 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
         return templates.TemplateResponse(
             request, "partials/closed_trades.html",
             {"trades": trades},
+        )
+
+    @app.get("/panel/status", response_class=HTMLResponse)
+    async def panel_status(request: Request):
+        return templates.TemplateResponse(
+            request, "partials/status.html",
+            {"hb": _heartbeat_status(db.last_heartbeat_ts())},
         )
 
     @app.get("/panel/exits", response_class=HTMLResponse)
