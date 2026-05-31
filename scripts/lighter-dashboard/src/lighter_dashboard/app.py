@@ -37,6 +37,20 @@ _REALIZED_WINDOWS = {"day": 1, "week": 7, "month": 30}
 _SIGNAL_LOOKBACK_HOURS = 12
 
 
+def _fmt_close(iso: str | None) -> str:
+    """Clock time a trade closed, as 'MM-DD HH:MM' in UTC, so a stall is obvious
+    at a glance (compare the newest close time to now). Returns '—' if missing."""
+    if not iso:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return "—"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%m-%d %H:%M")
+
+
 def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
     db = DashboardDB(cfg.db_path)
     mark_cache = marks if marks is not None else MarkCache(
@@ -107,9 +121,12 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
 
     @app.get("/panel/closed", response_class=HTMLResponse)
     async def panel_closed(request: Request):
+        trades = db.closed_trades(limit=20)
+        for t in trades:
+            t["closed_hm"] = _fmt_close(t.get("closed_at"))
         return templates.TemplateResponse(
             request, "partials/closed_trades.html",
-            {"trades": db.closed_trades(limit=20)},
+            {"trades": trades},
         )
 
     @app.get("/panel/exits", response_class=HTMLResponse)

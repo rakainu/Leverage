@@ -2,7 +2,7 @@
   <div class="label label--rule mb-2">Recent closed trades</div>
   <div class="scroll-6">
     <table class="w-full">
-      <thead><tr><th>id</th><th>sym</th><th>side</th><th>entry</th><th>exit</th><th>pnl</th><th>reason</th></tr></thead>
+      <thead><tr><th>id</th><th>sym</th><th>side</th><th>entry</th><th>exit</th><th>pnl</th><th>reason</th><th>closed (UTC)</th></tr></thead>
       <tbody>
         {% for t in trades %}
         <tr>
@@ -12,6 +12,7 @@
           <td>{{ "%.4f"|format(t.exit_price) if t.exit_price is not none else "—" }}</td>
           <td class="{{ 'pos' if (t.pnl_usdt or 0) >= 0 else 'neg' }}">{{ "%+.2f"|format(t.pnl_usdt) if t.pnl_usdt is not none else "—" }}</td>
           <td class="mut">{{ t.exit_reason }}</td>
+          <td class="mut" title="{{ t.closed_at }}">{{ t.closed_hm }}</td>
         </tr>
         {% endfor %}
       </tbody>
