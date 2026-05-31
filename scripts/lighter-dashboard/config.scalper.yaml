@@ -3,7 +3,7 @@
 # (/docker/scalper-paper/data/scalper.db, mounted into the container).
 db_path: "data/scalper.db"
 lighter_host: "https://mainnet.zklighter.elliot.ai"
-initial_collateral_usdc: 1000
+initial_collateral_usdc: 2000   # MUST match bridge config.scalper.yaml (else phantom equity/DD)
 symbols:                                  # name -> market_id (live Lighter ids)
   SOL: 2
   ETH: 0
