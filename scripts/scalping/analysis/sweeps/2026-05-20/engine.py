@@ -146,14 +146,26 @@ def fetch_ohlcv(
 
     all_bars: list[list[float]] = []
     cursor = end_ms
-    page_size = 100 if exchange == "blofin" else 1000
+    page_size = 1000  # both blofin and binance accept up to 1000 candles/page
+    fails = 0            # consecutive failures at the current cursor
+    MAX_FAILS = 8        # give up paging after this many retries (no infinite loop)
     while cursor > start_ms:
         try:
             chunk = client.fetch_ohlcv(symbol, timeframe=timeframe, limit=page_size,
                                        params={"until": cursor})
+            fails = 0
         except Exception as exc:
-            print(f"    fetch failed @{cursor}: {exc}", file=sys.stderr)
-            time.sleep(1.0)
+            fails += 1
+            msg = repr(exc)
+            # Cloudflare challenge / geo block -> exponential backoff, then bail
+            backoff = min(30.0, 1.5 ** fails)
+            short = "cloudflare/challenge" if ("challenge" in msg.lower() or "restricted" in msg.lower()) else msg[:120]
+            print(f"    fetch failed @{cursor} (try {fails}/{MAX_FAILS}, sleep {backoff:.0f}s): {short}",
+                  file=sys.stderr)
+            if fails >= MAX_FAILS:
+                print(f"    giving up at cursor {cursor} after {fails} fails; returning partial", file=sys.stderr)
+                break
+            time.sleep(backoff)
             continue
         if not chunk:
             break
