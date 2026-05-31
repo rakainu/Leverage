@@ -65,7 +65,7 @@ def run(family: str, df: pd.DataFrame, tf: str, side: str, params: dict,
 
 # Sensible STAGE-1 defaults per family (loose enough to fire often on LTFs).
 DEFAULTS = {
-    "regime_mr":       dict(trend_len=200, z_period=30, z_entry=1.5, sl_atr=1.5, tp_frac=0.4, max_bars=12, limit_atr=0.25),
+    "regime_mr":       dict(trend_len=200, z_period=30, z_entry=1.5, sl_atr=2.0, tp_frac=0.3, max_bars=12, limit_atr=0.25),
     "bb_revert":       dict(length=20, mult=2.0, sl_atr=1.5, tp_frac=1.0, max_bars=24),
     "kc_revert":       dict(length=20, mult=2.0, sl_atr=1.5, tp_frac=1.0, max_bars=24),
     "rsi_snapback":    dict(rsi_p=14, lo=30, hi=70, sl_atr=1.5, tp_atr=1.5, max_bars=24),

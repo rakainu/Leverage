@@ -24,11 +24,16 @@ rare-signal strategy. Test aggressive ideas honestly; backtest is the filter.
 - mr_fade2 3m/5m: overfit (HYPE 5m OOS PF 0.80; ZEC 3m WF fold 0.22). Rejected.
 - rsi_snapback SOL 15m both: PF 1.50, but 6/wk, SOL-specific, 1 losing WF fold.
 - **regime_mr basket (WINNER):** fade VWAP extensions WITH the EMA200 trend, 5-coin
-  15m. Pooled 186/wk, PF 1.22, 81% WR, exp +0.037%/trade, hold 18m. **All 5 coins
-  profitable** (1.05–1.40). IS 1.20 / OOS 1.28. WF 1.19/1.08/1.34/1.36. 2× slip →
-  1.15. 10x = 0 liq; $250@10x = +$443/26wk, maxDD $92.
+  15m. Tuned config stop 2.0·ATR / TP 0.3×dist: pooled **192/wk, PF 1.49, 89% WR**,
+  exp +0.061%/trade, hold 14m. **All 5 coins profitable** (1.33–1.74). IS 1.52 /
+  OOS 1.42. WF 1.42/1.46/1.63/1.49. 2× slip → 1.43. 10x = 0 liq; $250@10x =
+  +$756/26wk, maxDD $54. (Base sl1.5/tp0.4 was 186/wk PF 1.22 81% WR.)
 - ADX/trend-strength gating cut frequency without lifting PF — chop isn't the main
-  driver; edge is inherently thin (breakeven WR ≈ 77%, ~4pt cushion).
+  driver; edge is thin (breakeven WR ≈ 84%, ~4.7pt cushion vs 88.5% actual).
+- **Exit management (engine extended, regression-clean):** breakeven-trail is inert
+  (holds ~1 bar, TP ≪ stop so +1R BE trigger never reached); partial-TP/runner
+  HURTS (PF→1.07 — MR move done at VWAP, no trend to harvest). PF lift came from
+  stop/TP GEOMETRY, not exit mgmt.
 
 ## Honest verdict
 No cross-coin-generalizing 3m/5m scalp edge exists in this data. The real edge is

@@ -124,6 +124,12 @@ class Signal:
     limit_dist: float = 0.0       # for limit entries: offset from decision close (favorable)
     max_bars: int = 0             # time stop in bars (0 => none)
     trail_atr: float = 0.0        # if >0, trail stop at trail_atr * atr_at_entry behind peak (close-based)
+    # --- optional exit management (defaults reproduce single-TP behavior exactly) ---
+    be_trigger_r: float = 0.0     # arm breakeven stop once CLOSE has moved +be_trigger_r * sl_dist in favor (0 => off)
+    be_offset_r: float = 0.0      # where the BE stop sits, in units of sl_dist beyond entry (+ = locks a small gain)
+    tp1_frac: float = 1.0         # fraction exited at tp_dist (TP1). 1.0 => full exit (current behavior)
+    tp2_dist: float = 0.0         # runner target for the (1-tp1_frac) remainder, PRICE units (0 => none)
+    be_after_tp1: bool = False    # move stop to breakeven for the runner once TP1 fills
     meta: dict = field(default_factory=dict)
 
 
@@ -247,18 +253,28 @@ def simulate(df: pd.DataFrame, signals: list[Signal], costs: Costs, risk: RiskCf
         liq_move_frac = (1.0 / eff_leverage) * (1 - risk.maint_margin_rate)
         liq_price = entry_price * (1 - liq_move_frac) if side > 0 else entry_price * (1 + liq_move_frac)
 
-        # ---- WALK FORWARD TO EXIT ----
-        exit_i = exit_price = None
-        exit_reason = ""
-        peak = entry_price  # for trailing
+        # ---- WALK FORWARD TO EXIT (supports breakeven-trail + scale-out) ----
+        # legs: list of (qty_fraction, exit_price, fee_rate, reason). Defaults
+        # (tp1_frac=1, tp2_dist=0, be_trigger_r=0) collapse to a single-leg exit
+        # identical to the original single-TP simulator.
+        peak = entry_price            # for ATR trailing
         trail_sl = sl_price
+        be_sl = sg.be_offset_r * sg.sl_dist  # offset magnitude (price units)
         mae_frac = 0.0
         last = n - 1
         max_bars = sg.max_bars if sg.max_bars > 0 else (last - entry_i)
+        tp2_price = None
+        if sg.tp1_frac < 1.0 and sg.tp2_dist > 0:
+            tp2_price = entry_price + sg.tp2_dist if side > 0 else entry_price - sg.tp2_dist
+
+        legs: list[tuple] = []
+        rem = 1.0                     # remaining position fraction
+        tp1_done = False
+        be_armed = False
+        exit_i = None
 
         for j in range(entry_i, min(entry_i + max_bars + 1, n)):
             hi, lo, cl = H[j], L[j], C[j]
-            # adverse excursion tracking
             if side > 0:
                 mae_frac = max(mae_frac, (entry_price - lo) / entry_price)
             else:
@@ -266,41 +282,59 @@ def simulate(df: pd.DataFrame, signals: list[Signal], costs: Costs, risk: RiskCf
 
             cur_sl = trail_sl
             hit_sl = (lo <= cur_sl) if side > 0 else (hi >= cur_sl)
-            hit_tp = (tp_price is not None) and ((hi >= tp_price) if side > 0 else (lo <= tp_price))
-
-            if hit_sl:  # STOP WINS on a both-hit bar (conservative)
+            if hit_sl:  # STOP WINS on a both-hit bar (conservative); closes remainder
                 raw = cur_sl
-                exit_price = raw * (1 - slip) if side > 0 else raw * (1 + slip)
-                exit_i = j; exit_reason = "sl" if cur_sl == sl_price else "trail_sl"
-                exit_fee_rate = taker
-                break
-            if hit_tp:
-                exit_price = tp_price  # maker limit, no slippage
-                exit_i = j; exit_reason = "tp"; exit_fee_rate = maker
-                break
+                px = raw * (1 - slip) if side > 0 else raw * (1 + slip)
+                reason = "sl" if cur_sl == sl_price else ("be" if be_armed and not tp1_done else "trail_sl")
+                legs.append((rem, px, taker, reason)); rem = 0.0; exit_i = j; break
 
-            # update trailing stop off the CLOSE only (live bridge can't see wicks)
-            if sg.trail_atr > 0:
+            hit_tp1 = (tp_price is not None) and (not tp1_done) and ((hi >= tp_price) if side > 0 else (lo <= tp_price))
+            if hit_tp1:
+                if sg.tp1_frac >= 1.0 or tp2_price is None:
+                    legs.append((rem, tp_price, maker, "tp")); rem = 0.0; exit_i = j; break
+                legs.append((sg.tp1_frac, tp_price, maker, "tp1"))
+                rem -= sg.tp1_frac; tp1_done = True
+                if sg.be_after_tp1:  # lock breakeven on the runner
+                    trail_sl = max(trail_sl, entry_price) if side > 0 else min(trail_sl, entry_price)
+                    be_armed = True
+                # runner continues; TP2 handled on subsequent bars (conservative)
+
+            if tp1_done and tp2_price is not None:
+                hit_tp2 = (hi >= tp2_price) if side > 0 else (lo <= tp2_price)
+                if hit_tp2:
+                    legs.append((rem, tp2_price, maker, "tp2")); rem = 0.0; exit_i = j; break
+
+            # arm breakeven stop off the CLOSE (live bridge can't see wicks)
+            if sg.be_trigger_r > 0 and not be_armed:
+                fav = (cl - entry_price) if side > 0 else (entry_price - cl)
+                if fav >= sg.be_trigger_r * sg.sl_dist:
+                    be_level = entry_price + be_sl if side > 0 else entry_price - be_sl
+                    trail_sl = max(trail_sl, be_level) if side > 0 else min(trail_sl, be_level)
+                    be_armed = True
+
+            if sg.trail_atr > 0:  # ATR trailing off the CLOSE
                 if side > 0:
-                    peak = max(peak, cl)
-                    new_sl = peak - sg.trail_atr
-                    trail_sl = max(trail_sl, new_sl)
+                    peak = max(peak, cl); trail_sl = max(trail_sl, peak - sg.trail_atr)
                 else:
-                    peak = min(peak, cl)
-                    new_sl = peak + sg.trail_atr
-                    trail_sl = min(trail_sl, new_sl)
+                    peak = min(peak, cl); trail_sl = min(trail_sl, peak + sg.trail_atr)
 
-        if exit_i is None:  # ran out of bars or hit time stop -> exit at last seen close
-            j = min(entry_i + max_bars, n - 1)
-            exit_i = j
+        if rem > 0:  # ran out of bars / time stop -> close remainder at last close
+            j = exit_i if exit_i is not None else min(entry_i + max_bars, n - 1)
             raw = C[j]
-            exit_price = raw * (1 - slip) if side > 0 else raw * (1 + slip)
-            exit_reason = "time" if sg.max_bars > 0 else "eod"
-            exit_fee_rate = taker
+            px = raw * (1 - slip) if side > 0 else raw * (1 + slip)
+            legs.append((rem, px, taker, "time" if sg.max_bars > 0 else "eod"))
+            exit_i = j; rem = 0.0
 
-        # ---- PnL ----
-        gross = (exit_price - entry_price) * qty if side > 0 else (entry_price - exit_price) * qty
-        fees = notional * entry_fee_rate + (qty * exit_price) * exit_fee_rate
+        # ---- PnL (aggregate over legs) ----
+        gross = 0.0
+        exit_fees = 0.0
+        for frac, px, fee_rate, _ in legs:
+            leg_qty = qty * frac
+            gross += (px - entry_price) * leg_qty if side > 0 else (entry_price - px) * leg_qty
+            exit_fees += (leg_qty * px) * fee_rate
+        exit_price = legs[-1][1]               # representative (final leg) for the record
+        exit_reason = legs[-1][3]
+        fees = notional * entry_fee_rate + exit_fees
         bars_held = exit_i - entry_i
         hours = bars_held * tf_minutes / 60.0
         funding = notional * (costs.funding_pct_per_8h / 100.0) * (hours / 8.0)

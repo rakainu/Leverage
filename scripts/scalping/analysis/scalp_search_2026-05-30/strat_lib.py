@@ -384,7 +384,9 @@ def orb_fade(df, side="both", open_bars=12, sl_atr=1.0, tp_frac=0.7, atr_p=14,
 
 
 def regime_mr(df, side="both", trend_len=200, slope_lb=20, z_period=30, z_entry=1.5,
-              sl_atr=1.5, tp_frac=0.4, max_bars=12, limit_atr=0.25, atr_p=14):
+              sl_atr=1.5, tp_frac=0.4, max_bars=12, limit_atr=0.25, atr_p=14,
+              be_trigger_r=0.0, be_offset_r=0.0, tp1_frac=1.0, tp2_mult=0.0,
+              be_after_tp1=False):
     """Regime-gated VWAP mean-reversion: fade extensions ONLY in the direction of
     the higher-timeframe trend (EMA(trend_len) slope). Buy dips back to session
     VWAP in an uptrend; sell rips in a downtrend. Maker limit entry. This is the
@@ -409,7 +411,10 @@ def regime_mr(df, side="both", trend_len=200, slope_lb=20, z_period=30, z_entry=
             continue
         sigs.append(Signal(i=i, side=side_val, sl_dist=sl_atr * av[i], tp_dist=tp_dist,
                            entry_style="limit" if limit_atr > 0 else "market",
-                           limit_dist=limit_atr * av[i], max_bars=max_bars))
+                           limit_dist=limit_atr * av[i], max_bars=max_bars,
+                           be_trigger_r=be_trigger_r, be_offset_r=be_offset_r,
+                           tp1_frac=tp1_frac, tp2_dist=tp2_mult * tp_dist,
+                           be_after_tp1=be_after_tp1))
     return sigs
 
 
