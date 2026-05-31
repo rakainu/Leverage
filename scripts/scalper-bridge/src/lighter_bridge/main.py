@@ -126,12 +126,31 @@ class Bridge:
         self.paper = lighter.PaperClient(self.api,
                                          initial_collateral_usdc=self.cfg.initial_collateral_usdc)
 
-        # Subscribe to live order book for each enabled symbol
-        enabled = {n: s for n, s in self.cfg.symbols.items() if s.enabled}
-        for name, s in enabled.items():
+        # Subscribe to live order book for each enabled symbol. A single market
+        # whose WS subscription fails (e.g. Lighter has no stable book for it —
+        # BTC market_id=1 times out) must NOT kill the whole multi-coin bridge:
+        # skip it with a warning and trade the markets that did come up.
+        configured = {n: s for n, s in self.cfg.symbols.items() if s.enabled}
+        enabled: dict = {}
+        for name, s in configured.items():
             log.info("%s: subscribing to live order book (market_id=%d)", name, s.market_id)
-            await self.paper.track_market(market_id=s.market_id)
+            ok = await self._subscribe_with_retry(name, s.market_id, retries=5)
+            if not ok:
+                log.error("%s: order-book subscribe FAILED after retries (market_id=%d) — skipping",
+                          name, s.market_id)
+                continue
+            enabled[name] = s
             self.pending[name] = []
+        if not enabled:
+            try:
+                await notify.notify_error("Scalper startup aborted: no market order books came up")
+            except Exception:
+                pass
+            raise RuntimeError("no markets subscribed — cannot run")
+        if len(enabled) < len(configured):
+            dropped = sorted(set(configured) - set(enabled))
+            log.warning("Running with %d/%d markets (dropped: %s)",
+                        len(enabled), len(configured), dropped)
 
         # Build the executor with sizing config
         exec_symbols = {
@@ -1003,6 +1022,28 @@ class Bridge:
                 return "fatal"
             return "reconnect"
         return "ok"
+
+    async def _subscribe_with_retry(self, name: str, market_id: int,
+                                    retries: int = 5) -> bool:
+        """track_market with retries. Lighter's order-book listener.start() times
+        out intermittently when several markets are subscribed back-to-back; a
+        retry (after clearing any half-registered dead listener) almost always
+        succeeds. Returns True once subscribed, False if all attempts fail."""
+        for attempt in range(1, retries + 1):
+            try:
+                await self.paper.track_market(market_id=market_id)
+                if attempt > 1:
+                    log.info("%s: subscribed on attempt %d", name, attempt)
+                return True
+            except Exception as exc:
+                log.warning("%s: subscribe attempt %d/%d failed (market_id=%d): %r",
+                            name, attempt, retries, market_id, exc)
+                try:
+                    await self.paper.stop_tracking(market_id)   # clear dead listener before retry
+                except Exception:
+                    pass
+                await asyncio.sleep(min(2 * attempt, 8))
+        return False
 
     async def _reconnect_market(self, name: str, market_id: int,
                                 retries: int = 2) -> bool:
