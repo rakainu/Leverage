@@ -32,8 +32,10 @@ from .marks import MarkCache
 _TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 _STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
 
-# Selectable realized-PnL windows -> lookback in days.
-_REALIZED_WINDOWS = {"day": 1, "week": 7, "month": 30}
+# Selectable realized-PnL windows -> lookback in days (None = all-time).
+_REALIZED_WINDOWS = {"day": 1, "week": 7, "month": 30, "all": None}
+# Human-readable period label shown on the Realized card.
+_WINDOW_LABELS = {"day": "24h", "week": "7d", "month": "30d", "all": "all-time"}
 _SIGNAL_LOOKBACK_HOURS = 12
 
 
@@ -116,17 +118,21 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
         )
 
     @app.get("/panel/kpis", response_class=HTMLResponse)
-    async def panel_kpis(request: Request, window: str = "day"):
+    async def panel_kpis(request: Request, window: str = "all"):
         if window not in _REALIZED_WINDOWS:
-            window = "day"
+            window = "all"
         pnls = db.closed_pnls()                       # all-time: equity, PF, drawdown
         positions = await _open_positions_with_pnl()
         realized_all = sum(pnls)
         unrealized = sum(p["upnl"] or 0 for p in positions)
         equity = cfg.initial_collateral_usdc + realized_all + unrealized
         snaps = [s["portfolio_value"] for s in db.snapshots()] + [equity]
-        cutoff = (datetime.now(timezone.utc)
-                  - timedelta(days=_REALIZED_WINDOWS[window])).isoformat()
+        days = _REALIZED_WINDOWS[window]
+        if days is None:                              # all-time: no lower bound
+            cutoff = "1970-01-01T00:00:00+00:00"
+        else:
+            cutoff = (datetime.now(timezone.utc)
+                      - timedelta(days=days)).isoformat()
         win_net, win_n, win_wins = db.realized_since(cutoff)
         ctx = {
             "equity": equity,
@@ -136,6 +142,7 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
             "realized_n": win_n,
             "realized_win_pct": (win_wins / win_n * 100) if win_n else 0,
             "window": window,
+            "period_label": _WINDOW_LABELS[window],
             "profit_factor": stats.profit_factor(pnls),
             "max_dd": stats.max_drawdown(snaps),
             "poll_s": cfg.live_ms // 1000,

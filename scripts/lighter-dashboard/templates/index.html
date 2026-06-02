@@ -76,8 +76,8 @@
   </header>
 
   <!-- A: KPI strip (live). Loads once; the returned fragment self-polls and
-       carries the selected Realized window (day/week/month) forward. -->
-  <div hx-get="/panel/kpis?window=day" hx-trigger="load" class="mb-4"></div>
+       carries the selected Realized window (day/week/month/all) forward. -->
+  <div hx-get="/panel/kpis?window=all" hx-trigger="load" class="mb-4"></div>
 
   <!-- B: Equity curve (static) -->
   <div hx-get="/panel/equity" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s" class="mb-4"></div>

@@ -9,7 +9,8 @@ symbols:                                  # name -> market_id (live Lighter ids)
   ETH: 0
   ZEC: 90
   HYPE: 24
-  BTC: 1
+  # BTC (market_id 1) disabled in the bridge (dead Lighter book) — keep it off
+  # the dashboard too so the header ticker list matches the live basket.
 refresh:
   live_ms: 3000
   static_ms: 15000
