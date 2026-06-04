@@ -36,3 +36,25 @@ def test_unrealized_pnl_long():
 
 def test_unrealized_pnl_short():
     assert stats.unrealized_pnl("short", entry=100.0, mark=95.0, base=2.0) == 10.0
+
+
+def test_breakeven_win_rate_basic():
+    # avg win 34.47, avg loss -125.29 -> ~78.4% needed to break even
+    assert math.isclose(stats.breakeven_win_rate(34.47, -125.29), 0.7838, abs_tol=1e-3)
+
+
+def test_breakeven_win_rate_symmetric():
+    assert stats.breakeven_win_rate(100.0, -100.0) == 0.5
+
+
+def test_breakeven_win_rate_no_wins_is_none():
+    assert stats.breakeven_win_rate(0.0, -10.0) is None
+
+
+def test_breakeven_win_rate_no_losses_is_none():
+    assert stats.breakeven_win_rate(10.0, 0.0) is None
+
+
+def test_breakeven_win_rate_accepts_loss_magnitude():
+    # tolerate avg_loss passed as a positive magnitude
+    assert stats.breakeven_win_rate(100.0, 100.0) == 0.5

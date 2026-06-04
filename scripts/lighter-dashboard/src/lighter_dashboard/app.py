@@ -43,6 +43,21 @@ _REALIZED_WINDOWS = {"day": 1, "week": 7, "month": 30, "all": None}
 # Human-readable period label shown on the Realized card.
 _WINDOW_LABELS = {"day": "24h", "week": "7d", "month": "30d", "all": "all-time"}
 _SIGNAL_LOOKBACK_HOURS = 12
+# Per-coin scoreboard: below this trade count, a coin's verdict is "new" (too
+# small a sample to keep/cut). PF thresholds mirror the strategy kill-switch.
+_SCOREBOARD_MIN_SAMPLE = 10
+
+
+def _keep_cut(n: int, pf, cushion) -> str:
+    """At-a-glance keep/cut verdict for a coin. 'new' until enough trades, then
+    by profit factor (kill-switch thresholds): keep >=1.15, cut <=0.95, else watch."""
+    if n < _SCOREBOARD_MIN_SAMPLE:
+        return "new"
+    if pf is None or pf >= 1.15:
+        return "keep"
+    if pf <= 0.95:
+        return "cut"
+    return "watch"
 
 
 def _short_age(secs: float) -> str:
@@ -210,9 +225,21 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
         rows = []
         for r in db.per_symbol_stats():
             n, wins = r["n"], (r["wins"] or 0)
-            rows.append({**r, "win_pct": (wins / n * 100) if n else 0})
+            win_pct = (wins / n * 100) if n else 0
+            gl = r.get("gross_loss") or 0
+            pf = (r["gross_win"] / gl) if gl > 0 else None
+            be = stats.breakeven_win_rate(r.get("avg_win") or 0,
+                                          r.get("avg_loss") or 0)
+            be_pct = be * 100 if be is not None else None
+            cushion = (win_pct - be_pct) if be_pct is not None else None
+            rows.append({
+                **r, "win_pct": win_pct, "pf": pf,
+                "be_pct": be_pct, "cushion": cushion,
+                "verdict": _keep_cut(n, pf, cushion),
+            })
         return templates.TemplateResponse(
-            request, "partials/per_symbol.html", {"rows": rows}
+            request, "partials/per_symbol.html",
+            {"rows": rows, "min_sample": _SCOREBOARD_MIN_SAMPLE},
         )
 
     @app.get("/panel/signals", response_class=HTMLResponse)

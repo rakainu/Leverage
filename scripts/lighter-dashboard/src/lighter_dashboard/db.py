@@ -50,9 +50,13 @@ class DashboardDB:
             rows = c.execute(
                 "SELECT symbol, COUNT(*) AS n, "
                 "SUM(CASE WHEN pnl_usdt > 0 THEN 1 ELSE 0 END) AS wins, "
-                "ROUND(SUM(pnl_usdt), 2) AS net "
+                "ROUND(SUM(pnl_usdt), 2) AS net, "
+                "ROUND(SUM(CASE WHEN pnl_usdt > 0 THEN pnl_usdt ELSE 0 END), 2) AS gross_win, "
+                "ROUND(-SUM(CASE WHEN pnl_usdt <= 0 THEN pnl_usdt ELSE 0 END), 2) AS gross_loss, "
+                "ROUND(AVG(CASE WHEN pnl_usdt > 0 THEN pnl_usdt END), 2) AS avg_win, "
+                "ROUND(AVG(CASE WHEN pnl_usdt <= 0 THEN pnl_usdt END), 2) AS avg_loss "
                 "FROM trade_log WHERE pnl_usdt IS NOT NULL "
-                "GROUP BY symbol ORDER BY symbol"
+                "GROUP BY symbol ORDER BY net DESC"
             ).fetchall()
         return [dict(r) for r in rows]
 

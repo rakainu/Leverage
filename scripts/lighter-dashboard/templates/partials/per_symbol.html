@@ -1,15 +1,37 @@
 <div class="panel">
-  <div class="label label--rule mb-2">Per-symbol stats</div>
+  <div class="label label--rule mb-2">Per-coin scoreboard <span class="muted">— keep / cut by edge</span></div>
   <table class="w-full">
-    <thead><tr><th>sym</th><th>n</th><th>win%</th><th>net</th></tr></thead>
+    <thead><tr>
+      <th></th><th>sym</th><th>n</th><th>win%</th><th>PF</th>
+      <th>net</th><th>be%</th><th>cushion</th>
+    </tr></thead>
     <tbody>
       {% for r in rows %}
       <tr>
-        <td>{{ r.symbol }}</td><td>{{ r.n }}</td>
+        <td title="{{ r.verdict }}">
+          {%- if r.verdict == 'keep' -%}🟢
+          {%- elif r.verdict == 'cut' -%}🔴
+          {%- elif r.verdict == 'watch' -%}🟡
+          {%- else -%}⚪{%- endif -%}
+        </td>
+        <td><b>{{ r.symbol }}</b></td>
+        <td>{{ r.n }}</td>
         <td>{{ "%.0f"|format(r.win_pct) }}%</td>
-        <td class="{{ 'pos' if (r.net or 0) >= 0 else 'neg' }}">${{ "%+.0f"|format(r.net) }}</td>
+        <td>{% if r.pf is none %}<span class="muted">∞</span>{% else %}{{ "%.2f"|format(r.pf) }}{% endif %}</td>
+        <td class="{{ 'pos' if (r.net or 0) >= 0 else 'neg' }}">${{ "%+.0f"|format(r.net or 0) }}</td>
+        <td class="muted">{% if r.be_pct is none %}—{% else %}{{ "%.0f"|format(r.be_pct) }}%{% endif %}</td>
+        <td class="{{ 'pos' if (r.cushion or 0) >= 0 else 'neg' }}">
+          {%- if r.cushion is none %}—{% else %}{{ "%+.0f"|format(r.cushion) }}pt{% endif -%}
+        </td>
       </tr>
       {% endfor %}
+      {% if not rows %}
+      <tr><td colspan="8" class="muted">No closed trades yet.</td></tr>
+      {% endif %}
     </tbody>
   </table>
+  <div class="muted mt-2" style="font-size:11px">
+    🟢 keep (PF≥1.15) · 🟡 watch · 🔴 cut (PF≤0.95) · ⚪ &lt;{{ min_sample }} trades.
+    cushion = win% − breakeven%; positive = real edge.
+  </div>
 </div>

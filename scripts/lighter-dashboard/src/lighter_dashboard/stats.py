@@ -21,6 +21,21 @@ def profit_factor(pnls: list[float]) -> Optional[float]:
     return gross_win / gross_loss
 
 
+def breakeven_win_rate(avg_win: float, avg_loss: float) -> Optional[float]:
+    """Win rate needed to break even given average win/loss sizes.
+
+    breakeven = |avg_loss| / (avg_win + |avg_loss|). Accepts avg_loss as a
+    negative value or a positive magnitude. Returns None when there are no wins
+    or no losses (the ratio is undefined). Compare a coin's ACTUAL win rate to
+    this: actual > breakeven = positive edge; below = bleeding.
+    """
+    win = abs(avg_win)
+    loss = abs(avg_loss)
+    if win == 0 or loss == 0:
+        return None
+    return loss / (win + loss)
+
+
 def max_drawdown(equity_series: list[float]) -> float:
     """Largest peak-to-trough drop in the series. Returns <= 0.0."""
     peak = float("-inf")
