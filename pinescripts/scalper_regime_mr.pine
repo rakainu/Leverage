@@ -21,9 +21,14 @@
 //   entry : maker limit at close -/+ 0.25*ATR
 //   SL    : 2.0*ATR ;  TP : 0.3*|VWAP - limit| ;  time stop : 12 bars
 //   limit cancelled if unfilled after 3 bars
+// calc_on_every_tick=true so the regime/z readout updates live (this is a monitor,
+// not a backtest). Signal MARKERS still confirm on bar close — the regime/longSig/
+// shortSig flags use confirmed values — matching the bridge, which only acts on
+// closed 15m bars.
 strategy("Scalper regime_mr (viz)", overlay=true, pyramiding=0,
      default_qty_type=strategy.percent_of_equity, default_qty_value=100,
-     calc_on_order_fills=true, max_labels_count=500, max_lines_count=500)
+     calc_on_order_fills=true, calc_on_every_tick=true,
+     max_labels_count=500, max_lines_count=500)
 
 // ---------------- inputs (locked to the validated config) ----------------
 gTrend  = "Regime / signal"
