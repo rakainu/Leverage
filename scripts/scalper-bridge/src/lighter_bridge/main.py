@@ -1157,39 +1157,46 @@ class Bridge:
         WS-lifecycle failure class (keepalive drops, reconnect churn, subscribe
         flakiness).
 
-        Per tick all markets refresh concurrently (one slow market never delays
-        the others). We track each market's last SUCCESSFUL poll. As a last
-        resort, if a market with an OPEN position has had no successful poll past
-        fatal_s — so its SL/TP can't be checked on a fresh mark — exit so Docker
-        restarts with a clean client. A FLAT market that goes dark is logged but
-        never restarts the whole bridge.
+        Markets are refreshed ROUND-ROBIN — one order-book request every `gap`
+        seconds — NOT all-at-once. Bursting N concurrent requests every few
+        seconds is what tripped Lighter's WAF on the order-book path with the
+        10-coin basket (incident 2026-06-04, same class as the candle-feed burst):
+        each market is polled once per `mark_poll_interval_s`, but the requests are
+        spread evenly so the steady rate (~N / interval per sec) stays at the
+        proven-safe ~1.3 req/s the 4-coin basket ran at for days. We track each
+        market's last SUCCESSFUL poll; if a market with an OPEN position has had no
+        successful poll past fatal_s — so its SL/TP can't be checked on a fresh
+        mark — exit so Docker restarts with a clean client. A FLAT market that goes
+        dark is logged but never restarts the whole bridge.
         """
-        poll_s = self.cfg.loop.mark_poll_interval_s
+        period_s = self.cfg.loop.mark_poll_interval_s   # per-market refresh period
         warn_s = self.cfg.loop.mark_stale_warn_s
         fatal_s = self.cfg.loop.mark_stale_fatal_s
-        log.info("Mark poller started (REST snapshot every %ds; warn=%ds fatal=%ds)",
-                 poll_s, warn_s, fatal_s)
-        last_ok: dict[str, float] = {name: time.monotonic() for name in enabled}
+        names = list(self.executor.symbols.keys())
+        n = max(1, len(names))
+        gap = max(0.2, period_s / n)                     # time between single requests
+        log.info("Mark poller started (round-robin: 1 req/%.1fs, each market every "
+                 "%ds; warn=%ds fatal=%ds)", gap, period_s, warn_s, fatal_s)
+        last_ok: dict[str, float] = {name: time.monotonic() for name in names}
         last_warn: dict[str, float] = {}
+        idx = 0
         while not self._stopped:
-            await asyncio.sleep(poll_s)
+            await asyncio.sleep(gap)
             if self.executor is None or self.paper is None:
                 continue
-            names = list(self.executor.symbols.keys())
-            results = await asyncio.gather(
-                *(self.paper.refresh_order_book(self.executor.symbols[n]["market_id"])
-                  for n in names),
-                return_exceptions=True,
-            )
-            now_mono = time.monotonic()
-            for name, res in zip(names, results):
-                if not isinstance(res, Exception):
-                    last_ok[name] = now_mono
-                    continue
+            name = names[idx % n]
+            idx += 1
+            mid = self.executor.symbols[name]["market_id"]
+            try:
+                # per-request timeout so one hung call can't stall the round-robin
+                await asyncio.wait_for(self.paper.refresh_order_book(mid), timeout=5.0)
+                last_ok[name] = time.monotonic()
+            except Exception as exc:
+                now_mono = time.monotonic()
                 stale = now_mono - last_ok.get(name, now_mono)
                 if stale >= warn_s and now_mono - last_warn.get(name, 0.0) >= 60:
                     log.warning("%s: order-book snapshot failing for %.0fs: %r",
-                                name, stale, res)
+                                name, stale, exc)
                     last_warn[name] = now_mono
                 if stale >= fatal_s and self.executor.is_open(name):
                     msg = (f"Mark for {name} stale for {stale:.0f}s (>= fatal "

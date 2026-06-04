@@ -72,7 +72,11 @@ loop:
                                # on /candlesticks (incident 2026-06-04). Still catches
                                # a 15m close within ~1.5min.
   position_check_interval_s: 5 # SL/TP check on the live mark every 5s
-  mark_poll_interval_s: 3      # REST order-book snapshot poll for the mark (no WS delta stream)
+  mark_poll_interval_s: 8      # PER-MARKET order-book refresh period. Polls are
+                               # round-robin (1 req/~0.8s for 10 coins = ~1.25/s),
+                               # NOT a 10-wide burst — keeps total REST rate at the
+                               # proven-safe ~1.3/s and off Lighter's WAF (incident
+                               # 2026-06-04). Marks stay <=8s old (fine for 2ATR stops).
   mark_stale_warn_s: 300
   mark_stale_fatal_s: 900      # last-resort full restart (only if OPEN position + polls failing)
 
