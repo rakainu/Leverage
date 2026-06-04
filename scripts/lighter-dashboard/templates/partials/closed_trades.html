@@ -2,7 +2,7 @@
   <div class="label label--rule mb-2">Recent closed trades</div>
   <div class="scroll-6">
     <table class="w-full">
-      <thead><tr><th>id</th><th>sym</th><th>side</th><th>entry</th><th>exit</th><th>pnl</th><th>reason</th><th>closed (UTC)</th></tr></thead>
+      <thead><tr><th>id</th><th>sym</th><th>side</th><th>entry</th><th>exit</th><th>pnl</th><th>reason</th><th>closed ({{ tz_label }})</th></tr></thead>
       <tbody>
         {% for t in trades %}
         <tr>

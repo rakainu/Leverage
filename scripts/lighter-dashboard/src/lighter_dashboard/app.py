@@ -18,6 +18,12 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+# All wall-clock times in the UI are shown in Rich's local Pacific time.
+# America/Los_Angeles auto-tracks DST, so this stays correct (PST in winter,
+# PDT in summer) without any config. DB timestamps remain UTC ISO strings.
+_LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -69,9 +75,15 @@ def _heartbeat_status(iso: str | None) -> dict:
     }
 
 
+def _tz_label() -> str:
+    """Live Pacific abbreviation ('PST' / 'PDT') for column headers."""
+    return datetime.now(_LOCAL_TZ).strftime("%Z")
+
+
 def _fmt_close(iso: str | None) -> str:
-    """Clock time a trade closed, as 'MM-DD HH:MM' in UTC, so a stall is obvious
-    at a glance (compare the newest close time to now). Returns '—' if missing."""
+    """Clock time a trade closed, as 'MM-DD HH:MM' in local Pacific time, so a
+    stall is obvious at a glance (compare the newest close time to now).
+    Returns '—' if missing."""
     if not iso:
         return "—"
     try:
@@ -80,7 +92,20 @@ def _fmt_close(iso: str | None) -> str:
         return "—"
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).strftime("%m-%d %H:%M")
+    return dt.astimezone(_LOCAL_TZ).strftime("%m-%d %H:%M")
+
+
+def _fmt_hm(iso: str | None) -> str:
+    """Just the 'HH:MM' clock time in local Pacific, for the signal log."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_LOCAL_TZ).strftime("%H:%M")
 
 
 def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
@@ -163,7 +188,7 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
             t["closed_hm"] = _fmt_close(t.get("closed_at"))
         return templates.TemplateResponse(
             request, "partials/closed_trades.html",
-            {"trades": trades},
+            {"trades": trades, "tz_label": _tz_label()},
         )
 
     @app.get("/panel/status", response_class=HTMLResponse)
@@ -194,9 +219,12 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
     async def panel_signals(request: Request):
         cutoff = (datetime.now(timezone.utc)
                   - timedelta(hours=_SIGNAL_LOOKBACK_HOURS)).isoformat()
+        signals = db.signals(limit=50, since_iso=cutoff)
+        for s in signals:
+            s["bar_hm"] = _fmt_hm(s.get("bar_time"))
         return templates.TemplateResponse(
             request, "partials/signals.html",
-            {"signals": db.signals(limit=50, since_iso=cutoff)},
+            {"signals": signals, "tz_label": _tz_label()},
         )
 
     @app.get("/panel/equity", response_class=HTMLResponse)
