@@ -149,6 +149,14 @@ class NotifyConfig:
 
 
 @dataclass
+class ControlConfig:
+    """Inbound Telegram control listener (per-ticker entry switch).
+    Off by default so other bridges sharing this code are unaffected; the
+    Scalper config opts in. Authorizes against TELEGRAM_CHAT_ID (env)."""
+    telegram_enabled: bool = False
+
+
+@dataclass
 class BridgeConfig:
     host: str
     initial_collateral_usdc: float
@@ -166,6 +174,7 @@ class BridgeConfig:
     regime: "RegimeConfig" = field(default_factory=lambda: RegimeConfig())
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
+    control: ControlConfig = field(default_factory=ControlConfig)
 
 
 def load_config(path: str | Path) -> BridgeConfig:
@@ -222,6 +231,7 @@ def load_config(path: str | Path) -> BridgeConfig:
         webhook.secret = os.environ["BRIDGE_SECRET"]
 
     notify = NotifyConfig(**raw.get("notify", {}))
+    control = ControlConfig(**raw.get("control", {}))
 
     if exit_model == "trail" and exits is None:
         raise ValueError("exit_model 'trail' requires an 'exits:' config block")
@@ -244,4 +254,5 @@ def load_config(path: str | Path) -> BridgeConfig:
         regime=regime,
         webhook=webhook,
         notify=notify,
+        control=control,
     )

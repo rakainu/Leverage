@@ -54,6 +54,15 @@ CREATE TABLE IF NOT EXISTS account_snapshot (
     n_open          INTEGER,
     cum_pnl         REAL
 );
+
+-- Per-ticker entry switch. Only explicit overrides are stored; a symbol absent
+-- from this table defaults to ENABLED (entries allowed). Persisted so a /off
+-- survives a bridge restart.
+CREATE TABLE IF NOT EXISTS ticker_switch (
+    symbol          TEXT    PRIMARY KEY,
+    entries_enabled INTEGER NOT NULL,
+    updated_at      TEXT
+);
 """
 
 
@@ -147,6 +156,26 @@ class TradeLogDB:
             "trail_exits": trail or 0,
             "ceiling_hits": ceiling or 0,
         }
+
+    # ----- per-ticker entry switch -----
+
+    def get_switches(self) -> dict:
+        """Return {symbol: bool} of explicit entry-switch overrides.
+        Symbols absent here default to enabled (handled by the caller)."""
+        cur = self.conn.execute("SELECT symbol, entries_enabled FROM ticker_switch")
+        return {sym: bool(en) for sym, en in cur.fetchall()}
+
+    def set_switch(self, symbol: str, enabled: bool):
+        """Upsert a symbol's entry switch."""
+        from datetime import datetime, timezone
+        self.conn.execute(
+            "INSERT INTO ticker_switch (symbol, entries_enabled, updated_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(symbol) DO UPDATE SET entries_enabled=excluded.entries_enabled, "
+            "updated_at=excluded.updated_at",
+            (symbol, 1 if enabled else 0, datetime.now(timezone.utc).isoformat()),
+        )
+        self.conn.commit()
 
     def close(self):
         self.conn.close()

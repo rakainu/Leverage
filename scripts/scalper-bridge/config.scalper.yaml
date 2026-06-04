@@ -10,20 +10,28 @@
 
 connection:
   host: "https://mainnet.zklighter.elliot.ai"
-  initial_collateral_usdc: 2000        # paper starting equity
+  initial_collateral_usdc: 6000        # paper start: $500 margin x 10 coins ($5000) + ~20% buffer
 
 signal_source: regime                  # native regime_mr signal computation
 exit_model: regime                     # fixed SL + TP (maker target) + time stop
 
-symbols:                               # market_ids on Lighter mainnet; $6000 notional ($400 margin @ 15x)
-  SOL:  { market_id: 2,  enabled: true, margin_usdt: 400, leverage: 15 }
-  ETH:  { market_id: 0,  enabled: true, margin_usdt: 400, leverage: 15 }
-  ZEC:  { market_id: 90, enabled: true, margin_usdt: 400, leverage: 15 }
-  HYPE: { market_id: 24, enabled: true, margin_usdt: 400, leverage: 15 }
-  # BTC (market_id=1) DISABLED: its Lighter order-book WS subscription times out
-  # (no reliable mark feed). Backtest's weakest coin anyway (PF 1.38). Re-enable
-  # if/when Lighter serves a stable BTC book. The other 4 cover the basket edge.
-  BTC:  { market_id: 1,  enabled: false, margin_usdt: 400, leverage: 15 }
+# 10-coin test basket (2026-06-04). Uniform $500 margin @ 10x = $5000 notional each.
+# 10x = validated sweet spot (0 liquidations, best net/DD, full PF). Uniform sizing
+# = apples-to-apples per-coin PF/WR comparison to decide which coins to keep.
+# Coins are the most-liquid Lighter crypto perps by 24h volume. Per-ticker entries
+# can be toggled live via Telegram (/off SYM, /on SYM) — see `control:` below.
+# The old WS-flakiness reason for disabling coins is gone (REST snapshot mark feed).
+symbols:                               # market_id : 24h vol on Lighter
+  ETH:  { market_id: 0,  enabled: true, margin_usdt: 500, leverage: 10 }   # $558M
+  BTC:  { market_id: 1,  enabled: true, margin_usdt: 500, leverage: 10 }   # $1.68B (re-enabled)
+  SOL:  { market_id: 2,  enabled: true, margin_usdt: 500, leverage: 10 }   # $71M
+  XRP:  { market_id: 7,  enabled: true, margin_usdt: 500, leverage: 10 }   # $3.5M
+  WLD:  { market_id: 6,  enabled: true, margin_usdt: 500, leverage: 10 }   # $14M
+  NEAR: { market_id: 10, enabled: true, margin_usdt: 500, leverage: 10 }   # $14M
+  TON:  { market_id: 12, enabled: true, margin_usdt: 500, leverage: 10 }   # $8M
+  HYPE: { market_id: 24, enabled: true, margin_usdt: 500, leverage: 10 }   # $218M
+  BNB:  { market_id: 25, enabled: true, margin_usdt: 500, leverage: 10 }   # $4.2M
+  ZEC:  { market_id: 90, enabled: true, margin_usdt: 500, leverage: 10 }   # $42M
 
 # regime_mr params (the strategy's real knobs — locked from the validated config)
 regime:
@@ -53,6 +61,10 @@ notify:
   open: true
   close: true
   daily: true
+
+control:
+  telegram_enabled: true # inbound Telegram control: /off SYM /on SYM /close SYM /status
+                         # authorized to TELEGRAM_CHAT_ID (.env) only
 
 loop:
   bar_poll_interval_s: 30      # 15m bars — 30s poll catches new closes promptly

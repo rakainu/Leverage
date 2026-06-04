@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 import time
@@ -81,6 +82,9 @@ class Bridge:
         self.legs: dict[str, list] = {}                # symbol -> [(frac, exit_px, reason)]
         self.tp_seen: dict[str, set] = {}              # symbol -> {tp levels already closed} (pro_v3 mode)
         self.pending_entry: dict[str, dict] = {}       # symbol -> resting maker-limit entry (regime mode)
+        # --- per-ticker entry switch (Telegram control) ---
+        self.entries_enabled: dict[str, bool] = {}     # explicit overrides; missing = ON
+        self.control = None                            # TelegramControl task holder
 
     async def start(self):
         log.info("=" * 70)
@@ -165,6 +169,13 @@ class Bridge:
         }
         self.executor = PaperExecutor(self.paper, exec_symbols)
 
+        # Restore per-ticker entry switches from a prior run (persisted overrides).
+        self.entries_enabled = self.db.get_switches()
+        _off = sorted(s for s, on in self.entries_enabled.items() if not on)
+        if _off:
+            log.info("Entry switch: NEW entries OFF for %s (restored from DB; "
+                     "open positions still managed to exit)", _off)
+
         # Bar feeds (REST polling)
         for name, s in enabled.items():
             feed_cfg = BarFeedConfig(
@@ -211,6 +222,19 @@ class Bridge:
             log.info("Webhook listener on %s:%d%s (symbols=%s)",
                      self.cfg.webhook.host, self.cfg.webhook.port,
                      self.cfg.webhook.path, sorted(known))
+
+        # Telegram control listener (per-ticker entry switch) — opt-in.
+        if self.cfg.control.telegram_enabled:
+            from .telegram_control import TelegramControl
+            self.control = TelegramControl(
+                token=os.environ.get("TELEGRAM_BOT_TOKEN"),
+                chat_id=os.environ.get("TELEGRAM_CHAT_ID"),
+                known_symbols=list(enabled.keys()),
+                on_set_switch=self.on_set_switch,
+                on_force_close=self.force_close,
+                on_status=self.on_status,
+            )
+            tasks.append(asyncio.create_task(self.control.run_loop()))
         log.info(
             "Bridge running. %d bar-feed tasks + position checker + heartbeat + "
             "daily summary + mark poller (REST snapshot every %ds).",
@@ -225,6 +249,8 @@ class Bridge:
     async def stop(self):
         log.info("Stopping bridge...")
         self._stopped = True
+        if self.control is not None:
+            self.control.stop()
         for f in self.feeds.values():
             f.stop()
         if self.paper is not None:
@@ -333,6 +359,11 @@ class Bridge:
 
             # Position lock
             if self.executor.is_open(symbol):
+                new_pending.append(sig)
+                continue
+
+            # Per-ticker entry switch (keep pending so it can fire once re-enabled)
+            if not self._entries_allowed(symbol):
                 new_pending.append(sig)
                 continue
 
@@ -485,6 +516,11 @@ class Bridge:
             self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts),
                                outcome="skipped_open", detected_at=now)
             return
+        if not self._entries_allowed(symbol):
+            log.info("%s: entries OFF — dropping PRO V3 %s", symbol, side)
+            self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts),
+                               outcome="blocked_switch", detected_at=now)
+            return
         log.info("%s: PRO V3 %s webhook -> ENTER (raw signal)", symbol, side)
         pos = await self.executor.open_position(symbol, side)
         if pos is None:
@@ -604,6 +640,8 @@ class Bridge:
         side = "long" if bool(last["sq_long"]) else ("short" if bool(last["sq_short"]) else None)
         if side is None:
             return
+        if not self._entries_allowed(symbol):
+            return  # entries OFF for this ticker
         await self._open_squeeze(symbol, side, enriched)
 
     async def _open_squeeze(self, symbol: str, side: str, enriched: pd.DataFrame):
@@ -738,6 +776,13 @@ class Bridge:
         # 2) try to fill a resting maker-limit entry against this just-closed bar
         pe = self.pending_entry.get(symbol)
         if pe is not None:
+            # entries switched OFF since this limit was armed -> cancel it (an
+            # unfilled limit is a not-yet-open NEW entry).
+            if not self._entries_allowed(symbol):
+                log.info("%s: entries OFF — cancelling resting maker-limit @ %.4f",
+                         symbol, pe["limit_px"])
+                self.pending_entry.pop(symbol, None)
+                return
             pe["bars"] += 1
             lo, hi = float(last["Low"]), float(last["High"])
             filled = (lo <= pe["limit_px"]) if pe["side"] == "long" else (hi >= pe["limit_px"])
@@ -754,6 +799,8 @@ class Bridge:
             return
 
         # 3) flat & no pending: evaluate a fresh signal on the just-closed bar
+        if not self._entries_allowed(symbol):
+            return  # entries OFF for this ticker — don't arm a new maker limit
         side = "long" if bool(last["reg_long"]) else ("short" if bool(last["reg_short"]) else None)
         if side is None:
             return
@@ -832,6 +879,90 @@ class Bridge:
             asyncio.create_task(notify.notify_close(
                 symbol, pos.side, pos.entry_price, exit_p, pnl, reason, duration,
                 pos.max_state, starting_collateral=self.cfg.initial_collateral_usdc))
+
+    # ------- Per-ticker entry switch (Telegram control) -------
+
+    def _entries_allowed(self, symbol: str) -> bool:
+        """Gate checked at EVERY entry-decision point. Missing = ON (default)."""
+        from .telegram_control import entries_allowed
+        return entries_allowed(self.entries_enabled, symbol)
+
+    async def on_set_switch(self, symbol: str, enabled: bool) -> str:
+        """Telegram /on|/off callback. Persists, then (on OFF) cancels any
+        not-yet-filled resting entry so no NEW position opens. Open positions
+        are deliberately left running so the bridge babysits them to exit."""
+        self.entries_enabled[symbol] = enabled
+        self.db.set_switch(symbol, enabled)
+        note = ""
+        if not enabled:
+            if self.pending_entry.pop(symbol, None) is not None:
+                note = " · cancelled resting limit"
+            if self.pending.get(symbol):
+                self.pending[symbol] = []
+            if self.executor is not None and self.executor.is_open(symbol):
+                note += " · open position still managed to exit"
+        state = "🟢 ON" if enabled else "⛔ OFF"
+        log.info("Entry switch: %s entries %s%s", symbol, "ON" if enabled else "OFF", note)
+        return f"{symbol} entries {state}{note}"
+
+    async def force_close(self, symbol: str) -> str:
+        """Telegram /close callback. Flatten any open position at the live mark."""
+        pos = self.executor.positions.get(symbol) if self.executor else None
+        if pos is None:
+            return f"{symbol}: no open position"
+        em = self.cfg.exit_model
+        if em == "regime":
+            await self._close_regime(symbol, pos, "manual")
+        elif em == "atr_trail":
+            await self._close_squeeze(symbol, pos, forced_reason="manual")
+        elif em in ("scaleout", "pro_v3"):
+            res = await self.executor.reduce_position(symbol, pos.base_amount, "manual")
+            if res is not None:
+                self._book_leg(symbol, pos, res, "manual")
+            self._finalize_scaleout(symbol, pos)
+        else:
+            await self._close_generic(symbol, pos, "manual")
+        return f"🔻 {symbol}: force-closed {pos.side} @ entry ${pos.entry_price:.4f} (manual)"
+
+    async def _close_generic(self, symbol: str, pos, reason: str):
+        """Close + book a trail/replica-mode position (fallback for /close)."""
+        result = await self.executor.close_position(symbol, reason)
+        if result is None:
+            return
+        exit_p = result.avg_price
+        pnl = ((exit_p - pos.entry_price) if pos.side == "long"
+               else (pos.entry_price - exit_p)) * pos.base_amount
+        duration = int(time.time() - pos.opened_at)
+        tid = self.trade_ids.get(symbol)
+        if tid is not None:
+            self.db.update_trade_close(
+                tid, exit_price=exit_p, exit_reason=reason, pnl_usdt=pnl,
+                pnl_pct_account=pnl / self.cfg.initial_collateral_usdc * 100,
+                duration_secs=duration, max_state=pos.max_state,
+                closed_at=datetime.now(timezone.utc).isoformat())
+            del self.trade_ids[symbol]
+        if self.cfg.notify.close:
+            asyncio.create_task(notify.notify_close(
+                symbol, pos.side, pos.entry_price, exit_p, pnl, reason, duration,
+                pos.max_state, starting_collateral=self.cfg.initial_collateral_usdc))
+
+    async def on_status(self) -> str:
+        """Telegram /status callback — per-symbol entry switch + position state."""
+        if self.executor is None:
+            return "Scalper starting up…"
+        lines = ["📋 <b>Scalper status</b>"]
+        for sym in sorted(self.executor.symbols):
+            on = self._entries_allowed(sym)
+            pos = self.executor.positions.get(sym)
+            if pos is not None:
+                where = f"{pos.side} open @ ${pos.entry_price:.4f}"
+            elif self.pending_entry.get(sym) is not None:
+                where = "pending entry"
+            else:
+                where = "flat"
+            lines.append(f"{'🟢' if on else '⛔'} {sym}: entries "
+                         f"{'on' if on else 'OFF'} · {where}")
+        return "\n".join(lines)
 
     async def position_check_loop(self):
         """Tick every N seconds — run state machine on each open position."""
