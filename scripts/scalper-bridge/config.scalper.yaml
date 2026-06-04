@@ -67,7 +67,10 @@ control:
                          # authorized to TELEGRAM_CHAT_ID (.env) only
 
 loop:
-  bar_poll_interval_s: 30      # 15m bars — 30s poll catches new closes promptly
+  bar_poll_interval_s: 90      # 15m bars — feeds staggered+jittered; 90s × 10 coins
+                               # = ~1 candle req/9s, under Lighter's WAF rate limit
+                               # on /candlesticks (incident 2026-06-04). Still catches
+                               # a 15m close within ~1.5min.
   position_check_interval_s: 5 # SL/TP check on the live mark every 5s
   mark_poll_interval_s: 3      # REST order-book snapshot poll for the mark (no WS delta stream)
   mark_stale_warn_s: 300

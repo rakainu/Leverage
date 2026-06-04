@@ -202,10 +202,16 @@ class Bridge:
         if self.cfg.notify.startup:
             await notify.notify_startup(self.cfg, restored=restored or None)
 
-        # Kick off async tasks
+        # Kick off async tasks. Stagger the bar feeds across the poll interval so
+        # the N coins never hit /candlesticks in one synchronized burst (that burst
+        # tripped Lighter's WAF on 2026-06-04). With 10 coins @ 90s that's a candle
+        # request ~every 9s — smooth and well under the WAF rate threshold.
         tasks = []
-        for name, feed in self.feeds.items():
-            tasks.append(asyncio.create_task(feed.run_loop(self.on_new_bar)))
+        n_feeds = len(self.feeds)
+        stagger = (self.cfg.loop.bar_poll_interval_s / n_feeds) if n_feeds else 0.0
+        for i, (name, feed) in enumerate(self.feeds.items()):
+            tasks.append(asyncio.create_task(
+                feed.run_loop(self.on_new_bar, start_delay_s=i * stagger)))
         tasks.append(asyncio.create_task(self.position_check_loop()))
         tasks.append(asyncio.create_task(self.heartbeat_loop()))
         tasks.append(asyncio.create_task(self.daily_summary_loop()))

@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
 import lighter
 import pandas as pd
+
+from .feed_util import compute_backoff, is_waf_error
 
 log = logging.getLogger(__name__)
 
@@ -131,18 +134,31 @@ class BarFeed:
         )
         return self.df
 
-    async def run_loop(self, on_new_bar: Callable[[str, pd.DataFrame], Awaitable[None]]):
-        """Poll forever, calling `on_new_bar(symbol, df)` whenever a new bar closes."""
-        # Bootstrap with retries — Lighter REST can flake on startup
-        backoff = 5
+    async def run_loop(self, on_new_bar: Callable[[str, pd.DataFrame], Awaitable[None]],
+                       start_delay_s: float = 0.0):
+        """Poll forever, calling `on_new_bar(symbol, df)` whenever a new bar closes.
+
+        `start_delay_s` staggers this feed's first request so the N coins don't all
+        hit /candlesticks at the same instant (the synchronized burst that tripped
+        Lighter's WAF on 2026-06-04). Steady-state polls also carry jitter to keep
+        the feeds desynchronized over time. On a WAF challenge (405/captcha) we back
+        off exponentially (up to 10 min) so the sticky per-IP captcha flag can
+        expire instead of being re-armed by a retry storm.
+        """
+        if start_delay_s and not self._stopped:
+            await asyncio.sleep(start_delay_s)
+
+        # Bootstrap with WAF-aware backoff — Lighter REST can flake / rate-limit on startup
+        boot_errs = 0
         while not self._stopped and self.df is None:
             try:
                 await self.bootstrap()
             except Exception as exc:
-                log.error("%s: bootstrap failed (retry in %ds): %s",
-                          self.cfg.symbol, backoff, exc)
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 300)
+                boot_errs += 1
+                wait = compute_backoff(boot_errs, is_waf=is_waf_error(exc))
+                log.error("%s: bootstrap failed #%d (retry in %.0fs): %s",
+                          self.cfg.symbol, boot_errs, wait, exc)
+                await asyncio.sleep(wait)
         if self._stopped:
             return
         await on_new_bar(self.cfg.symbol, self.df)
@@ -154,13 +170,18 @@ class BarFeed:
                 if df is not None:
                     await on_new_bar(self.cfg.symbol, df)
                 consecutive_errs = 0
+                # jittered poll (±25%) so coins stay desynchronized
+                jitter = self.cfg.poll_interval_s * random.uniform(-0.25, 0.25)
+                await asyncio.sleep(max(1.0, self.cfg.poll_interval_s + jitter))
             except Exception as exc:
                 consecutive_errs += 1
-                log.error("%s: feed error (#%d): %s", self.cfg.symbol, consecutive_errs, exc)
-                # Soft backoff on repeated errors — caps at 5 min
-                extra_sleep = min(consecutive_errs * 30, 270)
-                await asyncio.sleep(extra_sleep)
-            await asyncio.sleep(self.cfg.poll_interval_s)
+                waf = is_waf_error(exc)
+                wait = compute_backoff(consecutive_errs, is_waf=waf)
+                wait += random.uniform(0, wait * 0.2)   # decorrelate retries
+                log.error("%s: feed error (#%d%s): backing off %.0fs: %s",
+                          self.cfg.symbol, consecutive_errs, " WAF" if waf else "",
+                          wait, exc)
+                await asyncio.sleep(wait)
 
     def stop(self):
         self._stopped = True
