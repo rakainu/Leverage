@@ -1,0 +1,154 @@
+//@version=6
+// Scalper — Regime-gated VWAP Mean-Reversion (regime_mr) VISUALIZER
+// =================================================================
+// Mirrors the LIVE scalper bridge (scripts/scalper-bridge/src/lighter_bridge/
+// regime.py) so you can SEE on the chart what the bot is doing: the EMA(200)
+// trend gate, the session VWAP it fades toward, the z-score bands, and the exact
+// maker-limit / SL / TP / time-stop of every entry.
+//
+// This is a STANDALONE chart tool. It does NOT touch the bridge and the bridge
+// does not read it. Use it on a 15m chart of the basket coins. (Strategy form so
+// entry/SL/TP markers render; not for relying on TV's backtester.)
+//
+// Parity notes vs regime.py:
+//   EMA   = ta.ema(close, 200)              (bridge: ewm span=200, adjust=False)
+//   slope = ema - ema[20]                   sign sets the regime
+//   VWAP  = daily-anchored, tp=(H+L+C)/3, volume-weighted, resets each session
+//   z     = (close-VWAP - sma30) / stdev30  (population stdev, matches ddof=0)
+//   ATR   = ta.atr(14)                      (Wilder RMA — matches bridge)
+//   LONG  : slope>0 AND z <= -1.5  (buy dip in uptrend)
+//   SHORT : slope<0 AND z >= +1.5  (sell rip in downtrend)
+//   entry : maker limit at close -/+ 0.25*ATR
+//   SL    : 2.0*ATR ;  TP : 0.3*|VWAP - limit| ;  time stop : 12 bars
+//   limit cancelled if unfilled after 3 bars
+strategy("Scalper regime_mr (viz)", overlay=true, pyramiding=0,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     calc_on_order_fills=true, max_labels_count=500, max_lines_count=500)
+
+// ---------------- inputs (locked to the validated config) ----------------
+gTrend  = "Regime / signal"
+trendLen = input.int(200, "EMA trend length", group=gTrend)
+slopeLb  = input.int(20,  "Slope lookback",    group=gTrend)
+zPeriod  = input.int(30,  "Z-score period",    group=gTrend)
+zEntry   = input.float(1.5, "Z entry threshold", step=0.1, group=gTrend)
+
+gExit = "Entry / exit geometry"
+atrLen   = input.int(14,   "ATR length",            group=gExit)
+limitAtr = input.float(0.25, "Maker limit (xATR)", step=0.05, group=gExit)
+slAtr    = input.float(2.0,  "Stop (xATR)",         step=0.1,  group=gExit)
+tpFrac   = input.float(0.3,  "TP (x dist-to-VWAP)", step=0.05, group=gExit)
+maxBars  = input.int(12,   "Time stop (bars)",      group=gExit)
+validBars= input.int(3,    "Limit valid (bars)",    group=gExit)
+
+// ---------------- indicators (parity with regime.py) ----------------
+emaTrend = ta.ema(close, trendLen)
+slope    = emaTrend - emaTrend[slopeLb]
+atr      = ta.atr(atrLen)
+
+// daily-anchored session VWAP
+newDay = ta.change(time("D")) != 0
+var float cumPV = 0.0
+var float cumV  = 0.0
+tp = (high + low + close) / 3.0
+v  = (na(volume) or volume == 0) ? 1.0 : volume
+if newDay
+    cumPV := 0.0
+    cumV  := 0.0
+cumPV += tp * v
+cumV  += v
+vwap = cumV > 0 ? cumPV / cumV : close
+
+// z-score of (close - VWAP)
+diff  = close - vwap
+basis = ta.sma(diff, zPeriod)
+dev   = ta.stdev(diff, zPeriod)          // population stdev = numpy std(ddof=0)
+z     = dev != 0 ? (diff - basis) / dev : na
+
+// ---------------- regime gate + fresh signal ----------------
+up        = slope > 0
+ready     = not na(z) and not na(atr) and atr > 0
+longSig   = ready and up       and z <= -zEntry
+shortSig  = ready and (not up) and z >=  zEntry
+
+// ---------------- entry / exit state machine ----------------
+var bool  pendingActive = false
+var int   pendingBars   = 0
+var int   pendingSide   = 0          // 1 long, -1 short
+var float limitPx = na
+var float slPx    = na
+var float tpPx    = na
+var bool  exitArmed = false
+var int   barsInTrade = 0
+
+flat = strategy.position_size == 0
+
+// 1) arm a maker-limit entry on a fresh signal while flat & nothing pending
+if flat and not pendingActive and (longSig or shortSig)
+    side = longSig ? 1 : -1
+    lp   = side == 1 ? close - limitAtr * atr : close + limitAtr * atr
+    sld  = slAtr * atr
+    tpd  = tpFrac * math.abs(vwap - lp)
+    if tpd > 0
+        limitPx := lp
+        slPx    := side == 1 ? lp - sld : lp + sld
+        tpPx    := side == 1 ? lp + tpd : lp - tpd
+        pendingSide := side
+        pendingActive := true
+        pendingBars := 0
+        if side == 1
+            strategy.entry("Long", strategy.long, limit=lp,
+                 comment="z=" + str.tostring(z, "#.##"))
+        else
+            strategy.entry("Short", strategy.short, limit=lp,
+                 comment="z=" + str.tostring(z, "#.##"))
+        label.new(bar_index, side == 1 ? low : high,
+             (side == 1 ? "▲ LONG limit " : "▼ SHORT limit ") + str.tostring(lp, format.mintick),
+             style=side == 1 ? label.style_label_up : label.style_label_down,
+             color=side == 1 ? color.new(color.teal, 30) : color.new(color.maroon, 30),
+             textcolor=color.white, size=size.small)
+
+// 2) age / cancel the resting limit
+if pendingActive
+    pendingBars += 1
+    if strategy.position_size != 0
+        pendingActive := false               // filled
+    else if pendingBars > validBars
+        strategy.cancel("Long")
+        strategy.cancel("Short")
+        pendingActive := false
+        label.new(bar_index, high, "limit cancelled", style=label.style_label_down,
+             color=color.new(color.gray, 40), textcolor=color.white, size=size.tiny)
+
+// 3) arm SL/TP once filled
+if strategy.position_size != 0 and not exitArmed
+    if strategy.position_size > 0
+        strategy.exit("X-Long", "Long", stop=slPx, limit=tpPx)
+    else
+        strategy.exit("X-Short", "Short", stop=slPx, limit=tpPx)
+    exitArmed := true
+
+// 4) time stop
+barsInTrade := strategy.position_size != 0 ? barsInTrade + 1 : 0
+if barsInTrade >= maxBars and strategy.position_size != 0
+    strategy.close_all(comment="time")
+if strategy.position_size == 0
+    exitArmed := false
+
+// ---------------- plots ----------------
+plot(emaTrend, "EMA trend", color=up ? color.new(color.green, 0) : color.new(color.red, 0), linewidth=2)
+plot(vwap, "Session VWAP", color=color.new(color.orange, 0), linewidth=1)
+plotshape(longSig  and flat, "Long signal",  shape.triangleup,   location.belowbar, color.teal,   size=size.tiny)
+plotshape(shortSig and flat, "Short signal", shape.triangledown, location.abovebar, color.maroon, size=size.tiny)
+// faint regime backdrop: green = uptrend (longs only), red = downtrend (shorts only)
+bgcolor(up ? color.new(color.green, 92) : color.new(color.red, 92), title="Regime")
+
+// live SL / TP guide lines while in a trade
+plot(strategy.position_size != 0 ? slPx : na, "SL", color=color.new(color.red, 0),  style=plot.style_linebr, linewidth=1)
+plot(strategy.position_size != 0 ? tpPx : na, "TP", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=1)
+
+// z-score readout (compact table, top-right)
+var table t = table.new(position.top_right, 1, 3, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.islast
+    table.cell(t, 0, 0, "regime " + (up ? "▲ up" : "▼ down"), text_color=up ? color.lime : color.red, text_size=size.small)
+    table.cell(t, 0, 1, "z = " + (na(z) ? "—" : str.tostring(z, "#.##")), text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 2, "slope " + str.tostring(slope, format.mintick), text_color=color.gray, text_size=size.small)
