@@ -136,6 +136,20 @@ class PaperExecutor:
             raw = max(round(raw, mc.size_decimals), mc.min_base_amount)
         return raw
 
+    def quantize_size(self, market_id: int, value: float) -> float:
+        """Snap a base amount to the market's size precision.
+
+        PaperClient (and the live exchange) reject any base_amount whose value
+        carries more decimals than the market's `size_decimals` — float dust
+        from fills/arithmetic (e.g. 11685.099999999999 for a 1-decimal market)
+        fails validation. Every order we submit MUST pass through here so a
+        close/reduce/rehydrate can never strand a position on a precision error.
+        """
+        mc = self.paper.market_configs.get(market_id)
+        if mc is None:
+            return value
+        return round(value, mc.size_decimals)
+
     def is_open(self, symbol: str) -> bool:
         return symbol in self.positions
 
@@ -185,7 +199,7 @@ class PaperExecutor:
             market_id=sym_cfg["market_id"],
             side=side,
             entry_price=float(result.avg_price),
-            base_amount=float(result.filled_size),
+            base_amount=self.quantize_size(sym_cfg["market_id"], float(result.filled_size)),
             margin_usdt=sym_cfg["margin_usdt"],
             leverage=sym_cfg["leverage"],
             opened_at=time.time(),
@@ -204,12 +218,13 @@ class PaperExecutor:
             log.warning("%s: close requested but no position open", symbol)
             return None
         close_side = lighter.PaperOrderSide.SELL if pos.side == "long" else lighter.PaperOrderSide.BUY
-        log.info("%s: CLOSE %s (reason=%s) size=%.4f", symbol, pos.side.upper(), reason, pos.base_amount)
+        size = self.quantize_size(pos.market_id, pos.base_amount)
+        log.info("%s: CLOSE %s (reason=%s) size=%.4f", symbol, pos.side.upper(), reason, size)
         try:
             result = await self.paper.create_paper_order(lighter.PaperOrderRequest(
                 market_id=pos.market_id,
                 side=close_side,
-                base_amount=pos.base_amount,
+                base_amount=size,
             ))
         except Exception as exc:
             log.error("%s: close order failed: %s", symbol, exc, exc_info=True)
@@ -217,9 +232,9 @@ class PaperExecutor:
 
         exit_price = float(result.avg_price)
         if pos.side == "long":
-            pnl = (exit_price - pos.entry_price) * pos.base_amount
+            pnl = (exit_price - pos.entry_price) * size
         else:
-            pnl = (pos.entry_price - exit_price) * pos.base_amount
+            pnl = (pos.entry_price - exit_price) * size
         log.info("%s: CLOSED at $%.4f  pnl=$%+.2f  reason=%s", symbol, exit_price, pnl, reason)
         del self.positions[symbol]
         return FillResult(

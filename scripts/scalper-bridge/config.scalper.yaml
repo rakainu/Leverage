@@ -26,12 +26,20 @@ symbols:                               # market_id : 24h vol on Lighter
   BTC:  { market_id: 1,  enabled: true, margin_usdt: 500, leverage: 10 }   # $1.68B (re-enabled)
   SOL:  { market_id: 2,  enabled: true, margin_usdt: 500, leverage: 10 }   # $71M
   XRP:  { market_id: 7,  enabled: true, margin_usdt: 500, leverage: 10 }   # $3.5M
-  WLD:  { market_id: 6,  enabled: true, margin_usdt: 500, leverage: 10 }   # $14M
-  NEAR: { market_id: 10, enabled: true, margin_usdt: 500, leverage: 10 }   # $14M
+  # WLD benched 2026-06-09 (n=6 noise + stranded-short bug). Kept enabled so the
+  # orphaned short restores & exits cleanly; NEW entries are OFF via DB switch.
+  WLD:  { market_id: 6,  enabled: true, margin_usdt: 500, leverage: 10 }   # $7M  (entries off)
+  # NEAR benched 2026-06-09 — heavy loser (-$257 / 18 trades). Kept enabled so its
+  # open long (#170) exits cleanly; NEW entries are OFF via DB switch.
+  NEAR: { market_id: 10, enabled: true, margin_usdt: 500, leverage: 10 }   # $3.6M (entries off)
   TON:  { market_id: 12, enabled: true, margin_usdt: 500, leverage: 10 }   # $8M
   HYPE: { market_id: 24, enabled: true, margin_usdt: 500, leverage: 10 }   # $218M
   BNB:  { market_id: 25, enabled: true, margin_usdt: 500, leverage: 10 }   # $4.2M
   ZEC:  { market_id: 90, enabled: true, margin_usdt: 500, leverage: 10 }   # $42M
+  # New blood 2026-06-09 — deepest untested Lighter perps (>> LINK/SUI liquidity).
+  # MKR is an INACTIVE market on Lighter (empty book, last_price=0) — disabled.
+  MKR:  { market_id: 28, enabled: false, margin_usdt: 500, leverage: 10 }  # inactive market
+  XMR:  { market_id: 77, enabled: true, margin_usdt: 500, leverage: 10 }   # $4.8M
 
 # regime_mr params (the strategy's real knobs — locked from the validated config)
 regime:

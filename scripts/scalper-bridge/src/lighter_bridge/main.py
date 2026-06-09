@@ -1295,11 +1295,13 @@ class Bridge:
             order_side = (
                 lighter.PaperOrderSide.BUY if side == "long" else lighter.PaperOrderSide.SELL
             )
+            base_amount = self.executor.quantize_size(
+                sym_cfg["market_id"], float(row["base_amount"]))
             try:
                 result = await self.paper.create_paper_order(lighter.PaperOrderRequest(
                     market_id=sym_cfg["market_id"],
                     side=order_side,
-                    base_amount=float(row["base_amount"]),
+                    base_amount=base_amount,
                 ))
                 rehydration_price = float(result.avg_price)
             except Exception as exc:
@@ -1314,7 +1316,7 @@ class Bridge:
                 market_id=sym_cfg["market_id"],
                 side=side,
                 entry_price=entry_price,
-                base_amount=float(row["base_amount"]),
+                base_amount=base_amount,
                 margin_usdt=float(row["margin_usdt"]),
                 leverage=float(row["leverage"]),
                 opened_at=opened_at_unix,
