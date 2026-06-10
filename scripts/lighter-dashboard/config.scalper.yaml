@@ -1,16 +1,22 @@
-# Dashboard config for the Scalper regime-MR 5-coin paper bridge.
+# Dashboard config for the Scalper regime-MR paper bridge.
 # Same code as the Lighter dashboard, pointed at the scalper bridge's DB
 # (/docker/scalper-paper/data/scalper.db, mounted into the container).
 db_path: "data/scalper.db"
 lighter_host: "https://mainnet.zklighter.elliot.ai"
-initial_collateral_usdc: 2000   # MUST match bridge config.scalper.yaml (else phantom equity/DD)
-symbols:                                  # name -> market_id (live Lighter ids)
-  SOL: 2
+initial_collateral_usdc: 6000   # MUST match bridge config.scalper.yaml (else phantom equity/DD)
+symbols:                                  # name -> market_id (live Lighter ids); 10-coin test basket
   ETH: 0
-  ZEC: 90
+  BTC: 1
+  SOL: 2
+  XRP: 7
+  WLD: 6
+  NEAR: 10
+  TON: 12
   HYPE: 24
-  # BTC (market_id 1) disabled in the bridge (dead Lighter book) — keep it off
-  # the dashboard too so the header ticker list matches the live basket.
+  BNB: 25
+  ZEC: 90
+  MKR: 28    # parity (disabled/inactive on bridge, but avoids 500 if ever enabled)
+  XMR: 77    # added to bridge basket 2026-06-09 (open short #176)
 refresh:
   live_ms: 3000
   static_ms: 15000
