@@ -1,6 +1,6 @@
 <div class="panel">
   <div class="label label--rule mb-2">Per-coin scoreboard <span class="muted">— keep / cut by edge</span></div>
-  <table class="w-full">
+  <table class="w-full scoreboard">
     <thead><tr>
       <th></th><th>sym</th><th>n</th><th>win%</th><th>PF</th>
       <th>net</th><th>be%</th><th>cushion</th>
@@ -8,13 +8,13 @@
     <tbody>
       {% for r in rows %}
       <tr>
-        <td title="{{ r.verdict }}">
+        <td class="dot" title="{{ r.verdict }}">
           {%- if r.verdict == 'keep' -%}🟢
           {%- elif r.verdict == 'cut' -%}🔴
           {%- elif r.verdict == 'watch' -%}🟡
           {%- else -%}⚪{%- endif -%}
         </td>
-        <td><b>{{ r.symbol }}</b></td>
+        <td class="sym"><b>{{ r.symbol }}</b></td>
         <td>{{ r.n }}</td>
         <td>{{ "%.0f"|format(r.win_pct) }}%</td>
         <td>{% if r.pf is none %}<span class="muted">∞</span>{% else %}{{ "%.2f"|format(r.pf) }}{% endif %}</td>

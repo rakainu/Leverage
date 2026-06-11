@@ -48,6 +48,11 @@
       border-bottom:2px solid #5b6580;
     }
     td, th { padding:6px 8px; }
+    /* Per-coin scoreboard is the headline panel — roomier rows + larger type */
+    .scoreboard td, .scoreboard th { padding:9px 12px; }
+    .scoreboard tbody td { font-size:15px; }
+    .scoreboard .sym { font-size:16px; }
+    .scoreboard .dot { font-size:13px; }
     .pos { color:#34d399; } .neg { color:#f87171; } .mut { color:#9aa6b8; }
     /* Pulsing dot on the Live status pill */
     @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
@@ -89,9 +94,14 @@
     <div class="col-span-2" hx-get="/panel/closed" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s"></div>
   </div>
 
-  <div class="grid grid-cols-3 gap-4">
+  <!-- Bottom row: the per-coin scoreboard is the headline panel (col-span-2,
+       left half); exit reasons + signal log are secondary, one narrow column
+       each. items-start pins the short panels to the top instead of
+       stretching them to the tall scoreboard's height. -->
+  <div class="grid grid-cols-4 gap-4 items-start">
+    <!-- F: Per-symbol scoreboard (headline) -->
+    <div class="col-span-2" hx-get="/panel/symbols" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s"></div>
     <!-- E: Exit reasons --><div hx-get="/panel/exits" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s"></div>
-    <!-- F: Per-symbol --><div hx-get="/panel/symbols" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s"></div>
     <!-- G: Signals --><div hx-get="/panel/signals" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s"></div>
   </div>
 </body>
