@@ -85,6 +85,10 @@ class Bridge:
         # --- per-ticker entry switch (Telegram control) ---
         self.entries_enabled: dict[str, bool] = {}     # explicit overrides; missing = ON
         self.control = None                            # TelegramControl task holder
+        # --- news-rip cooldown circuit breaker (config-gated; off => inert) ---
+        self._cd_consec = 0          # consecutive losing closes (basket-wide)
+        self._cd_until = 0.0         # epoch secs until which entries are blocked
+        self._cd_armed = False       # cooldown window active (drives resume-notify)
 
     async def start(self):
         log.info("=" * 70)
@@ -124,6 +128,10 @@ class Bridge:
                      self.cfg.exits.sl_loss_usdt, self.cfg.exits.breakeven_usdt,
                      self.cfg.exits.lock_profit_activate_usdt,
                      self.cfg.exits.trail_activate_usdt, self.cfg.exits.trail_distance_usdt)
+
+        if self.cfg.cooldown.enabled:
+            log.info("Cooldown breaker: %d consec losses -> block entries %dm (auto-resume)",
+                     self.cfg.cooldown.consec_losses, self.cfg.cooldown.minutes)
 
         # Lighter client + paper client
         self.api = lighter.ApiClient(configuration=lighter.Configuration(host=self.cfg.host))
@@ -881,6 +889,7 @@ class Bridge:
             del self.trade_ids[symbol]
         log.info("%s: REGIME CLOSED %s @ %.4f pnl=$%+.2f (%s, %d bars)",
                  symbol, pos.side.upper(), exit_p, pnl, reason, pos.bars_held)
+        self._register_close(reason, pnl)
         if self.cfg.notify.close:
             asyncio.create_task(notify.notify_close(
                 symbol, pos.side, pos.entry_price, exit_p, pnl, reason, duration,
@@ -889,9 +898,46 @@ class Bridge:
     # ------- Per-ticker entry switch (Telegram control) -------
 
     def _entries_allowed(self, symbol: str) -> bool:
-        """Gate checked at EVERY entry-decision point. Missing = ON (default)."""
+        """Gate checked at EVERY entry-decision point. Missing = ON (default).
+        A live cooldown blocks every symbol regardless of its per-ticker switch."""
+        if self._cooldown_active():
+            return False
         from .telegram_control import entries_allowed
         return entries_allowed(self.entries_enabled, symbol)
+
+    def _cooldown_active(self) -> bool:
+        if not self.cfg.cooldown.enabled:
+            return False
+        return self._cd_until > 0 and time.time() < self._cd_until
+
+    def _register_close(self, reason: str, pnl: float):
+        """Feed each booked regime close to the basket-wide cooldown breaker.
+        After `consec_losses` losing closes in a row, block ALL entries for
+        `minutes`, then auto-resume. Manual/kill closes do not count."""
+        cd = self.cfg.cooldown
+        if not cd.enabled or reason == "manual":
+            return
+        if pnl < 0:
+            self._cd_consec += 1
+            if self._cd_consec >= cd.consec_losses and not self._cooldown_active():
+                self._cd_until = time.time() + cd.minutes * 60
+                self._cd_consec = 0
+                self._cd_armed = True
+                log.warning("COOLDOWN armed: %d consec losses -> all entries blocked %dm",
+                            cd.consec_losses, cd.minutes)
+                if self.cfg.notify.close:
+                    asyncio.create_task(notify.send(
+                        f"\U0001f9ca COOLDOWN \u2014 {cd.consec_losses} losing closes in a row. "
+                        f"All entries paused {cd.minutes}m (auto-resume)."))
+        else:
+            self._cd_consec = 0
+
+    def _maybe_notify_cooldown_resume(self):
+        if self._cd_armed and not self._cooldown_active():
+            self._cd_armed = False
+            log.info("COOLDOWN lifted - entries resume.")
+            if self.cfg.notify.close:
+                asyncio.create_task(notify.send("\u2705 Cooldown lifted \u2014 entries resume."))
 
     async def on_set_switch(self, symbol: str, enabled: bool) -> str:
         """Telegram /on|/off callback. Persists, then (on OFF) cancels any
@@ -957,6 +1003,9 @@ class Bridge:
         if self.executor is None:
             return "Scalper starting up…"
         lines = ["📋 <b>Scalper status</b>"]
+        if self._cooldown_active():
+            mins = int((self._cd_until - time.time()) / 60) + 1
+            lines.append(f"🧊 COOLDOWN active \u2014 entries blocked ~{mins}m more")
         for sym in sorted(self.executor.symbols):
             on = self._entries_allowed(sym)
             pos = self.executor.positions.get(sym)
@@ -1059,6 +1108,7 @@ class Bridge:
         last_seen_at = time.time()
         while not self._stopped:
             await asyncio.sleep(300)
+            self._maybe_notify_cooldown_resume()
             if self.executor is None:
                 continue
             try:

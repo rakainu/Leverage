@@ -157,6 +157,16 @@ class ControlConfig:
 
 
 @dataclass
+class CooldownConfig:
+    """Basket-wide news-rip circuit breaker. After `consec_losses` losing closes
+    in a row (across all coins), block ALL new entries for `minutes`, then
+    auto-resume. Off by default; revert = set enabled:false."""
+    enabled: bool = False
+    consec_losses: int = 2
+    minutes: int = 360
+
+
+@dataclass
 class BridgeConfig:
     host: str
     initial_collateral_usdc: float
@@ -175,6 +185,7 @@ class BridgeConfig:
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
+    cooldown: CooldownConfig = field(default_factory=CooldownConfig)
 
 
 def load_config(path: str | Path) -> BridgeConfig:
@@ -232,6 +243,7 @@ def load_config(path: str | Path) -> BridgeConfig:
 
     notify = NotifyConfig(**raw.get("notify", {}))
     control = ControlConfig(**raw.get("control", {}))
+    cooldown = CooldownConfig(**raw.get("cooldown", {}))
 
     if exit_model == "trail" and exits is None:
         raise ValueError("exit_model 'trail' requires an 'exits:' config block")
@@ -255,4 +267,5 @@ def load_config(path: str | Path) -> BridgeConfig:
         webhook=webhook,
         notify=notify,
         control=control,
+        cooldown=cooldown,
     )
