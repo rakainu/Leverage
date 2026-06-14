@@ -32,7 +32,7 @@ import aiohttp
 log = logging.getLogger("control")
 
 _ACTIONS_NEED_SYMBOL = {"off", "on", "close"}
-_ACTIONS_NO_SYMBOL = {"status", "help"}
+_ACTIONS_NO_SYMBOL = {"status", "help", "kill"}
 _ALL_ACTIONS = _ACTIONS_NEED_SYMBOL | _ACTIONS_NO_SYMBOL
 
 
@@ -79,6 +79,8 @@ def parse_command(text: str, known_symbols) -> Optional[ParsedCommand]:
         return ParsedCommand(action=head, symbol=None,
                              error=f"Usage: /{head} SYMBOL")
     symbol = parts[1].upper()
+    if symbol == "ALL":
+        return ParsedCommand(action=head, symbol="ALL", error=None)
     if symbol not in known_symbols:
         known = ", ".join(sorted(known_symbols))
         return ParsedCommand(action=head, symbol=None,
@@ -181,17 +183,52 @@ class TelegramControl:
             elif cmd.action == "help":
                 await self._reply(
                     "Scalper control:\n"
-                    "/off SYM — block new entries (open trade still managed)\n"
-                    "/on SYM — re-enable entries\n"
-                    "/close SYM — force-close open position now\n"
+                    "/kill — STOP ALL: close every open position + block all entries\n"
+                    "/off SYM|ALL — block new entries (open trade still managed)\n"
+                    "/on SYM|ALL — re-enable entries\n"
+                    "/close SYM|ALL — force-close open position(s) now\n"
                     "/status — show on/off + open positions"
                 )
-            elif cmd.action == "off":
-                await self._reply(await self.on_set_switch(cmd.symbol, False))
-            elif cmd.action == "on":
-                await self._reply(await self.on_set_switch(cmd.symbol, True))
+            elif cmd.action == "kill":
+                await self._reply(await self._kill_all())
+            elif cmd.action in ("off", "on"):
+                enabled = cmd.action == "on"
+                if cmd.symbol == "ALL":
+                    await self._reply(await self._switch_all(enabled))
+                else:
+                    await self._reply(await self.on_set_switch(cmd.symbol, enabled))
             elif cmd.action == "close":
-                await self._reply(await self.on_force_close(cmd.symbol))
+                if cmd.symbol == "ALL":
+                    await self._reply(await self._close_all())
+                else:
+                    await self._reply(await self.on_force_close(cmd.symbol))
         except Exception as exc:
             log.error("control dispatch error on %s: %s", cmd, exc, exc_info=True)
             await self._reply(f"⚠️ command failed: {exc}")
+
+
+    async def _switch_all(self, enabled: bool) -> str:
+        for sym in sorted(self.known):
+            await self.on_set_switch(sym, enabled)
+        state = "🟢 ON" if enabled else "⛔ OFF"
+        return f"ALL entries {state} ({len(self.known)} symbols)"
+
+    async def _close_all(self) -> str:
+        closed = []
+        for sym in sorted(self.known):
+            r = await self.on_force_close(sym)
+            if "no open position" not in r:
+                closed.append(r)
+        return "\n".join(closed) if closed else "No open positions to close."
+
+    async def _kill_all(self) -> str:
+        for sym in sorted(self.known):
+            await self.on_set_switch(sym, False)
+        closed = []
+        for sym in sorted(self.known):
+            r = await self.on_force_close(sym)
+            if "no open position" not in r:
+                closed.append(r)
+        head = f"🛑 KILL — all entries OFF ({len(self.known)} symbols)"
+        return head + (" · flattened:\n" + "\n".join(closed) if closed
+                       else " · no open positions")
