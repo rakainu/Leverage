@@ -1107,9 +1107,9 @@ class Bridge:
         """Every 5 minutes, snapshot total equity (collateral + realized + unrealized)."""
         last_seen_at = time.time()
         while not self._stopped:
-            await asyncio.sleep(300)
             self._maybe_notify_cooldown_resume()
             if self.executor is None:
+                await asyncio.sleep(5)
                 continue
             try:
                 realized, unrealized, equity = self._equity_breakdown()
@@ -1138,6 +1138,7 @@ class Bridge:
                     asyncio.create_task(notify.notify_error(
                         f"Heartbeat silent for >30m: {exc}"
                     ))
+            await asyncio.sleep(300)
 
     async def _verify_mark_feed_live(self, enabled: dict, deadline_s: int):
         """Block until every enabled symbol has reported a non-zero mark price,
