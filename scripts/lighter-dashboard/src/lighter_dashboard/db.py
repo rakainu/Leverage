@@ -126,6 +126,26 @@ class DashboardDB:
                 return 0.0
         return float(row["t"] or 0.0)
 
+    def fill_quality(self, limit: int = 15) -> dict:
+        """Maker-fill telemetry for real-order books (Booster). Zeroed/empty if the
+        fill_quality table doesn't exist (paper books) or has no rows yet."""
+        out = {"n": 0, "maker_pct": 0.0, "avg_slip_bps": 0.0, "avg_wait_s": 0.0, "recent": []}
+        with self._conn() as c:
+            try:
+                agg = c.execute(
+                    "SELECT COUNT(*) n, AVG(maker)*100 mk, AVG(slippage_bps) slip, "
+                    "AVG(wait_s) wait FROM fill_quality").fetchone()
+                rows = c.execute(
+                    "SELECT ts, symbol, side, requested_px, filled_px, slippage_bps, maker, "
+                    "wait_s FROM fill_quality ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            except sqlite3.OperationalError:
+                return out
+        if agg and agg["n"]:
+            out.update(n=int(agg["n"]), maker_pct=float(agg["mk"] or 0.0),
+                       avg_slip_bps=float(agg["slip"] or 0.0), avg_wait_s=float(agg["wait"] or 0.0),
+                       recent=[dict(r) for r in rows])
+        return out
+
     def withdrawals(self, limit: int = 25) -> list[dict]:
         """Recent withdrawal ledger rows (newest first); [] if no ledger yet."""
         with self._conn() as c:

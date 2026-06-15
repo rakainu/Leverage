@@ -15,6 +15,9 @@ class DashboardConfig:
     live_ms: int
     static_ms: int
     mark_cache_ttl_s: float
+    title: str = "Lighter"             # dashboard heading; per-book override (default preserves legacy)
+    subtitle: str = "paper bridge"     # heading sub-label (Booster = "testnet · real orders")
+    show_fill_quality: bool = False    # real-order books (Booster) show the fill-quality panel
 
 
 def load_config(path: str | Path) -> DashboardConfig:
@@ -28,4 +31,7 @@ def load_config(path: str | Path) -> DashboardConfig:
         live_ms=int(refresh.get("live_ms", 3000)),
         static_ms=int(refresh.get("static_ms", 15000)),
         mark_cache_ttl_s=float(data.get("mark_cache_ttl_s", 2.0)),
+        title=str(data.get("title", "Lighter")),
+        subtitle=str(data.get("subtitle", "paper bridge")),
+        show_fill_quality=bool(data.get("show_fill_quality", False)),
     )

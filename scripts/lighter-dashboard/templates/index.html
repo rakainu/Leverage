@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lighter Dashboard</title>
+  <title>{{ cfg.title|default('Lighter', true) }} Dashboard</title>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -71,8 +71,8 @@
 <body class="p-5">
   <header class="flex items-center justify-between mb-5">
     <h1 class="text-2xl font-extrabold tracking-tight">
-      <span style="background:linear-gradient(90deg,#34d399,#06b6d4); -webkit-background-clip:text; background-clip:text; color:transparent;">Lighter</span>
-      <span class="mut font-normal text-base">paper bridge</span>
+      <span style="background:linear-gradient(90deg,#34d399,#06b6d4); -webkit-background-clip:text; background-clip:text; color:transparent;">{{ cfg.title|default('Lighter', true) }}</span>
+      <span class="mut font-normal text-base">{{ cfg.subtitle|default('paper bridge', true) }}</span>
     </h1>
     <div class="flex items-center gap-4">
       <div hx-get="/panel/status" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
@@ -89,6 +89,11 @@
 
   <!-- B2: Profit withdrawals (static) -->
   <div hx-get="/panel/withdrawals" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s" class="mb-4"></div>
+
+  {% if cfg.show_fill_quality %}
+  <!-- B3: Fill quality (real-order books only): maker-fill rate, slippage, live vs backtest WR -->
+  <div hx-get="/panel/fillquality" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s" class="mb-4"></div>
+  {% endif %}
 
   <div class="grid grid-cols-3 gap-4 mb-4">
     <!-- C: Open positions (live) -->

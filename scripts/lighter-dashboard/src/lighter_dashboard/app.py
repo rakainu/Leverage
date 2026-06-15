@@ -209,6 +209,19 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
              "last": last, "target": target, "tz_label": _tz_label()},
         )
 
+    @app.get("/panel/fillquality", response_class=HTMLResponse)
+    async def panel_fillquality(request: Request):
+        fq = db.fill_quality(limit=15)
+        for r in fq["recent"]:
+            r["when"] = _fmt_close(r.get("ts"))
+        pnls = db.closed_pnls()
+        live_wr = (sum(1 for p in pnls if p > 0) / len(pnls) * 100.0) if pnls else None
+        return templates.TemplateResponse(
+            request, "partials/fillquality.html",
+            {"fq": fq, "live_wr": live_wr, "n_closed": len(pnls), "bt_wr": 88.0,
+             "tz_label": _tz_label()},
+        )
+
     @app.get("/panel/positions", response_class=HTMLResponse)
     async def panel_positions(request: Request):
         return templates.TemplateResponse(

@@ -1,0 +1,17 @@
+# Dashboard for the Booster testnet book (real-order regime_mr).
+# Deployed to /docker/lighter-dashboard/config.boost.yaml; container boost-dashboard
+# (127.0.0.1:8097), Traefik boost.agentneo.cloud. Reuses the shared dashboard image.
+db_path: "data/boost.db"
+lighter_host: "https://testnet.zklighter.elliot.ai"
+initial_collateral_usdc: 10000   # MUST match boost bridge config (else phantom equity/DD)
+symbols:
+  SOL: 2
+  ETH: 0
+  BTC: 1
+title: "Booster"
+subtitle: "testnet · real orders"
+show_fill_quality: true          # surfaces the fill-quality panel (real-order books only)
+refresh:
+  live_ms: 3000
+  static_ms: 15000
+mark_cache_ttl_s: 2.0

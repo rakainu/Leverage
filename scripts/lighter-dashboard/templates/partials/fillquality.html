@@ -1,0 +1,50 @@
+<div class="panel">
+  <div class="label label--rule mb-2">🎯 Fill quality — does the live edge hold?</div>
+  <div class="grid gap-3 mb-3" style="grid-template-columns: 1fr 1fr 1fr 1fr;">
+    <div>
+      <div class="label">Maker-fill rate</div>
+      <div class="text-2xl font-bold {{ 'pos' if fq.maker_pct >= 95 else '' }}">
+        {{ "%.0f%%"|format(fq.maker_pct) if fq.n else "—" }}</div>
+      <div class="label">{{ fq.n }} fills</div>
+    </div>
+    <div>
+      <div class="label">Avg slippage</div>
+      <div class="text-2xl font-bold {{ 'neg' if fq.avg_slip_bps > 5 else '' }}">
+        {{ "%.1f bps"|format(fq.avg_slip_bps) if fq.n else "—" }}</div>
+      <div class="label">adverse</div>
+    </div>
+    <div>
+      <div class="label">Live win rate</div>
+      <div class="text-2xl font-bold {{ 'pos' if live_wr is not none and live_wr >= 84 else ('neg' if live_wr is not none else '') }}">
+        {{ "%.0f%%"|format(live_wr) if live_wr is not none else "—" }}</div>
+      <div class="label">{{ n_closed }} closed</div>
+    </div>
+    <div>
+      <div class="label">Backtest WR</div>
+      <div class="text-2xl font-bold mut">{{ "%.0f%%"|format(bt_wr) }}</div>
+      <div class="label">breakeven ~84%</div>
+    </div>
+  </div>
+  {% if fq.recent %}
+  <div class="scroll-6">
+    <table class="w-full">
+      <thead><tr><th>when ({{ tz_label }})</th><th>sym</th><th>side</th><th>requested</th><th>filled</th><th>slip</th><th>wait</th></tr></thead>
+      <tbody>
+        {% for r in fq.recent %}
+        <tr>
+          <td class="mut" title="{{ r.ts }}">{{ r.when }}</td>
+          <td>{{ r.symbol }}</td>
+          <td class="{{ 'pos' if r.side == 'long' else 'neg' }}">{{ r.side }}</td>
+          <td class="mut">{{ "%.4f"|format(r.requested_px) }}</td>
+          <td>{{ "%.4f"|format(r.filled_px) }}</td>
+          <td class="{{ 'neg' if r.slippage_bps > 2 else 'mut' }}">{{ "%+.1f"|format(r.slippage_bps) }}</td>
+          <td class="mut">{{ "%.0fs"|format(r.wait_s) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="mut">No real fills yet — maker entries arm on new 15m signals; the first fill posts here with its true maker-fill rate, slippage, and live-vs-backtest win rate.</div>
+  {% endif %}
+</div>
