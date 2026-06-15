@@ -947,8 +947,9 @@ class Bridge:
         entry at the LIMIT price (maker fill, no slippage — matches the backtest)."""
         side = pe["side"]
         now = datetime.now(timezone.utc).isoformat()
+        # Risk-based 2% sizing (same base_amount as the real path), not margin×lev.
         pos = await self.executor.open_position(symbol, side,
-                                                margin_override=self._entry_margin(symbol))
+                                                base_amount=pe.get("base_amount"))
         if pos is None:
             return
         # Override to the maker limit price (executor filled at the live mark).

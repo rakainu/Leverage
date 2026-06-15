@@ -1,22 +1,20 @@
-# Booster — aggressive regime_mr book on Lighter TESTNET (real signed orders).
-# Purpose: measure whether the 88% backtest win-rate + maker fills survive live.
-# Separate from the scalper in every way. NEVER touches scalper-bridge.
+# Booster — aggressive regime_mr book on Lighter MAINNET (paper sim, scalper-style).
+# Real mainnet prices/liquidity/all-coins, stable feed, realistic capital. Simulated
+# fills (honest backtest rule). Separate from the scalper in every way. NEVER touches it.
+# (Was a testnet real-order book; moved to mainnet paper for clean, stable edge data.)
 connection:
-  host: "https://testnet.zklighter.elliot.ai"
-  initial_collateral_usdc: 10000       # testnet account 171 balance (sizing base)
+  host: "https://mainnet.zklighter.elliot.ai"
+  initial_collateral_usdc: 3000        # realistic starting capital (the real deploy figure)
 
 execution:
-  mode: real                           # REAL signed orders via SignerClient
-  account_index: 171
-  key_index: 4
-  risk_frac: 0.02                      # 2% of equity to the hard stop per trade
+  mode: paper                          # PaperClient simulation (no Lighter key needed)
+  risk_frac: 0.02                      # 2% of equity to the hard stop per trade (aggressive)
   fill_wait_bars: 3                    # cancel a resting maker entry after 3 bars unfilled
-  # private key injected from env LIGHTER_PRIVATE_KEY — never in this file
 
 signal_source: regime                  # native regime_mr signal computation
 exit_model: regime                     # fixed SL + maker TP + time stop
 
-symbols:                               # testnet market IDs (verified 2026-06-15)
+symbols:                               # mainnet market IDs (verified 2026-06-15)
   SOL:  { market_id: 2,  enabled: true, margin_usdt: 200, leverage: 10 }
   ETH:  { market_id: 0,  enabled: true, margin_usdt: 200, leverage: 10 }
   ZEC:  { market_id: 90, enabled: true, margin_usdt: 200, leverage: 10 }

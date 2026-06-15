@@ -1,16 +1,18 @@
-# Dashboard for the Booster testnet book (real-order regime_mr).
+# Dashboard for the Booster MAINNET paper book (aggressive regime_mr, scalper-style).
 # Deployed to /docker/lighter-dashboard/config.boost.yaml; container boost-dashboard
 # (127.0.0.1:8097), Traefik boost.agentneo.cloud. Reuses the shared dashboard image.
 db_path: "data/boost.db"
-lighter_host: "https://testnet.zklighter.elliot.ai"
-initial_collateral_usdc: 10000   # MUST match boost bridge config (else phantom equity/DD)
+lighter_host: "https://mainnet.zklighter.elliot.ai"
+initial_collateral_usdc: 3000    # MUST match boost bridge config (else phantom equity/DD)
 symbols:
   SOL: 2
   ETH: 0
+  ZEC: 90
+  HYPE: 24
   BTC: 1
 title: "Booster"
-subtitle: "testnet · real orders"
-show_fill_quality: true          # surfaces the fill-quality panel (real-order books only)
+subtitle: "mainnet · paper"
+show_fill_quality: false         # paper sim has no real fills — hide the fill-quality panel
 refresh:
   live_ms: 3000
   static_ms: 15000
