@@ -54,3 +54,6 @@ scripts/scalping/analysis/data/*.db-journal
 # Local diagnostic artifacts (not source)
 Screenshot*.png
 *.png.bak
+
+# Fetched market data (reproducible via fetch scripts)
+*.parquet

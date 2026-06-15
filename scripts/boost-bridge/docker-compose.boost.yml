@@ -1,0 +1,31 @@
+# Booster — aggressive regime_mr book on Lighter TESTNET (REAL signed orders).
+# Own image, own DB (data/boost.db), own container, own Telegram bot ("Booster").
+# Fully isolated from scalper-bridge — shares nothing.
+#
+# Deploy:  docker compose -f docker-compose.boost.yml up -d --build
+services:
+  boost-bridge:
+    build: .
+    image: boost-bridge:latest
+    container_name: boost-bridge
+    restart: unless-stopped
+    env_file:
+      - .env                         # LIGHTER_PRIVATE_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    environment:
+      TELEGRAM_SENDER_TAG: "BOOST"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./config.boost.yaml:/app/config.boost.yaml:ro
+    command: ["python", "-u", "run_bridge.py", "--config", "config.boost.yaml"]
+    healthcheck:
+      test: ["CMD-SHELL", "find /app/data/boost.db /app/data/boost.db-wal -mmin -20 -type f 2>/dev/null | grep -q . || exit 1"]
+      interval: 5m
+      timeout: 15s
+      start_period: 3m
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,74 @@
+# Booster — aggressive regime_mr book on Lighter TESTNET (real signed orders).
+# Purpose: measure whether the 88% backtest win-rate + maker fills survive live.
+# Separate from the scalper in every way. NEVER touches scalper-bridge.
+connection:
+  host: "https://testnet.zklighter.elliot.ai"
+  initial_collateral_usdc: 10000       # testnet account 171 balance (sizing base)
+
+execution:
+  mode: real                           # REAL signed orders via SignerClient
+  account_index: 171
+  key_index: 4
+  risk_frac: 0.02                      # 2% of equity to the hard stop per trade
+  fill_wait_bars: 3                    # cancel a resting maker entry after 3 bars unfilled
+  # private key injected from env LIGHTER_PRIVATE_KEY — never in this file
+
+signal_source: regime                  # native regime_mr signal computation
+exit_model: regime                     # fixed SL + maker TP + time stop
+
+symbols:                               # testnet market IDs (verified 2026-06-15)
+  SOL:  { market_id: 2,  enabled: true, margin_usdt: 200, leverage: 10 }
+  ETH:  { market_id: 0,  enabled: true, margin_usdt: 200, leverage: 10 }
+  ZEC:  { market_id: 90, enabled: true, margin_usdt: 200, leverage: 10 }
+  HYPE: { market_id: 24, enabled: true, margin_usdt: 200, leverage: 10 }
+  BTC:  { market_id: 1,  enabled: true, margin_usdt: 200, leverage: 10 }
+
+regime:                                # BASELINE config (comparable to live scalper)
+  trend_len: 200
+  slope_lb: 20
+  z_period: 30
+  z_entry: 1.5
+  sl_atr: 2.0
+  tp_frac: 0.3
+  max_bars: 12
+  limit_atr: 0.25
+  atr_period: 14
+  entry_valid_bars: 3
+
+entry:
+  timeframe: "15m"
+  min_abs_slope_pct: 0.0
+  require_retest: false
+  ema_period: 9
+  retest_overshoot_pct: 0.2
+  slope_lookback_bars: 3
+  retest_timeout_bars: 6
+
+notify:
+  startup: true
+  open: true
+  close: true
+  daily: true
+
+control:
+  telegram_enabled: true               # /kill, /off|on|close SYM|ALL, /status via Booster bot
+
+loop:
+  bar_poll_interval_s: 90
+  position_check_interval_s: 5
+  mark_poll_interval_s: 8
+  mark_stale_warn_s: 300
+  mark_stale_fatal_s: 900
+
+log:
+  level: "INFO"
+  db_path: "data/boost.db"
+
+# Measurement phase: flat $10k sizing, no compounding/withdrawal/cooldown — we want
+# maximum fill data and a clean read on the live edge before layering those on.
+sizing:
+  mode: fixed
+withdrawal:
+  enabled: false
+cooldown:
+  enabled: false
