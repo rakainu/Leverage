@@ -874,7 +874,7 @@ class Bridge:
         lv = entry_levels(side, close_v, atr_v, vwap_v, rg.limit_atr, rg.sl_atr, rg.tp_frac)
         if lv["tp_dist"] <= 0:
             return
-        base_amount = self._regime_base_amount(lv["sl_dist"])
+        base_amount = self._regime_base_amount(lv["sl_dist"], close_v)
         if self._is_real():
             if base_amount <= 0:
                 return
@@ -897,13 +897,17 @@ class Bridge:
     def _is_real(self) -> bool:
         return self.cfg.execution.mode == "real"
 
-    def _regime_base_amount(self, sl_dist: float) -> float:
+    def _regime_base_amount(self, sl_dist: float, price: float) -> float:
         """Risk-based size for a regime entry: risk `execution.risk_frac` of live
-        equity to the hard stop. base_amount = risk_usd / sl_dist (price distance)."""
-        if sl_dist <= 0:
+        equity to the hard stop (base = risk_usd / sl_dist), but capped so notional
+        never exceeds max_leverage * equity (a very tight stop can't over-lever the
+        account — matches the backtest's leverage cap)."""
+        if sl_dist <= 0 or price <= 0:
             return 0.0
         equity = self._equity_breakdown()[2]
-        return (self.cfg.execution.risk_frac * equity) / sl_dist
+        base = (self.cfg.execution.risk_frac * equity) / sl_dist
+        cap = (self.cfg.execution.max_leverage * equity) / price   # max notional / price
+        return min(base, cap)
 
     async def _finalize_regime_real(self, symbol: str, pos, fq, pe: dict):
         """A real maker entry filled on-chain (detected by the fast loop). Book the
@@ -1454,6 +1458,47 @@ class Bridge:
                 log.error("Daily summary error: %s", exc, exc_info=True)
             await asyncio.sleep(86400)
 
+    async def _restore_real(self, open_rows: list[dict]) -> list[OpenPosition]:
+        """Re-adopt real on-chain positions after a restart (real/testnet mode). For
+        each open DB trade, confirm the position still exists on-chain and resume
+        managing it (SL/TP/time-stop from the fast loop); mark reconciled-flat any
+        DB row whose position is already gone (closed externally / while we were down)."""
+        restored: list[OpenPosition] = []
+        for row in open_rows:
+            symbol = row["symbol"]
+            sym_cfg = self.cfg.symbols.get(symbol)
+            if sym_cfg is None:
+                continue
+            market_id = sym_cfg.market_id
+            tid = row["id"]
+            real = await self.executor.read_position(market_id)
+            if real is None or real["size"] <= 0:
+                log.warning("%s: DB trade #%d open but flat on-chain — reconciled-flat", symbol, tid)
+                self.db.update_trade_close(
+                    tid, exit_price=float(row["entry_price"]), exit_reason="reconcile_flat",
+                    pnl_usdt=0.0, pnl_pct_account=0.0, duration_secs=0, max_state=0,
+                    closed_at=datetime.now(timezone.utc).isoformat())
+                continue
+            try:
+                ot = datetime.fromisoformat(row["opened_at"])
+                bars_held = max(0, int((datetime.now(timezone.utc) - ot).total_seconds() // 900))
+            except Exception:
+                bars_held = 0
+            entry = float(row["entry_price"])
+            pos = OpenPosition(
+                symbol=symbol, market_id=market_id, side=row["side"], entry_price=entry,
+                base_amount=self.executor.quantize_size(market_id, real["size"]),
+                margin_usdt=0.0, leverage=0.0, opened_at=time.time() - bars_held * 900,
+                notional=entry * real["size"], sl_price=float(row["initial_sl"] or 0.0),
+                tp_price=float(row["initial_tp"] or 0.0), bars_held=bars_held, trail_high=entry)
+            self.executor.positions[symbol] = pos
+            self.trade_ids[symbol] = tid
+            restored.append(pos)
+            log.info("%s: RE-ADOPTED on-chain %s %.6f @ %.4f SL=%.4f TP=%.4f (bars_held=%d)",
+                     symbol, pos.side.upper(), pos.base_amount, entry, pos.sl_price,
+                     pos.tp_price, bars_held)
+        return restored
+
     async def restore_open_positions(self) -> list[OpenPosition]:
         """Reconstruct any orphaned open positions from the DB after a restart.
 
@@ -1475,12 +1520,9 @@ class Bridge:
         if not open_rows:
             return []
         if self._is_real():
-            # Real positions persist on-chain; the paper-order restore path would
-            # create phantom positions. v1: don't auto-restore — log for manual
-            # reconciliation. (First deploy has none open, so this is a no-op then.)
-            log.warning("REAL mode: %d open trade(s) in DB not auto-restored — reconcile "
-                        "on-chain manually if needed", len(open_rows))
-            return []
+            # Real positions persist on-chain — re-adopt them (the paper-order restore
+            # path below would create phantom positions). Reconcile against the chain.
+            return await self._restore_real(open_rows)
 
         log.info("Restoring %d open position(s) from trade_log...", len(open_rows))
         candle_api = lighter.CandlestickApi(self.api)

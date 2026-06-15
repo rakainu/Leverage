@@ -199,6 +199,7 @@ class ExecutionConfig:
     account_index: int = 0
     key_index: int = 0
     risk_frac: float = 0.02         # regime entries: fraction of equity risked to the hard stop
+    max_leverage: float = 10.0      # cap notional at max_leverage * equity (matches backtest; tight stops can't over-lever)
     fill_wait_bars: int = 3         # cancel a resting real maker entry after N bars unfilled
     private_key: str = ""           # injected from env, never persisted
 
