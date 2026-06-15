@@ -1,6 +1,6 @@
 # Scalper — regime-gated VWAP mean-reversion PAPER bridge (Lighter zero-fee).
 # Native signals (no webhooks): computes EMA-trend gate + VWAP z-score on its own
-# 15m candle feed for the 5-coin basket, long+short, FIXED notional, maker-limit
+# 15m candle feed for the 6-coin basket, long+short, FIXED notional, maker-limit
 # entry. Validated: scripts/scalping/analysis/scalp_search_2026-05-30/STRATEGY.md
 #   pooled PF 1.49 | 89% WR | 192 trades/wk | OOS 1.42 | walk-forward 4/4 |
 #   2x-slip 1.43 | all 5 coins PF>=1.33 | 10x = 0 liquidations.
@@ -10,40 +10,24 @@
 
 connection:
   host: "https://mainnet.zklighter.elliot.ai"
-  initial_collateral_usdc: 6000        # paper start: $500 margin x 10 coins ($5000) + ~20% buffer
+  initial_collateral_usdc: 3600        # 6 coins x $500 margin ($3000 notional) + 20% buffer
 
 signal_source: regime                  # native regime_mr signal computation
 exit_model: regime                     # fixed SL + TP (maker target) + time stop
 
-# 10-coin test basket (2026-06-04). Uniform $500 margin @ 10x = $5000 notional each.
-# 10x = validated sweet spot (0 liquidations, best net/DD, full PF). Uniform sizing
-# = apples-to-apples per-coin PF/WR comparison to decide which coins to keep.
-# Coins are the most-liquid Lighter crypto perps by 24h volume. Per-ticker entries
-# can be toggled live via Telegram (/off SYM, /on SYM) — see `control:` below.
-# The old WS-flakiness reason for disabling coins is gone (REST snapshot mark feed).
+# 6-coin live basket (2026-06-14). Trimmed from 10 -> 6: XRP/ZEC/TON/NEAR/WLD/MKR
+# removed as net losers (combined -$1,242, all 67-76% WR vs ~84% breakeven); history
+# archived (docs/scalper/dead-coins-2026-06-14/) and purged from scalper.db. Kept set
+# = proven winners: +$1,685 / 85.8% WR / PF 1.92 over 219 trades. Uniform $500 margin
+# @ 10x = $5000 notional each (validated sweet spot: 0 liquidations, best net/DD).
+# Per-ticker entries toggle live via Telegram (/off SYM, /on SYM) — see `control:`.
 symbols:                               # market_id : 24h vol on Lighter
   ETH:  { market_id: 0,  enabled: true, margin_usdt: 500, leverage: 10 }   # $558M
   BTC:  { market_id: 1,  enabled: true, margin_usdt: 500, leverage: 10 }   # $1.68B (re-enabled)
   SOL:  { market_id: 2,  enabled: true, margin_usdt: 500, leverage: 10 }   # $71M
-  XRP:  { market_id: 7,  enabled: true, margin_usdt: 500, leverage: 10 }   # $3.5M
-  # WLD benched 2026-06-09 (n=6 noise + stranded-short bug). DISABLED 2026-06-10:
-  # its orphaned short has now exited (flat), so it no longer needs to load feeds.
-  # Keeping it enabled added an 11th feed and pushed total Lighter REST rate over the
-  # ~1.4/s budget -> chronic 429s. Re-enable + DB switch ON to re-test.
-  WLD:  { market_id: 6,  enabled: false, margin_usdt: 500, leverage: 10 }   # $7M  (benched, flat)
-  # NEAR benched 2026-06-09 — heavy loser (-$257 / 18 trades). DISABLED 2026-06-10:
-  # open long (#170) has exited (flat); dropping its feed to stay under the REST budget.
-  NEAR: { market_id: 10, enabled: false, margin_usdt: 500, leverage: 10 }   # $3.6M (benched, flat)
-  TON:  { market_id: 12, enabled: true, margin_usdt: 500, leverage: 10 }   # $8M
   HYPE: { market_id: 24, enabled: true, margin_usdt: 500, leverage: 10 }   # $218M
   BNB:  { market_id: 25, enabled: true, margin_usdt: 500, leverage: 10 }   # $4.2M
-  ZEC:  { market_id: 90, enabled: true, margin_usdt: 500, leverage: 10 }   # $42M
-  # New blood 2026-06-09 — deepest untested Lighter perps (>> LINK/SUI liquidity).
-  # MKR is an INACTIVE market on Lighter (empty book, last_price=0) — disabled.
-  MKR:  { market_id: 28, enabled: false, margin_usdt: 500, leverage: 10 }  # inactive market
   XMR:  { market_id: 77, enabled: true, margin_usdt: 500, leverage: 10 }   # $4.8M
-
-# regime_mr params (the strategy's real knobs — locked from the validated config)
 regime:
   trend_len: 200          # EMA length for the higher-tf trend gate
   slope_lb: 20            # slope = EMA - EMA.shift(20); sign sets the regime
@@ -77,21 +61,46 @@ control:
                          # authorized to TELEGRAM_CHAT_ID (.env) only
 
 loop:
-  bar_poll_interval_s: 90      # 15m bars — feeds staggered+jittered; 90s × 9 active
-                               # coins = ~1 candle req/10s, under Lighter's WAF rate
-                               # limit on /candlesticks (incident 2026-06-04). Still
-                               # catches a 15m close within ~1.5min.
+  bar_poll_interval_s: 90      # 15m bars — feeds staggered+jittered; 90s × 6 coins
+                               # = ~1 candle req/9s, under Lighter's WAF rate limit
+                               # on /candlesticks (incident 2026-06-04). Still catches
+                               # a 15m close within ~1.5min.
   position_check_interval_s: 5 # SL/TP check on the live mark every 5s
   mark_poll_interval_s: 8      # PER-MARKET order-book refresh period. Polls are
-                               # round-robin (~1 req/0.9s for 9 active coins = ~1.1/s),
-                               # NOT a burst — keeps TOTAL Lighter REST rate (mark+bar)
-                               # under the proven-safe ~1.4/s budget and off the WAF/429
-                               # (incidents 2026-06-04 WAF, 2026-06-10 429). Marks stay
-                               # <=8s old (fine for 2ATR stops). RULE: each coin ADDED
-                               # back must keep total <=~1.4/s, else raise this interval.
+                               # round-robin (1 req/~1.3s for 6 coins = ~0.75/s),
+                               # NOT a 6-wide burst — keeps total REST rate at the
+                               # proven-safe ~1.3/s and off Lighter's WAF (incident
+                               # 2026-06-04). Marks stay <=8s old (fine for 2ATR stops).
   mark_stale_warn_s: 300
   mark_stale_fatal_s: 900      # last-resort full restart (only if OPEN position + polls failing)
 
 log:
   level: "INFO"
   db_path: "data/scalper.db"
+
+# News-rip circuit breaker (2026-06-14). After consec_losses losing closes
+# in a row across the whole basket, block ALL new entries for the set minutes, then
+# auto-resume.
+# Backtest cooldown(3,180m) on the validated 5-coin set: pooled PF 1.49->1.58,
+# OOS 1.42->1.47, walk-forward floor 1.42->1.44, max-DD -52%, ~4% fewer trades,
+# 0 liquidations. REVERT = set enabled:false (one line) + restart.
+cooldown:
+  enabled: true
+  consec_losses: 3
+  minutes: 180
+
+# Position sizing (2026-06-14). compound = margin scales with live account equity
+# (base_equity -> base margin per coin), capped at base x cap_mult and floored at 0
+# on drawdown. See src/lighter_bridge/sizing.py (unit-tested, paper == live).
+sizing:
+  mode: compound
+  base_equity: 3600      # equity at which a coin trades its base $500 margin
+  cap_mult: 3.0          # margin/notional never exceeds 3x base ($1,500 margin / $15k notl)
+
+# Weekly profit withdrawal. Skims REALIZED equity above base_equity x target_mult
+# ($10,800), once per ISO week, to the withdrawals ledger + Telegram + dashboard.
+# Never touches unrealized P&L. REVERT = set enabled:false.
+withdrawal:
+  enabled: true
+  cadence: weekly
+  target_mult: 3.0

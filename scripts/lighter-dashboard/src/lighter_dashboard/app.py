@@ -165,8 +165,12 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
         positions = await _open_positions_with_pnl()
         realized_all = sum(pnls)
         unrealized = sum(p["upnl"] or 0 for p in positions)
-        equity = cfg.initial_collateral_usdc + realized_all + unrealized
-        snaps = [s["portfolio_value"] for s in db.snapshots()] + [equity]
+        withdrawn = db.withdrawn_total()
+        # gross = trading value (drives curve + true total return); equity = net balance
+        # actually in the account after profit withdrawals.
+        gross = cfg.initial_collateral_usdc + realized_all + unrealized
+        equity = gross - withdrawn
+        snaps = [s["portfolio_value"] for s in db.snapshots()] + [gross]
         days = _REALIZED_WINDOWS[window]
         if days is None:                              # all-time: no lower bound
             cutoff = "1970-01-01T00:00:00+00:00"
@@ -176,7 +180,8 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
         win_net, win_n, win_wins = db.realized_since(cutoff)
         ctx = {
             "equity": equity,
-            "equity_pct": (equity / cfg.initial_collateral_usdc - 1) * 100,
+            "equity_pct": (gross / cfg.initial_collateral_usdc - 1) * 100,
+            "withdrawn": withdrawn,
             "n_open": len(positions),
             "realized": win_net,
             "realized_n": win_n,
@@ -188,6 +193,21 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
             "poll_s": cfg.live_ms // 1000,
         }
         return templates.TemplateResponse(request, "partials/kpis.html", ctx)
+
+    @app.get("/panel/withdrawals", response_class=HTMLResponse)
+    async def panel_withdrawals(request: Request):
+        rows = db.withdrawals(limit=52)
+        total = db.withdrawn_total()
+        for w in rows:
+            w["when"] = _fmt_close(w.get("ts"))
+        last = rows[0] if rows else None
+        # account is held at the last withdrawal's equity_after (the target level)
+        target = last["equity_after"] if last else None
+        return templates.TemplateResponse(
+            request, "partials/withdrawals.html",
+            {"rows": rows, "total": total, "count": len(rows),
+             "last": last, "target": target, "tz_label": _tz_label()},
+        )
 
     @app.get("/panel/positions", response_class=HTMLResponse)
     async def panel_positions(request: Request):

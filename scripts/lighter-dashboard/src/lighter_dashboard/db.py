@@ -116,3 +116,24 @@ class DashboardDB:
                 "SELECT ts FROM account_snapshot ORDER BY ts DESC LIMIT 1"
             ).fetchone()
         return row["ts"] if row else None
+
+    def withdrawn_total(self) -> float:
+        """Sum of all profit withdrawals. 0 if the ledger doesn't exist yet."""
+        with self._conn() as c:
+            try:
+                row = c.execute("SELECT COALESCE(SUM(amount),0) AS t FROM withdrawals").fetchone()
+            except sqlite3.OperationalError:
+                return 0.0
+        return float(row["t"] or 0.0)
+
+    def withdrawals(self, limit: int = 25) -> list[dict]:
+        """Recent withdrawal ledger rows (newest first); [] if no ledger yet."""
+        with self._conn() as c:
+            try:
+                rows = c.execute(
+                    "SELECT ts, amount, equity_before, equity_after, note "
+                    "FROM withdrawals ORDER BY id DESC LIMIT ?", (limit,)
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
+        return [dict(r) for r in rows]

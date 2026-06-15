@@ -63,6 +63,19 @@ CREATE TABLE IF NOT EXISTS ticker_switch (
     entries_enabled INTEGER NOT NULL,
     updated_at      TEXT
 );
+
+-- Profit-withdrawal ledger. Each row is a realized skim of equity above target.
+-- withdrawn_total = SUM(amount) reduces the equity base used for sizing + display,
+-- mirroring a real transfer off the exchange. The bridge reads this to enforce
+-- once-per-period cadence (survives restarts) and the dashboard shows the tally.
+CREATE TABLE IF NOT EXISTS withdrawals (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            TEXT    NOT NULL,
+    amount        REAL    NOT NULL,
+    equity_before REAL,
+    equity_after  REAL,
+    note          TEXT
+);
 """
 
 
@@ -109,6 +122,28 @@ class TradeLogDB:
             tuple(kwargs.values()),
         )
         self.conn.commit()
+
+    # ---- profit-withdrawal ledger ----
+    def record_withdrawal(self, amount: float, equity_before: float,
+                          equity_after: float, note: str = "") -> int:
+        from datetime import datetime, timezone
+        cur = self.conn.execute(
+            "INSERT INTO withdrawals (ts, amount, equity_before, equity_after, note) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (datetime.now(timezone.utc).isoformat(), amount, equity_before, equity_after, note),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def withdrawn_total(self) -> float:
+        row = self.conn.execute("SELECT COALESCE(SUM(amount), 0) FROM withdrawals").fetchone()
+        return float(row[0] or 0.0)
+
+    def last_withdrawal_ts(self) -> str | None:
+        row = self.conn.execute(
+            "SELECT ts FROM withdrawals ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return row[0] if row else None
 
     def snapshot_account(self, collateral: float, portfolio_value: float,
                           n_open: int, cum_pnl: float):

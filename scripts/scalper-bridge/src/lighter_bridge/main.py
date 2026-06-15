@@ -31,6 +31,7 @@ from .config import BridgeConfig, load_config
 from .db import TradeLogDB
 from .executor import OpenPosition, PaperExecutor
 from . import notify
+from . import sizing
 from .signals import (
     check_retest, compute_ema_and_slope, generate_v3_signals,
     passes_entry_filters, prepare,
@@ -132,6 +133,15 @@ class Bridge:
         if self.cfg.cooldown.enabled:
             log.info("Cooldown breaker: %d consec losses -> block entries %dm (auto-resume)",
                      self.cfg.cooldown.consec_losses, self.cfg.cooldown.minutes)
+        if self.cfg.sizing.mode == "compound":
+            sz = self.cfg.sizing
+            log.info("Sizing: COMPOUND off equity (base $%.0f -> base margin), cap %gx "
+                     "(max margin = base x %g)", sz.base_equity, sz.cap_mult, sz.cap_mult)
+        if self.cfg.withdrawal.enabled:
+            wd = self.cfg.withdrawal
+            log.info("Withdrawal: %s skim of realized equity above %gx ($%.0f); "
+                     "total taken so far $%.2f", wd.cadence, wd.target_mult,
+                     self.cfg.sizing.base_equity * wd.target_mult, self.db.withdrawn_total())
 
         # Lighter client + paper client
         self.api = lighter.ApiClient(configuration=lighter.Configuration(host=self.cfg.host))
@@ -843,7 +853,8 @@ class Bridge:
         entry at the LIMIT price (maker fill, no slippage — matches the backtest)."""
         side = pe["side"]
         now = datetime.now(timezone.utc).isoformat()
-        pos = await self.executor.open_position(symbol, side)
+        pos = await self.executor.open_position(symbol, side,
+                                                margin_override=self._entry_margin(symbol))
         if pos is None:
             return
         # Override to the maker limit price (executor filled at the live mark).
@@ -1006,6 +1017,14 @@ class Bridge:
         if self._cooldown_active():
             mins = int((self._cd_until - time.time()) / 60) + 1
             lines.append(f"🧊 COOLDOWN active \u2014 entries blocked ~{mins}m more")
+        if self.cfg.sizing.mode == "compound":
+            eq = self._equity_breakdown()[2]
+            mult = (eq / self.cfg.sizing.base_equity) if self.cfg.sizing.base_equity else 1.0
+            lines.append(f"\U0001f4c8 Sizing: compound {min(mult, self.cfg.sizing.cap_mult):.2f}x "
+                         f"(cap {self.cfg.sizing.cap_mult:g}x) · equity ${eq:,.0f}")
+        _wtot = self.db.withdrawn_total()
+        if _wtot > 0:
+            lines.append(f"\U0001f4b5 Withdrawn to date: ${_wtot:,.2f}")
         for sym in sorted(self.executor.symbols):
             on = self._entries_allowed(sym)
             pos = self.executor.positions.get(sym)
@@ -1088,9 +1107,10 @@ class Bridge:
     def _equity_breakdown(self) -> tuple[float, float, float]:
         """Return (realized_pnl, unrealized_pnl, total_equity).
 
-        realized_pnl  = sum of closed-trade PnL from DB
+        realized_pnl  = sum of closed-trade PnL from DB (gross, pre-withdrawal)
         unrealized_pnl = sum of pnl_at_mark over open positions
-        total_equity   = initial_collateral + realized + unrealized
+        total_equity   = initial_collateral + realized + unrealized - withdrawn
+        (withdrawn = profit already skimmed off the account; see withdrawals ledger)
         """
         stats = self.db.summary()
         realized = float(stats.get("net_pnl") or 0.0)
@@ -1100,8 +1120,60 @@ class Bridge:
                 v = self.executor.pnl_at_mark(sym)
                 if v is not None:
                     unrealized += float(v)
-        equity = float(self.cfg.initial_collateral_usdc) + realized + unrealized
+        equity = (float(self.cfg.initial_collateral_usdc) + realized + unrealized
+                  - self.db.withdrawn_total())
         return realized, unrealized, equity
+
+    # ---- compounding sizing + profit withdrawal (config-gated; see sizing.py) ----
+    def _entry_margin(self, symbol: str) -> float:
+        """Margin to post for a NEW entry. Compounding (capped) when enabled, else
+        the symbol's configured fixed margin. Sizes off live account equity, so it
+        scales up as the account grows and down on drawdown."""
+        base = self.cfg.symbols[symbol].margin_usdt
+        sz = self.cfg.sizing
+        if sz.mode != "compound":
+            return base
+        return sizing.compound_margin(base, self._equity_breakdown()[2], sz.base_equity, sz.cap_mult)
+
+    def _realized_equity(self) -> float:
+        """Realized-only account equity for the withdrawal decision — never skims
+        open (unrealized) P&L. = initial_collateral + realized - withdrawn."""
+        realized = float(self.db.summary().get("net_pnl") or 0.0)
+        return float(self.cfg.initial_collateral_usdc) + realized - self.db.withdrawn_total()
+
+    def _same_withdrawal_period(self, last_iso: str, cadence: str) -> bool:
+        """True if `last_iso` falls in the current cadence period (so we don't
+        withdraw twice in one ISO week / day). Survives restarts via the ledger."""
+        try:
+            last = datetime.fromisoformat(last_iso)
+        except (ValueError, TypeError):
+            return False
+        now = datetime.now(timezone.utc)
+        if cadence == "daily":
+            return last.date() == now.date()
+        return last.isocalendar()[:2] == now.isocalendar()[:2]   # weekly (ISO year, week)
+
+    def _maybe_withdraw(self):
+        """Once per cadence period, skim realized equity above target to the ledger."""
+        wd = self.cfg.withdrawal
+        if not wd.enabled:
+            return
+        last = self.db.last_withdrawal_ts()
+        if last is not None and self._same_withdrawal_period(last, wd.cadence):
+            return
+        realized_eq = self._realized_equity()
+        surplus = sizing.withdrawal_surplus(realized_eq, self.cfg.sizing.base_equity, wd.target_mult)
+        if surplus <= 0:
+            return
+        after = realized_eq - surplus
+        self.db.record_withdrawal(surplus, realized_eq, after,
+                                  note=f"{wd.cadence} skim > {wd.target_mult:g}x")
+        total = self.db.withdrawn_total()
+        log.warning("WITHDRAWAL: skimmed $%.2f (realized equity $%.2f -> $%.2f); total taken $%.2f",
+                    surplus, realized_eq, after, total)
+        asyncio.create_task(notify.send(
+            f"\U0001f4b5 Withdrawal: skimmed ${surplus:,.2f} profit — account back to "
+            f"${after:,.0f} (target {wd.target_mult:g}x). Total taken to date: ${total:,.2f}."))
 
     async def heartbeat_loop(self):
         """Every 5 minutes, snapshot total equity (collateral + realized + unrealized)."""
@@ -1112,11 +1184,16 @@ class Bridge:
                 await asyncio.sleep(5)
                 continue
             try:
-                realized, unrealized, equity = self._equity_breakdown()
-                total_pnl = equity - self.cfg.initial_collateral_usdc
+                self._maybe_withdraw()                      # weekly profit skim (config-gated)
+                realized, unrealized, equity = self._equity_breakdown()   # equity = net (post-withdrawal)
+                withdrawn = self.db.withdrawn_total()
+                # The curve tracks GROSS trading value so weekly skims don't read as
+                # drawdowns; the live "equity" balance is the net (post-withdrawal) figure.
+                gross_equity = equity + withdrawn
+                total_pnl = gross_equity - self.cfg.initial_collateral_usdc
                 free_basis = self.cfg.initial_collateral_usdc + realized
                 n_open = len(self.executor.positions)
-                self.db.snapshot_account(free_basis, equity, n_open, total_pnl)
+                self.db.snapshot_account(free_basis, gross_equity, n_open, total_pnl)
                 # Per-symbol mark-feed freshness, for at-a-glance WS health.
                 mark_parts: list[str] = []
                 for name in self.executor.symbols:
@@ -1127,9 +1204,10 @@ class Bridge:
                     elif mark is None:
                         mark_parts.append(f"{name}=NO_MARK")
                 marks_str = "  " + " ".join(mark_parts) if mark_parts else ""
+                wd_str = f"  withdrawn=${withdrawn:,.2f}" if withdrawn > 0 else ""
                 log.info(
-                    "HEARTBEAT  equity=$%.2f  realized=$%+.2f  unrealized=$%+.2f  open=%d%s",
-                    equity, realized, unrealized, n_open, marks_str,
+                    "HEARTBEAT  equity=$%.2f  realized=$%+.2f  unrealized=$%+.2f  open=%d%s%s",
+                    equity, realized, unrealized, n_open, wd_str, marks_str,
                 )
                 last_seen_at = time.time()
             except Exception as exc:

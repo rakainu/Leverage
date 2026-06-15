@@ -1,0 +1,37 @@
+<div class="panel">
+  <div class="label label--rule mb-2">💵 Profit withdrawals</div>
+  <div class="grid gap-3 mb-3" style="grid-template-columns: 1fr 1fr 1fr;">
+    <div>
+      <div class="label">Total withdrawn</div>
+      <div class="text-2xl font-bold pos">${{ "%.2f"|format(total) }}</div>
+    </div>
+    <div>
+      <div class="label">Withdrawals</div>
+      <div class="text-2xl font-bold">{{ count }}</div>
+    </div>
+    <div>
+      <div class="label">Account held at</div>
+      <div class="text-2xl font-bold">{{ ("$%.0f"|format(target)) if target is not none else "—" }}</div>
+    </div>
+  </div>
+  {% if rows %}
+  <div class="scroll-6">
+    <table class="w-full">
+      <thead><tr><th>when ({{ tz_label }})</th><th>amount</th><th>before</th><th>after</th><th>note</th></tr></thead>
+      <tbody>
+        {% for w in rows %}
+        <tr>
+          <td class="mut" title="{{ w.ts }}">{{ w.when }}</td>
+          <td class="pos">${{ "%.2f"|format(w.amount) }}</td>
+          <td class="mut">{{ ("$%.0f"|format(w.equity_before)) if w.equity_before is not none else "—" }}</td>
+          <td class="mut">{{ ("$%.0f"|format(w.equity_after)) if w.equity_after is not none else "—" }}</td>
+          <td class="mut">{{ w.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="mut">No withdrawals yet — the account compounds until it reaches the target, then skims weekly.</div>
+  {% endif %}
+</div>

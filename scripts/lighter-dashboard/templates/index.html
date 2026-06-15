@@ -87,6 +87,9 @@
   <!-- B: Equity curve (static) -->
   <div hx-get="/panel/equity" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s" class="mb-4"></div>
 
+  <!-- B2: Profit withdrawals (static) -->
+  <div hx-get="/panel/withdrawals" hx-trigger="load, every {{ cfg.static_ms // 1000 }}s" class="mb-4"></div>
+
   <div class="grid grid-cols-3 gap-4 mb-4">
     <!-- C: Open positions (live) -->
     <div hx-get="/panel/positions" hx-trigger="load, every {{ cfg.live_ms // 1000 }}s"></div>

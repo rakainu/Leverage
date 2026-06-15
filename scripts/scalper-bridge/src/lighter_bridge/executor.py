@@ -125,10 +125,16 @@ class PaperExecutor:
             return None
         return time.monotonic() - ts
 
-    def size_for_margin(self, symbol: str, ref_price: float) -> float:
-        """Compute base_amount for a position with the symbol's margin × leverage."""
+    def size_for_margin(self, symbol: str, ref_price: float,
+                        margin_override: Optional[float] = None) -> float:
+        """Compute base_amount for a position with margin × leverage.
+
+        `margin_override` (compounding sizer) replaces the symbol's configured
+        margin when given; leverage is unchanged.
+        """
         sym_cfg = self.symbols[symbol]
-        notional = sym_cfg["margin_usdt"] * sym_cfg["leverage"]
+        margin = margin_override if margin_override is not None else sym_cfg["margin_usdt"]
+        notional = margin * sym_cfg["leverage"]
         raw = notional / ref_price
         market_id = sym_cfg["market_id"]
         mc = self.paper.market_configs.get(market_id)
@@ -154,12 +160,14 @@ class PaperExecutor:
         return symbol in self.positions
 
     async def open_position(self, symbol: str, side: str,
-                            base_amount: Optional[float] = None) -> Optional[OpenPosition]:
+                            base_amount: Optional[float] = None,
+                            margin_override: Optional[float] = None) -> Optional[OpenPosition]:
         """Place a market buy/sell. Returns the new OpenPosition on success.
 
         If `base_amount` is given (risk-based sizing from the caller), it is used
         directly (rounded to the market's size precision, floored at min); else
-        the per-symbol margin x leverage sizing is used.
+        the per-symbol margin x leverage sizing is used, with `margin_override`
+        (compounding sizer) replacing the configured margin when supplied.
         """
         if self.is_open(symbol):
             log.warning("%s: already have an open position; ignoring %s entry", symbol, side)
@@ -175,14 +183,15 @@ class PaperExecutor:
             if mc:
                 size = max(round(size, mc.size_decimals), mc.min_base_amount)
         else:
-            size = self.size_for_margin(symbol, price)
+            size = self.size_for_margin(symbol, price, margin_override)
         if size <= 0:
             log.error("%s: computed size <= 0 (price %.4f)", symbol, price)
             return None
 
+        margin_used = margin_override if margin_override is not None else sym_cfg["margin_usdt"]
         order_side = lighter.PaperOrderSide.BUY if side == "long" else lighter.PaperOrderSide.SELL
         log.info("%s: OPEN %s size=%.4f @ ~$%.4f (margin $%.0f x%.0f)",
-                 symbol, side.upper(), size, price, sym_cfg["margin_usdt"], sym_cfg["leverage"])
+                 symbol, side.upper(), size, price, margin_used, sym_cfg["leverage"])
         try:
             result = await self.paper.create_paper_order(lighter.PaperOrderRequest(
                 market_id=sym_cfg["market_id"],
@@ -200,7 +209,7 @@ class PaperExecutor:
             side=side,
             entry_price=float(result.avg_price),
             base_amount=self.quantize_size(sym_cfg["market_id"], float(result.filled_size)),
-            margin_usdt=sym_cfg["margin_usdt"],
+            margin_usdt=margin_used,
             leverage=sym_cfg["leverage"],
             opened_at=time.time(),
             notional=float(result.avg_price) * float(result.filled_size),

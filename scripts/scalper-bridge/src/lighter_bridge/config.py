@@ -167,6 +167,28 @@ class CooldownConfig:
 
 
 @dataclass
+class SizingConfig:
+    """Position sizing mode. `fixed` (default) posts each symbol's configured
+    margin. `compound` scales margin with live account equity (base_equity ->
+    base margin), capped at base * cap_mult and floored at 0 on drawdown.
+    See sizing.compound_margin — identical math for paper and live."""
+    mode: str = "fixed"            # "fixed" | "compound"
+    base_equity: float = 0.0       # equity at which a symbol trades its base margin; 0 => initial_collateral
+    cap_mult: float = 3.0          # margin never exceeds base_margin * cap_mult
+
+
+@dataclass
+class WithdrawalConfig:
+    """Periodic profit withdrawal. Skims REALIZED equity above
+    base_equity * target_mult, at most once per cadence period. Records to the
+    `withdrawals` ledger and reduces the equity base used for sizing. Off by
+    default; revert = set enabled:false."""
+    enabled: bool = False
+    cadence: str = "weekly"        # "weekly" (ISO week) | "daily"
+    target_mult: float = 3.0       # skim realized equity above base_equity * target_mult
+
+
+@dataclass
 class BridgeConfig:
     host: str
     initial_collateral_usdc: float
@@ -186,6 +208,8 @@ class BridgeConfig:
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
     cooldown: CooldownConfig = field(default_factory=CooldownConfig)
+    sizing: SizingConfig = field(default_factory=SizingConfig)
+    withdrawal: WithdrawalConfig = field(default_factory=WithdrawalConfig)
 
 
 def load_config(path: str | Path) -> BridgeConfig:
@@ -244,6 +268,11 @@ def load_config(path: str | Path) -> BridgeConfig:
     notify = NotifyConfig(**raw.get("notify", {}))
     control = ControlConfig(**raw.get("control", {}))
     cooldown = CooldownConfig(**raw.get("cooldown", {}))
+    sizing = SizingConfig(**raw.get("sizing", {}))
+    withdrawal = WithdrawalConfig(**raw.get("withdrawal", {}))
+    # base_equity defaults to the starting collateral if left at 0.
+    if sizing.base_equity <= 0:
+        sizing.base_equity = float(raw["connection"]["initial_collateral_usdc"])
 
     if exit_model == "trail" and exits is None:
         raise ValueError("exit_model 'trail' requires an 'exits:' config block")
@@ -268,4 +297,6 @@ def load_config(path: str | Path) -> BridgeConfig:
         notify=notify,
         control=control,
         cooldown=cooldown,
+        sizing=sizing,
+        withdrawal=withdrawal,
     )

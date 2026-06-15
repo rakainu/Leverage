@@ -7,6 +7,7 @@
     <div class="label">Equity</div>
     <div class="text-2xl font-bold">${{ "%.2f"|format(equity) }}</div>
     <div class="{{ 'pos' if equity_pct >= 0 else 'neg' }}">{{ "%+.2f"|format(equity_pct) }}% all-time</div>
+    {% if withdrawn and withdrawn > 0 %}<div class="mut">${{ "%.0f"|format(withdrawn) }} withdrawn</div>{% endif %}
   </div>
   <div class="panel">
     <div class="label">Open positions</div>
