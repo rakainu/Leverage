@@ -268,7 +268,10 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
                   - timedelta(hours=_SIGNAL_LOOKBACK_HOURS)).isoformat()
         signals = db.signals(limit=50, since_iso=cutoff)
         for s in signals:
-            s["bar_hm"] = _fmt_hm(s.get("bar_time"))
+            # show the real event time (when it was detected / cancelled), not the
+            # candle the signal belongs to — so a 3-bar unfilled cancel reads ~45m
+            # after its detection, as it actually happened.
+            s["event_hm"] = _fmt_hm(s.get("detected_at"))
         return templates.TemplateResponse(
             request, "partials/signals.html",
             {"signals": signals, "tz_label": _tz_label()},

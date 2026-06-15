@@ -3,7 +3,7 @@
   <div class="scroll-4">
     {% for s in signals %}
     <div class="py-1" style="font-size:14px;">
-      <span class="mut" title="{{ s.bar_time }}">{{ s.bar_hm }}</span>
+      <span class="mut" title="detected {{ s.detected_at }} · candle {{ s.bar_time }}">{{ s.event_hm }}</span>
       {{ s.symbol }} {{ s.side }}
       <span class="{{ 'pos' if s.outcome == 'fired' else ('mut' if s.outcome == 'expired' else 'neg') }}">{{ s.outcome }}</span>
       {% if s.slope_pct is not none %}<span class="mut">· slope {{ "%.2f"|format(s.slope_pct) }}</span>{% endif %}
