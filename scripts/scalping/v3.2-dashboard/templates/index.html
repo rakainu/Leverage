@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Scalping V3.2 · Telemetry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070a0e; --bg2:#0b1016; --panel:#0d141c; --line:#1b2733;
+  --ink:#eef5f9; --dim:#e4eef4; --faint:#cdd7dd;
+  --engine:#34d3e6; --engine-dim:#15616b;
+  --live:#ffb24d; --live-dim:#7a4e16;
+  --good:#46e0a0; --bad:#ff5d6c; --warn:#ffcf5c;
+  --mono:'IBM Plex Mono',monospace; --disp:'Rajdhani',sans-serif; --body:'IBM Plex Sans',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--ink);font-family:var(--body);-webkit-font-smoothing:antialiased}
+body{
+  min-height:100vh;
+  background-image:
+    radial-gradient(1200px 600px at 78% -10%, rgba(52,211,230,.06), transparent 60%),
+    radial-gradient(900px 500px at 0% 110%, rgba(255,178,77,.05), transparent 55%),
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size:auto,auto,42px 42px,42px 42px;
+  background-position:center;
+}
+body::after{ /* grain */
+  content:"";position:fixed;inset:0;pointer-events:none;opacity:.035;z-index:99;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.wrap{max-width:1280px;margin:0 auto;padding:8px 26px 44px}
+
+/* ---- HUD panel frame with clipped corners ---- */
+.panel{
+  position:relative;background:linear-gradient(180deg,var(--panel),var(--bg2));
+  border:1px solid var(--line);
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px));
+  padding:12px 16px;
+}
+.panel::before{ /* corner ticks */
+  content:"";position:absolute;top:0;right:0;width:14px;height:14px;
+  border-left:1px solid var(--engine-dim);transform:translateX(-1px) rotate(0deg);
+}
+.label{font-family:var(--disp);text-transform:uppercase;letter-spacing:.18em;font-size:12px;color:var(--dim);font-weight:600}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---- header ---- */
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;
+  border-bottom:1px solid var(--line);padding-bottom:9px;margin-bottom:12px}
+.brand h1{font-family:var(--disp);font-weight:700;font-size:27px;letter-spacing:.04em;line-height:.95;
+  background:linear-gradient(90deg,var(--ink),var(--engine));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.brand .sub{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:6px;letter-spacing:.04em}
+.hdr-right{text-align:right;font-family:var(--mono);font-size:12px;color:var(--dim)}
+.tag{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--engine-dim);color:var(--engine);
+  padding:4px 10px;font-family:var(--disp);letter-spacing:.16em;font-size:12px;font-weight:600;text-transform:uppercase}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 0 0 rgba(255,178,77,.7);animation:pulse 2.4s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,178,77,.55)}70%{box-shadow:0 0 0 9px rgba(255,178,77,0)}100%{box-shadow:0 0 0 0 rgba(255,178,77,0)}}
+
+/* ---- grid ---- */
+.grid{display:grid;gap:11px}
+.hero{margin-bottom:11px}
+.row2{grid-template-columns:1.35fr 1fr}
+.row3{grid-template-columns:1fr 1.25fr}
+@media(max-width:900px){.row2,.row3{grid-template-columns:1fr}}
+
+/* ---- hero verdict ---- */
+.verdict{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:13px;margin-top:4px}
+.verdict .vbig{font-family:var(--disp);font-weight:700;font-size:26px;letter-spacing:.04em}
+.chip{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter-spacing:.14em;font-size:13px;
+  padding:6px 14px;border:1px solid currentColor;clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px))}
+.c-warmup{color:var(--warn)} .c-on_track{color:var(--good)} .c-ahead{color:var(--engine)} .c-lagging{color:var(--bad)}
+.verdict .meta{font-family:var(--mono);font-size:12px;color:var(--dim);margin-left:auto;text-align:right}
+
+/* ---- tracking gauges ---- */
+.gauges{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+@media(max-width:760px){.gauges{grid-template-columns:repeat(2,1fr)}}
+.gauge .gl{display:flex;justify-content:space-between;align-items:baseline}
+.gauge .gname{font-family:var(--disp);letter-spacing:.12em;text-transform:uppercase;font-size:12px;color:var(--dim)}
+.gauge .gv{font-family:var(--mono);font-weight:600;font-size:26px;color:var(--live);letter-spacing:-.01em}
+.gauge .gv.none{color:var(--faint)}
+.gauge .gtarget{font-family:var(--mono);font-size:11px;color:var(--engine);opacity:.8}
+.track{position:relative;height:8px;margin-top:12px;background:#0a1015;border:1px solid var(--line);overflow:hidden}
+.track .band{position:absolute;top:0;bottom:0;background:linear-gradient(90deg,var(--engine-dim),var(--engine));opacity:.45}
+.track .mark{position:absolute;top:-3px;bottom:-3px;width:3px;background:var(--live);box-shadow:0 0 8px var(--live)}
+.track .mark.none{background:var(--faint);box-shadow:none}
+.gauge .vchip{margin-top:9px;font-family:var(--disp);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+
+/* ---- stat strip ---- */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+.stat{padding:0 14px;border-left:1px solid var(--line)}
+.stat:first-child{border-left:none;padding-left:0}
+.stat .sv{font-family:var(--mono);font-size:20px;font-weight:600}
+.stat .sl{font-family:var(--disp);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-top:3px}
+.pos{color:var(--good)} .neg{color:var(--bad)}
+
+/* equity */
+.eq-wrap{position:relative;height:118px;margin-top:6px}
+svg{width:100%;height:100%;display:block;overflow:visible}
+
+/* exit mix + side */
+.bars{margin-top:6px}
+.bar{display:flex;align-items:center;gap:10px;margin:9px 0}
+.bar .bn{font-family:var(--mono);font-size:12px;width:74px;color:var(--ink)}
+.bar .bt{flex:1;height:14px;background:#0a1015;border:1px solid var(--line);position:relative;overflow:hidden}
+.bar .bf{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--live-dim),var(--live))}
+.bar .be{position:absolute;top:0;bottom:0;width:2px;background:var(--engine);opacity:.85}
+.bar .bp{font-family:var(--mono);font-size:12px;width:42px;text-align:right;color:var(--dim)}
+.side{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.side .s{border:1px solid var(--line);padding:10px 12px}
+.side .sh{font-family:var(--disp);letter-spacing:.14em;font-size:12px;text-transform:uppercase}
+.side .sn{font-family:var(--mono);font-size:18px;font-weight:600;margin-top:4px}
+
+/* lists */
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th{font-family:var(--disp);text-transform:uppercase;letter-spacing:.1em;font-size:11px;color:var(--dim);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{font-family:var(--mono);font-size:12.5px;padding:7px 8px;border-bottom:1px solid #121a22;color:var(--ink)}
+.sidecell{font-weight:600}.s-long{color:var(--engine)}.s-short{color:var(--live)}
+.empty{font-family:var(--mono);color:var(--dim);font-size:13px;padding:18px 4px;text-align:center}
+
+.feed .sig{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #121a22}
+.feed .sig:last-child{border-bottom:none}
+.feed .sa{font-family:var(--disp);font-weight:700;letter-spacing:.1em;font-size:14px;padding:2px 9px;border:1px solid currentColor}
+.a-buy{color:var(--good)} .a-sell{color:var(--bad)}
+.feed .sp{font-family:var(--mono);font-size:13px;color:var(--ink)}
+.feed .st{font-family:var(--mono);font-size:11px;color:var(--dim);margin-left:auto}
+
+.foot{margin-top:14px;border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;
+  font-family:var(--mono);font-size:11px;color:var(--dim);flex-wrap:wrap;gap:8px}
+
+/* staggered load */
+.panel,.hero{opacity:0;transform:translateY(10px);animation:rise .6s cubic-bezier(.2,.7,.2,1) forwards}
+@keyframes rise{to{opacity:1;transform:none}}
+.d1{animation-delay:.05s}.d2{animation-delay:.13s}.d3{animation-delay:.21s}.d4{animation-delay:.29s}.d5{animation-delay:.37s}
+.scan{position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,transparent,var(--engine),transparent);opacity:.5;animation:sweep 5.5s linear infinite}
+@keyframes sweep{0%{top:0}100%{top:100%}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <h1 id="title">SCALPING V3.2</h1>
+      <div class="sub" id="subtitle">self-generated HA-V3 · BloFin demo</div>
+    </div>
+    <div class="hdr-right">
+      <div class="tag"><span class="dot"></span><span id="envtag">DEMO · LIVE</span></div>
+      <div style="margin-top:8px">UPLINK <span id="updated" style="color:var(--ink)">—</span></div>
+      <div style="margin-top:3px">T+<span id="days" style="color:var(--ink)">0.0</span>d TRACKING ENGINE</div>
+    </div>
+  </header>
+
+  <!-- HERO: live vs engine tracking -->
+  <section class="panel hero d1">
+    <span class="scan"></span>
+    <div class="label">Live ÷ Engine — signal tracking</div>
+    <div class="verdict">
+      <div class="vbig" id="verdict-big">WARMING UP</div>
+      <div class="chip" id="verdict-chip">AWAITING DATA</div>
+      <div class="meta" id="verdict-meta">—</div>
+    </div>
+    <div class="gauges" id="gauges"></div>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <div class="grid row2 hero">
+    <section class="panel d2">
+      <div class="label">Equity — realized net (USDT)</div>
+      <div class="eq-wrap"><svg id="equity" viewBox="0 0 600 150" preserveAspectRatio="none"></svg></div>
+    </section>
+    <section class="panel d3">
+      <div class="label">Exit mix &amp; side — bar = live, tick = engine</div>
+      <div class="bars" id="exitmix"></div>
+      <div class="side" id="sides"></div>
+    </section>
+  </div>
+
+  <div class="grid row3 hero" style="margin-top:11px">
+    <section class="panel feed d4">
+      <div class="label">Signal feed — pending (<span id="pcount">0</span>)</div>
+      <div id="feed"></div>
+    </section>
+    <section class="panel d5">
+      <div class="label">Recent closed</div>
+      <div id="recent"></div>
+    </section>
+  </div>
+
+  <div class="foot">
+    <span id="engine-src">engine: —</span>
+    <span>read-only · scalping-v3.2 · stop <span id="stopv">—</span> (1.1% notional)</span>
+  </div>
+</div>
+
+<script>
+window.__STATE__ = {{ state|tojson }};
+const $=id=>document.getElementById(id);
+const fmt=(v,d=2)=>v===null||v===undefined?'—':(typeof v==='number'?v.toFixed(d):v);
+const pf=v=>v===null?'—':(v===Infinity||v>99?'∞':v.toFixed(2));
+const pct=v=>v===null?'—':(v*100).toFixed(0)+'%';
+const money=v=>(v>=0?'+$':'-$')+Math.abs(v).toFixed(0);
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+
+function gauge(name,liveVal,disp,band,target,verdict){
+  // position live marker within [band.lo*.6 .. band.hi*1.15] scale
+  const lo=band[0],hi=band[1];
+  const min=lo*0.55, max=hi*1.18;
+  const span=max-min||1;
+  const bandL=clamp((lo-min)/span*100,0,100), bandW=clamp((hi-lo)/span*100,0,100);
+  const has=liveVal!==null&&liveVal!==undefined;
+  const markP=has?clamp((liveVal-min)/span*100,1,99):0;
+  return `<div class="gauge">
+    <div class="gl"><span class="gname">${name}</span></div>
+    <div class="gv ${has?'':'none'}">${disp}</div>
+    <div class="gtarget">engine ${target}</div>
+    <div class="track"><span class="band" style="left:${bandL}%;width:${bandW}%"></span>
+      <span class="mark ${has?'':'none'}" style="left:${markP}%"></span></div>
+    <div class="vchip c-${verdict}">${verdict.replace('_',' ')}</div>
+  </div>`;
+}
+
+function sparkline(curve){
+  const svg=$('equity');
+  if(!curve||curve.length<2){svg.innerHTML=`<line x1="0" y1="120" x2="600" y2="120" stroke="#1b2733" stroke-width="1"/><text x="300" y="80" fill="#33444f" font-family="IBM Plex Mono" font-size="13" text-anchor="middle">awaiting first close</text>`;return;}
+  const n=curve.length, mn=Math.min(0,...curve), mx=Math.max(0,...curve), rng=(mx-mn)||1;
+  const X=i=>i/(n-1)*600, Y=v=>140-(v-mn)/rng*128-6;
+  let d='', area='';
+  curve.forEach((v,i)=>{d+=(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)+' ';});
+  area=`M0 ${Y(curve[0]).toFixed(1)} `+curve.map((v,i)=>'L'+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ')+` L600 ${Y(curve[n-1]).toFixed(1)} L600 150 L0 150 Z`;
+  const zeroY=Y(0).toFixed(1);
+  svg.innerHTML=`<defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ffb24d" stop-opacity=".28"/><stop offset="1" stop-color="#ffb24d" stop-opacity="0"/></linearGradient></defs>
+    <line x1="0" y1="${zeroY}" x2="600" y2="${zeroY}" stroke="#1b2733" stroke-width="1" stroke-dasharray="3 4"/>
+    <path d="${area}" fill="url(#eg)"/><path d="${d}" fill="none" stroke="#ffb24d" stroke-width="2"/>`;
+}
+
+function render(s){
+  $('title').textContent=s.meta.title; $('subtitle').textContent=s.meta.subtitle;
+  $('updated').textContent=s.meta.updated; $('days').textContent=s.meta.days_running;
+  $('stopv').textContent='$'+s.meta.stop_usdt; $('engine-src').textContent='engine: '+s.engine.source;
+  const L=s.live, E=s.engine, T=s.tracking;
+
+  // verdict
+  const ready=T.ready;
+  $('verdict-big').textContent= ready? 'ON TRACK' : 'WARMING UP';
+  let agg='warmup';
+  if(ready){const vs=[T.win_rate,T.profit_factor,T.avg_r];
+    if(vs.includes('lagging'))agg='lagging';else if(vs.every(v=>v==='ahead'))agg='ahead';else agg='on_track';
+    $('verdict-big').textContent={lagging:'LAGGING ENGINE',ahead:'AHEAD OF ENGINE',on_track:'ON TRACK'}[agg];}
+  const chip=$('verdict-chip'); chip.className='chip c-'+agg;
+  chip.textContent= ready? agg.replace('_',' ') : `${T.n} / ${T.min_n} closed`;
+  $('verdict-meta').innerHTML=`live n=<b style="color:var(--live)">${L.n}</b> · ${fmt(L.trades_per_day,1)}/day &nbsp;|&nbsp; engine ${E.trades_per_day}/day · target n≥${T.min_n}`;
+
+  // gauges
+  $('gauges').innerHTML=
+    gauge('Win rate',L.win_rate, L.win_rate===null?'—':pct(L.win_rate), E.band.win_rate, pct(E.win_rate), T.win_rate)+
+    gauge('Profit factor',L.profit_factor, pf(L.profit_factor), E.band.profit_factor, E.profit_factor.toFixed(2), T.profit_factor)+
+    gauge('Avg R',L.avg_r, L.avg_r===null?'—':fmt(L.avg_r,3), E.band.avg_r, E.avg_r.toFixed(3), T.avg_r)+
+    gauge('Trades / day',L.trades_per_day, fmt(L.trades_per_day,1), E.band.trades_per_day, E.trades_per_day.toFixed(1), T.trades_per_day);
+
+  // stat strip
+  const netCls=L.net>=0?'pos':'neg', ddCls='neg';
+  $('stats').innerHTML=`
+    <div class="stat"><div class="sv ${netCls}">${money(L.net)}</div><div class="sl">Net realized</div></div>
+    <div class="stat"><div class="sv">${fmt(L.net_per_day,1)===null?'—':money(L.net_per_day)}</div><div class="sl">Net / day · eng ${money(E.net_per_day_usdt)}</div></div>
+    <div class="stat"><div class="sv ${ddCls}">${money(L.max_dd)}</div><div class="sl">Max DD · eng ${money(E.max_dd_usdt)}</div></div>
+    <div class="stat"><div class="sv">${L.max_consec_loss}</div><div class="sl">Max consec loss</div></div>`;
+
+  sparkline(s.equity);
+
+  // exit mix
+  const order=['trail_sl','sl_be','sl']; const lab={trail_sl:'trail',sl_be:'BE stop',sl:'hard SL'};
+  $('exitmix').innerHTML=order.map(k=>{
+    const lv=(s.exit_mix[k]||0), ev=(E.exit_mix[k]||0);
+    return `<div class="bar"><span class="bn">${lab[k]}</span>
+      <span class="bt"><span class="bf" style="width:${(lv*100).toFixed(0)}%"></span><span class="be" style="left:${(ev*100).toFixed(0)}%"></span></span>
+      <span class="bp">${(lv*100).toFixed(0)}%</span></div>`;}).join('');
+
+  // sides
+  $('sides').innerHTML=`
+    <div class="s"><div class="sh s-long">LONG · ${L.long_n}</div><div class="sn ${L.long_net>=0?'pos':'neg'}">${money(L.long_net)}</div></div>
+    <div class="s"><div class="sh s-short">SHORT · ${L.short_n}</div><div class="sn ${L.short_net>=0?'pos':'neg'}">${money(L.short_net)}</div></div>`;
+
+  // feed
+  $('pcount').textContent=s.pending_count;
+  $('feed').innerHTML = s.pending_open.length? s.pending_open.map(p=>`
+    <div class="sig"><span class="sa a-${p.action}">${p.action.toUpperCase()}</span>
+      <span class="sp">${p.symbol} @ ${Number(p.signal_price).toFixed(2)}</span>
+      <span class="st">${(p.created_at||'').slice(11,19)} · pending</span></div>`).join('')
+    : `<div class="empty">no pending signals — engine scanning every 30s</div>`;
+
+  // recent
+  $('recent').innerHTML = s.recent.length? `<table><thead><tr><th>side</th><th>exit</th><th>pnl</th><th>R</th><th>opened</th></tr></thead><tbody>`+
+    s.recent.map(t=>{const r=(t.pnl_usdt/s.meta.stop_usdt);return `<tr>
+      <td class="sidecell s-${t.side}">${t.side.toUpperCase()}</td>
+      <td>${t.exit_reason||'—'}</td>
+      <td class="${t.pnl_usdt>=0?'pos':'neg'}">${money(t.pnl_usdt)}</td>
+      <td class="${r>=0?'pos':'neg'}">${r.toFixed(2)}</td>
+      <td style="color:var(--dim)">${(t.opened_at||'').slice(5,16).replace('T',' ')}</td></tr>`;}).join('')+`</tbody></table>`
+    : `<div class="empty">no closed trades yet — first entry fills on the next HA-V3 retest</div>`;
+}
+
+render(window.__STATE__);
+async function poll(){try{const r=await fetch('/api/state',{cache:'no-store'});if(r.ok)render(await r.json());}catch(e){}}
+setInterval(poll,4000);
+</script>
+</body>
+</html>

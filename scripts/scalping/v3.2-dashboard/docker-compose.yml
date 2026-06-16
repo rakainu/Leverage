@@ -1,0 +1,20 @@
+services:
+  scalping-v3-2-dashboard:
+    build: .
+    container_name: scalping-v3-2-dashboard
+    restart: unless-stopped
+    environment:
+      - V32_DB=/data/bridge.db
+      - V32_TITLE=SCALPING V3.2
+      - "V32_SUBTITLE=self-generated HA-V3 · BloFin demo"
+      - V32_STOP_USDT=82.5
+    volumes:
+      # bridge DB, read-only — the app also opens it in ro mode (belt + braces)
+      - /docker/scalping-v3.2/data:/data:ro
+    ports:
+      - "127.0.0.1:8097:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

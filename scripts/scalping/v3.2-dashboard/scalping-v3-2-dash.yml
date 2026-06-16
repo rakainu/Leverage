@@ -1,0 +1,20 @@
+http:
+  routers:
+    scalping-v3-2-dashboard:
+      rule: "Host(`v3-2.agentneo.cloud`)"
+      entryPoints:
+        - websecure
+      service: scalping-v3-2-dashboard
+      middlewares:
+        - scalping-v3-2-auth
+      tls:
+        certResolver: letsencrypt
+  services:
+    scalping-v3-2-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8097"
+  middlewares:
+    scalping-v3-2-auth:
+      basicAuth:
+        usersFile: "/config/lighter.htpasswd"
