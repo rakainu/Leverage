@@ -41,6 +41,7 @@ from .state_machine import step as state_step
 from . import scaleout as so
 from .squeeze import prepare_squeeze
 from .regime import prepare_regime, entry_levels
+from .rebound import prepare_rebound
 # NOTE: webhook.py (fastapi/uvicorn) is imported lazily in start() only when
 # webhook mode is enabled, so the trail/replica bridge never needs those deps.
 
@@ -126,6 +127,12 @@ class Bridge:
                      "| SL=%.2f×ATR TP=%.2f×dist-to-VWAP time=%d bars",
                      rg.trend_len, rg.z_period, rg.z_entry, rg.limit_atr,
                      rg.sl_atr, rg.tp_frac, rg.max_bars)
+        elif self.cfg.exit_model == "rebound":
+            rb = self.cfg.rebound
+            log.info("Rebound: VWAP(%d) fade |band|=%.1fσ in ADX<%.0f range | MARKET entry | "
+                     "bank %.0f%% @ VWAP-mean -> %.1f×ATR runner trail | SL=%.1f×ATR (cap skip) "
+                     "time=%d bars | risk=%.2f%%/trade", rb.vwap_len, rb.bb_mult, rb.adx_max,
+                     rb.tp1_frac * 100, rb.atr_trail, rb.atr_stop, rb.max_bars, rb.risk_frac * 100)
         else:
             log.info("Exits: SL=$%.0f BE=$%.0f lock_act=$%.0f trail_act=$%.0f trail_dist=$%.0f",
                      self.cfg.exits.sl_loss_usdt, self.cfg.exits.breakeven_usdt,
@@ -321,6 +328,9 @@ class Bridge:
             return
         if self.cfg.signal_source == "regime":
             await self._on_new_bar_regime(symbol, df)
+            return
+        if self.cfg.signal_source == "rebound":
+            await self._on_new_bar_rebound(symbol, df)
             return
 
         is_bootstrap = symbol not in self.bars
@@ -786,6 +796,183 @@ class Bridge:
                 symbol, pos.side, pos.entry_price, exit_p, pnl, reason, duration,
                 pos.max_state, starting_collateral=self.cfg.initial_collateral_usdc))
 
+    # ------- Rebound (1H VWAP-anchored MR fade) — day-trade diversifier -------
+
+    async def _on_new_bar_rebound(self, symbol: str, df: pd.DataFrame):
+        """On each new closed 1h bar: manage an open position (ratchet the runner trail
+        once the mean is banked; time-stop), else fire a MARKET entry on a fresh reclaim
+        signal. One position at a time (matches the backtest)."""
+        rb = self.cfg.rebound
+        enriched = prepare_rebound(df, vwap_len=rb.vwap_len, bb_len=rb.bb_len,
+                                   bb_mult=rb.bb_mult, adx_len=rb.adx_len, adx_max=rb.adx_max,
+                                   atr_period=rb.atr_period, atr_min_pct=rb.atr_min_pct)
+        is_bootstrap = symbol not in self.bars
+        self.bars[symbol] = enriched
+        last = enriched.iloc[-1]
+        last_ts = enriched.index[-1]
+        if is_bootstrap:
+            nl = int(enriched["reb_long"].sum()); ns = int(enriched["reb_short"].sum())
+            log.info("%s: rebound bootstrap scan — %d long + %d short reclaim signals over %d bars "
+                     "(most recent %s)", symbol, nl, ns, len(enriched), last_ts)
+            return
+        if self.executor.is_open(symbol):
+            await self._rebound_bar_manage(symbol, enriched)
+            return
+        side = "long" if bool(last["reb_long"]) else ("short" if bool(last["reb_short"]) else None)
+        if side is None:
+            return
+        if not self._entries_allowed(symbol):
+            return
+        await self._open_rebound(symbol, side, enriched)
+
+    async def _open_rebound(self, symbol: str, side: str, enriched: pd.DataFrame):
+        last = enriched.iloc[-1]; last_ts = enriched.index[-1]
+        now = datetime.now(timezone.utc).isoformat()
+        rb = self.cfg.rebound
+        atr_v = float(last.get("atr14", 0.0) or 0.0)
+        basis_v = float(last.get("basis", 0.0) or 0.0)
+        ref = self.executor.get_mark_price(symbol)
+        if atr_v <= 0 or ref is None or ref <= 0 or basis_v <= 0:
+            log.warning("%s: rebound entry skipped (atr=%.4f mark=%s basis=%.4f)",
+                        symbol, atr_v, ref, basis_v)
+            return
+        # hard stop = atr_stop*ATR, capped per coin; SKIP if wider than the cap (backtest rule)
+        cap_frac = rb.stop_caps.get(symbol, rb.default_stop_cap) / 100.0
+        stop_dist = rb.atr_stop * atr_v
+        if stop_dist > cap_frac * ref:
+            log.info("%s: rebound skip — stop %.4f > %.2f%% cap of price (%.4f)",
+                     symbol, stop_dist, cap_frac * 100, cap_frac * ref)
+            return
+        stop_frac = stop_dist / ref
+        if stop_frac <= 0:
+            return
+        # the VWAP mean must be a profitable target from the entry mark
+        if (side == "long" and basis_v <= ref) or (side == "short" and basis_v >= ref):
+            return
+        _, _, equity = self._equity_breakdown()
+        if equity <= 0:
+            equity = self.cfg.initial_collateral_usdc
+        notional = min((rb.risk_frac * equity) / stop_frac, equity * rb.max_leverage)
+        base = notional / ref
+        pos = await self.executor.open_position(symbol, side, base_amount=base)
+        if pos is None:
+            return
+        pos.atr_entry = atr_v
+        pos.best_close = pos.entry_price
+        pos.bars_held = 0
+        pos.reb_tp_done = False
+        pos.tp_price = basis_v   # fade target = the VWAP mean at signal
+        pos.sl_price = (pos.entry_price - stop_dist) if side == "long" else (pos.entry_price + stop_dist)
+        self.orig_base[symbol] = pos.base_amount
+        self.realized[symbol] = 0.0
+        self.legs[symbol] = []
+        eff_lev = pos.notional / equity
+        pos.leverage = round(eff_lev, 2)
+        pos.margin_usdt = round(pos.notional / rb.max_leverage, 2)
+        trade_id = self.db.log_trade(
+            symbol=symbol, side=side, entry_price=pos.entry_price,
+            margin_usdt=pos.margin_usdt, leverage=pos.leverage,
+            base_amount=pos.base_amount, notional=pos.notional,
+            initial_sl=pos.sl_price, initial_tp=pos.tp_price,
+            opened_at=now, bar_time_open=str(last_ts),
+            adx_at_entry=float(last.get("adx", 0.0) or 0.0))
+        self.trade_ids[symbol] = trade_id
+        log.info("%s: REBOUND %s entry=%.4f ATR=%.4f SL=%.4f mean(TP)=%.4f notional=$%.0f "
+                 "(eff_lev=%.1f×) risk=$%.2f", symbol, side.upper(), pos.entry_price, atr_v,
+                 pos.sl_price, pos.tp_price, pos.notional, eff_lev, rb.risk_frac * equity)
+        self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts), outcome="fired",
+                           detected_at=now)
+        if self.cfg.notify.open:
+            asyncio.create_task(notify.notify_open(pos))
+
+    async def _rebound_bar_manage(self, symbol: str, enriched: pd.DataFrame):
+        """On bar close: ratchet the runner trail off the close ONCE the mean is banked
+        (stop floored at breakeven by the bank step), and time-stop at max_bars."""
+        pos = self.executor.positions.get(symbol)
+        if pos is None:
+            return
+        rb = self.cfg.rebound
+        close = float(enriched.iloc[-1]["Close"])
+        pos.bars_held += 1
+        if getattr(pos, "reb_tp_done", False):
+            trail_dist = rb.atr_trail * pos.atr_entry
+            if pos.side == "long":
+                pos.best_close = max(pos.best_close, close)
+                pos.sl_price = max(pos.sl_price, pos.best_close - trail_dist)
+            else:
+                pos.best_close = min(pos.best_close, close)
+                pos.sl_price = min(pos.sl_price, pos.best_close + trail_dist)
+        if pos.bars_held >= rb.max_bars:
+            log.info("%s: rebound time stop (%d bars) — closing", symbol, pos.bars_held)
+            await self._close_rebound(symbol, pos, "time")
+
+    async def _rebound_tick(self, symbol: str, pos, mark: float):
+        """Mark-tick exit. Before the mean is banked: hard stop, or bank tp1_frac at the
+        mean and move the runner stop to breakeven. After: trail-stop the runner.
+        STOP WINS on a tie (conservative, matches the backtest)."""
+        rb = self.cfg.rebound
+        side = pos.side
+        if not getattr(pos, "reb_tp_done", False):
+            hit_sl = (mark <= pos.sl_price) if side == "long" else (mark >= pos.sl_price)
+            if hit_sl:
+                await self._close_rebound(symbol, pos, "sl")
+                return
+            hit_mean = (mark >= pos.tp_price) if side == "long" else (mark <= pos.tp_price)
+            if hit_mean:
+                amt = rb.tp1_frac * self.orig_base.get(symbol, pos.base_amount)
+                res = await self.executor.reduce_position(symbol, amt, "mean")
+                if res is not None:
+                    leg_pnl = ((res.avg_price - pos.entry_price) if side == "long"
+                               else (pos.entry_price - res.avg_price)) * res.filled_size
+                    self.realized[symbol] = self.realized.get(symbol, 0.0) + leg_pnl
+                    self.legs.setdefault(symbol, []).append((res.filled_size, res.avg_price, "mean"))
+                    log.info("%s: REBOUND banked %.0f%% @ mean %.4f pnl=$%+.2f -> runner trails",
+                             symbol, rb.tp1_frac * 100, res.avg_price, leg_pnl)
+                pos.reb_tp_done = True
+                pos.best_close = pos.entry_price
+                pos.sl_price = pos.entry_price          # breakeven on the runner
+                if not self.executor.is_open(symbol):   # frac rounded to a full close
+                    self._finalize_rebound(symbol, pos)
+            return
+        hit = (mark <= pos.sl_price) if side == "long" else (mark >= pos.sl_price)
+        if hit:
+            await self._close_rebound(symbol, pos, "trail")
+
+    async def _close_rebound(self, symbol: str, pos, reason: str):
+        """Close the remaining size at the mark and finalize the (multi-leg) trade."""
+        res = await self.executor.close_position(symbol, reason)
+        if res is not None:
+            leg_pnl = ((res.avg_price - pos.entry_price) if pos.side == "long"
+                       else (pos.entry_price - res.avg_price)) * res.filled_size
+            self.realized[symbol] = self.realized.get(symbol, 0.0) + leg_pnl
+            self.legs.setdefault(symbol, []).append((res.filled_size, res.avg_price, reason))
+        self._finalize_rebound(symbol, pos)
+
+    def _finalize_rebound(self, symbol: str, pos):
+        legs = self.legs.get(symbol, [])
+        total_pnl = self.realized.get(symbol, 0.0)
+        sz = sum(s for s, _, _ in legs)
+        wavg = (sum(s * px for s, px, _ in legs) / sz) if sz > 0 else pos.entry_price
+        banked = any(r == "mean" for _, _, r in legs)
+        last_reason = legs[-1][2] if legs else "unknown"
+        duration = int(time.time() - pos.opened_at)
+        tid = self.trade_ids.get(symbol)
+        if tid is not None:
+            self.db.update_trade_close(
+                tid, exit_price=wavg, exit_reason=f"rebound:{last_reason}",
+                pnl_usdt=total_pnl, pnl_pct_account=total_pnl / self.cfg.initial_collateral_usdc * 100,
+                duration_secs=duration, max_state=(1 if banked else 0),
+                closed_at=datetime.now(timezone.utc).isoformat())
+            del self.trade_ids[symbol]
+        for d in (self.realized, self.legs, self.orig_base):
+            d.pop(symbol, None)
+        log.info("%s: REBOUND CLOSED %s wavg=%.4f pnl=$%+.2f (%s, %d bars)",
+                 symbol, pos.side.upper(), wavg, total_pnl, last_reason, pos.bars_held)
+        if self.cfg.notify.close:
+            asyncio.create_task(notify.notify_close(
+                symbol, pos.side, pos.entry_price, wavg, total_pnl, last_reason, duration,
+                (1 if banked else 0), starting_collateral=self.cfg.initial_collateral_usdc))
+
     # ------- Regime-gated VWAP mean-reversion (regime_mr) strategy — Scalper -------
 
     async def _on_new_bar_regime(self, symbol: str, df: pd.DataFrame):
@@ -1175,6 +1362,9 @@ class Bridge:
                         await self._close_regime(symbol, pos, "sl")
                     elif hit_tp:
                         await self._close_regime(symbol, pos, "tp")
+                    continue
+                if self.cfg.exit_model == "rebound":
+                    await self._rebound_tick(symbol, pos, mark)
                     continue
                 if self.cfg.exit_model == "pro_v3":
                     continue  # exits are driven by Pro V3 TP/SL webhooks, not ticked

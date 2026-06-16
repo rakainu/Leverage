@@ -100,6 +100,33 @@ class SqueezeConfig:
 
 
 @dataclass
+class ReboundConfig:
+    """Rebound — 1H VWAP-anchored range mean-reversion FADE (the day-trade diversifier).
+    Validated 10-coin 1h basket (scripts/scalping/analysis/donchian_breakout_2026-06-15):
+    OOS PF 1.31, WR 71%, DD ~10%, max 3 consec losses, survives fees/slip, not one-coin.
+    In a RANGE regime (ADX < adx_max) fade a poke beyond the VWAP-anchored band that
+    closes back inside; MARKET entry next bar. Exit = bank tp1_frac at the VWAP mean,
+    run the remainder on an atr_trail*ATR trail (stop->breakeven after the mean is hit),
+    hard stop atr_stop*ATR (skip if wider than the per-coin cap), time stop max_bars.
+    Sizing is RISK-PER-TRADE (risk_frac of equity to the hard stop), same as squeeze."""
+    vwap_len: int = 48          # rolling VWAP window (the fade anchor)
+    bb_len: int = 20            # window for the band std (of close - VWAP)
+    bb_mult: float = 2.5        # poke threshold = bb_mult * std
+    adx_len: int = 14
+    adx_max: float = 20.0       # only fade when ADX < this (range regime)
+    atr_period: int = 14
+    atr_min_pct: float = 0.4    # ATR% floor (volatility worth fading)
+    atr_stop: float = 2.5       # hard stop = atr_stop * ATR (capped per coin)
+    atr_trail: float = 2.0      # runner trail = atr_trail * ATR(at entry)
+    tp1_frac: float = 0.7       # fraction banked at the VWAP mean; runner = 1 - tp1_frac
+    max_bars: int = 24          # time stop (1h bars)
+    risk_frac: float = 0.025    # 2.5% of equity to the hard stop ($75 on $3000)
+    max_leverage: float = 20.0
+    stop_caps: dict = field(default_factory=dict)  # per-coin max stop % (skip if wider)
+    default_stop_cap: float = 2.5                   # max stop % for coins not in stop_caps
+
+
+@dataclass
 class WebhookConfig:
     """Inbound Pro V3 webhook listener (signal_source == 'webhook')."""
     enabled: bool = False
@@ -220,6 +247,7 @@ class BridgeConfig:
     scaleout: ScaleOutConfig = field(default_factory=ScaleOutConfig)
     squeeze: "SqueezeConfig" = field(default_factory=lambda: SqueezeConfig())
     regime: "RegimeConfig" = field(default_factory=lambda: RegimeConfig())
+    rebound: "ReboundConfig" = field(default_factory=lambda: ReboundConfig())
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
@@ -276,6 +304,7 @@ def load_config(path: str | Path) -> BridgeConfig:
     scaleout = ScaleOutConfig(**so_raw)
     squeeze = SqueezeConfig(**raw.get("squeeze", {}))
     regime = RegimeConfig(**raw.get("regime", {}))
+    rebound = ReboundConfig(**raw.get("rebound", {}))
 
     webhook = WebhookConfig(**raw.get("webhook", {}))
     # BRIDGE_SECRET env overrides the yaml secret (so it's never committed).
@@ -315,6 +344,7 @@ def load_config(path: str | Path) -> BridgeConfig:
         scaleout=scaleout,
         squeeze=squeeze,
         regime=regime,
+        rebound=rebound,
         webhook=webhook,
         notify=notify,
         control=control,
