@@ -57,3 +57,6 @@ Screenshot*.png
 
 # Fetched market data (reproducible via fetch scripts)
 *.parquet
+
+# Local off-site backup tarballs (contain .env secrets — never commit)
+_local_backups/
