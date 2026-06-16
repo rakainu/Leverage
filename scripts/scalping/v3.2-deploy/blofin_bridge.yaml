@@ -1,0 +1,52 @@
+# Scalping V3.2 — V3.1 strategy DNA (slope/Sunday/body filters + 5-stage trail)
+# with a SELF-GENERATED HA-V3 entry signal replacing the TradingView Pro V3
+# webhook. The audit showed the live Pro V3 signal was sparse (~36% fill) and
+# its longs lost even with a perfect exit; this swaps in the engine-proven
+# (+$19k / PF 2.80 over 181d) HA-V3 signal and removes the TV alert dependency.
+# Exits, stops, filters, sizing, leverage = unchanged from V3.1.
+
+defaults:
+  margin_usdt: 100
+  leverage: 30
+  margin_mode: isolated
+  position_mode: net
+  sl_policy: p2_step_stop
+  # --- SL / Trail / TP @ baseline margin ($100) — identical to V3.1 ---
+  sl_loss_usdt: 13
+  breakeven_usdt: 12
+  lock_profit_activate_usdt: 18
+  lock_profit_usdt: 15
+  trail_activate_usdt: 30
+  trail_start_usdt: 32
+  trail_distance_usdt: 15
+  tp_limit_margin_pct: 2.0
+  # --- EMA retest entry (unchanged) ---
+  ema_retest_period: 9
+  ema_retest_timeframe: "5m"
+  ema_retest_timeout_minutes: 30
+  ema_retest_max_overshoot_pct: 0.2
+  min_5m_slope_pct: 0.15
+  poll_interval_seconds: 2
+  # --- V3.1 entry filters (unchanged) ---
+  block_weekdays_utc: [6]
+  block_body_atr_band: [0.3, 0.5]
+  min_body_atr_ratio: 0.0
+  # --- V3.2 self-generated HA-V3 signal ---
+  signal_source: ha_v3
+  signal_sensitivity: 8
+  signal_fakeout: 0.2
+  signal_range_filt: 0.2
+  signal_lookback_bars: 300
+  signal_scan_interval_seconds: 30
+  signal_min_adx: 0.0   # 0=off (full net). Set 18 for the risk-adjusted profile.
+
+symbols:
+  # ZEC only — the proven instrument. SOL dropped (live -\$10/30t noise, no 5m
+  # backtest data). Re-add by copying this block + changing margin_usdt.
+  ZEC-USDT:
+    enabled: true
+    margin_usdt: 250
+    leverage: 30
+    margin_mode: isolated
+    sl_policy: p2_step_stop
+    sl_loss_usdt: 82.50

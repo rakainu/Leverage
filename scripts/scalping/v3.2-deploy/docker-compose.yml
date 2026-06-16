@@ -1,0 +1,20 @@
+services:
+  scalping-v3.2:
+    build: .
+    container_name: scalping-v3.2
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    ports:
+      # Host port 8789 (v3.1 uses 8788). V3.2 self-generates signals — no
+      # inbound webhook needed; only /health + /status are served locally.
+      # V3.2 and V3.1 are mutually exclusive: both trade the same BloFin demo
+      # ZEC account, so only one runs at a time.
+      - "127.0.0.1:8789:8787"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get(\"http://localhost:8787/health\", timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
