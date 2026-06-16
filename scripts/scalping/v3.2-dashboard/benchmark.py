@@ -12,26 +12,30 @@ live range, not a single brittle point.
 """
 from __future__ import annotations
 
-# Primary reference: 181-day, zero-fee (demo) engine pass, ZEC, both sides.
+# Reference: 7-coin basket engine pass (ZEC/XRP/DOGE/SOL/BTC/BNB/HYPE), demo
+# (zero-fee). Per-trade quality (WR/PF/avg_R) is similar across coins, so those
+# bands hold; throughput (trades/day, net/day) is the SUM across the basket.
+#   per-coin demo trades/day: ZEC 5.3 XRP 1.3 DOGE 1.5 SOL 1.7 BTC 0.8 BNB 0.6
+#   HYPE 6.7  → ~18/day. net/day sum ≈ $378 (idealized demo — live fills lower).
 ENGINE = {
-    "source": "52k-bar ZEC 5m · 181d · V3.1 cfg · both sides · zero-fee",
-    "win_rate": 0.71,
-    "profit_factor": 5.67,
-    "avg_r": 0.406,           # avg pnl / stop ($82.50)
-    "avg_trade_usdt": 33.47,
-    "trades_per_day": 5.36,   # 971 trades / 181 days
-    "net_per_day_usdt": 179.5,
-    "max_dd_usdt": -247.0,
-    # Realistic live bands (0-slip .. 0.10% entry-slip, from the slip sweep).
+    "source": "7-coin basket · demo (zero-fee) · idealized fills",
+    "win_rate": 0.69,
+    "profit_factor": 3.0,
+    "avg_r": 0.255,           # avg pnl / stop ($82.50)
+    "avg_trade_usdt": 21.0,
+    "trades_per_day": 18.0,   # sum across the 7-coin basket
+    "net_per_day_usdt": 378.0,
+    "max_dd_usdt": -400.0,    # basket (concurrent positions) — rough
+    # Realistic live bands (idealized .. fee/slip-haircut).
     "band": {
-        "win_rate": (0.67, 0.71),
-        "profit_factor": (3.78, 5.67),
-        "avg_r": (0.315, 0.406),
-        "avg_trade_usdt": (25.97, 33.47),
-        "trades_per_day": (5.0, 7.0),
+        "win_rate": (0.62, 0.72),
+        "profit_factor": (2.2, 3.4),
+        "avg_r": (0.16, 0.28),
+        "avg_trade_usdt": (13.0, 21.0),
+        "trades_per_day": (12.0, 24.0),
     },
-    # Exit-reason mix the engine produces (from the same-window 240-trade pass).
-    "exit_mix": {"trail_sl": 0.675, "sl_be": 0.213, "sl": 0.113},
+    # Exit-reason mix the engine produces (representative).
+    "exit_mix": {"trail_sl": 0.67, "sl_be": 0.21, "sl": 0.12},
 }
 
 # Secondary reference (if ever flipped to a fee'd/live book): BloFin 0.06%/side.

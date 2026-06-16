@@ -291,7 +291,7 @@ function render(s){
   const netCls=L.net>=0?'pos':'neg', ddCls='neg';
   $('stats').innerHTML=`
     <div class="stat"><div class="sv ${netCls}">${money(L.net)}</div><div class="sl">Net realized</div></div>
-    <div class="stat"><div class="sv">${fmt(L.net_per_day,1)===null?'—':money(L.net_per_day)}</div><div class="sl">Net / day · eng ${money(E.net_per_day_usdt)}</div></div>
+    <div class="stat"><div class="sv">${L.net_per_day===null||L.net_per_day===undefined?'—':money(L.net_per_day)}</div><div class="sl">Net / day · eng ${money(E.net_per_day_usdt)}</div></div>
     <div class="stat"><div class="sv ${ddCls}">${money(L.max_dd)}</div><div class="sl">Max DD · eng ${money(E.max_dd_usdt)}</div></div>
     <div class="stat"><div class="sv">${L.max_consec_loss}</div><div class="sl">Max consec loss</div></div>`;
 

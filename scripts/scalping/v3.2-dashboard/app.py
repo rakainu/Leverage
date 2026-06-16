@@ -116,7 +116,8 @@ def _kpis(trades: list[dict]) -> dict:
     return {
         "n": len(trades),
         "win_rate": len(wins) / len(trades),
-        "profit_factor": (gw / gl) if gl > 0 else (float("inf") if gw > 0 else 0.0),
+        # 999 = sentinel for "no losses yet" (∞); JSON can't carry float('inf').
+        "profit_factor": (gw / gl) if gl > 0 else (999.0 if gw > 0 else 0.0),
         "avg_r": (net / len(trades)) / STOP_USDT if STOP_USDT else None,
         "avg_trade": net / len(trades),
         "net": net,
@@ -188,7 +189,7 @@ def _per_coin(trades: list[dict], open_syms: set) -> list[dict]:
         out.append({
             "symbol": s, "n": len(pn), "net": round(sum(pn), 1),
             "win_rate": (len(wins) / len(pn)) if pn else None,
-            "profit_factor": (gw / gl) if gl > 0 else (float("inf") if gw > 0 else None),
+            "profit_factor": (gw / gl) if gl > 0 else (999.0 if gw > 0 else None),
             "open": s in open_syms,
         })
     return sorted(out, key=lambda r: (r["open"], r["net"]), reverse=True)
@@ -211,10 +212,16 @@ def build_state() -> dict:
     if not first and pending:
         first = _parse(pending[-1]["created_at"])
     now = datetime.now(timezone.utc)
-    days = max(((now - first).total_seconds() / 86400.0), 1e-6) if first else 0.0
-    live["trades_per_day"] = (live["n"] / days) if days else 0.0
-    live["net_per_day"] = (live["net"] / days) if days else 0.0
+    days = ((now - first).total_seconds() / 86400.0) if first else 0.0
     live["days_running"] = days
+    # Per-day rates are meaningless extrapolated from a sub-day window
+    # (2 trades in an hour is NOT "49/day"). Suppress until ≥1 day elapsed.
+    if days >= 1.0:
+        live["trades_per_day"] = live["n"] / days
+        live["net_per_day"] = live["net"] / days
+    else:
+        live["trades_per_day"] = None
+        live["net_per_day"] = None
 
     # equity curve (cumulative net by close order)
     cum = 0.0
