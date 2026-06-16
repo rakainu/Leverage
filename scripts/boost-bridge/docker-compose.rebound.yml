@@ -1,0 +1,32 @@
+# Rebound — 1H VWAP-anchored MR fade on Lighter MAINNET (paper sim).
+# Day-trade diversifier; replaces the sunset Booster. Own image, own DB (data/rebound.db),
+# own container. Reuses the Booster Telegram bot (@myboosterbot) via .env. Paper mode =
+# no LIGHTER_PRIVATE_KEY needed. Fully isolated from scalper-bridge.
+#
+# Deploy:  docker compose -f docker-compose.rebound.yml up -d --build
+services:
+  rebound-bridge:
+    build: .
+    image: rebound-bridge:latest
+    container_name: rebound-bridge
+    restart: unless-stopped
+    env_file:
+      - .env                         # TELEGRAM_BOT_TOKEN (@myboosterbot), TELEGRAM_CHAT_ID
+    environment:
+      TELEGRAM_SENDER_TAG: "REBOUND"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./config.rebound.yaml:/app/config.rebound.yaml:ro
+    command: ["python", "-u", "run_bridge.py", "--config", "config.rebound.yaml"]
+    healthcheck:
+      test: ["CMD-SHELL", "find /app/data/rebound.db /app/data/rebound.db-wal -mmin -90 -type f 2>/dev/null | grep -q . || exit 1"]
+      interval: 5m
+      timeout: 15s
+      start_period: 3m
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

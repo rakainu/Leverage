@@ -1,0 +1,25 @@
+# Dashboard for the Rebound MAINNET paper book (1H VWAP-anchored MR fade).
+# Deployed to /docker/lighter-dashboard/config.rebound.yaml; container rebound-dashboard
+# (127.0.0.1:8098), Traefik rebound.agentneo.cloud. Reuses the shared dashboard image
+# (config-gated + self-defaulting, so the scalper dashboard is untouched).
+db_path: "data/rebound.db"
+lighter_host: "https://mainnet.zklighter.elliot.ai"
+initial_collateral_usdc: 3000    # MUST match the rebound bridge config (else phantom equity/DD)
+symbols:
+  BTC: 1
+  ETH: 0
+  SOL: 2
+  XRP: 7
+  DOGE: 3
+  SUI: 16
+  LINK: 8
+  AVAX: 9
+  BNB: 25
+  HYPE: 24
+title: "Rebound"
+subtitle: "1h VWAP-fade · paper"
+show_fill_quality: false         # paper sim has no real fills — hide the fill-quality panel
+refresh:
+  live_ms: 3000
+  static_ms: 15000
+mark_cache_ttl_s: 2.0

@@ -1,0 +1,25 @@
+# Traefik dynamic (file-provider) config for the Rebound VWAP-fade dashboard.
+# Deploy: scp -> /docker/traefik-mncm/config/rebound-dash.yml  (Traefik hot-reloads)
+# Container publishes 127.0.0.1:8098 -> :8080. Basic-auth reuses the existing
+# /config/lighter.htpasswd (radk9). Own middleware name to avoid cross-file clashes.
+# Requires DNS: rebound.agentneo.cloud -> 46.202.146.30 (or a *.agentneo.cloud wildcard).
+http:
+  routers:
+    rebound-dashboard:
+      rule: "Host(`rebound.agentneo.cloud`)"
+      entryPoints:
+        - websecure
+      service: rebound-dashboard
+      middlewares:
+        - rebound-auth
+      tls:
+        certResolver: letsencrypt
+  services:
+    rebound-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8098"
+  middlewares:
+    rebound-auth:
+      basicAuth:
+        usersFile: "/config/lighter.htpasswd"
