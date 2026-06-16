@@ -284,7 +284,9 @@ function render(s){
   $('gauges').innerHTML=
     gauge('Win rate',L.win_rate, L.win_rate===null?'—':pct(L.win_rate), E.band.win_rate, pct(E.win_rate), T.win_rate)+
     gauge('Profit factor',L.profit_factor, pf(L.profit_factor), E.band.profit_factor, E.profit_factor.toFixed(2), T.profit_factor)+
-    gauge('Avg R',L.avg_r, L.avg_r===null?'—':fmt(L.avg_r,3), E.band.avg_r, E.avg_r.toFixed(3), T.avg_r)+
+    gauge('Avg / trade', L.avg_trade,
+      (L.avg_trade===null?'—':money(L.avg_trade))+(L.avg_r===null||L.avg_r===undefined?'':` <span style="font-size:12px;color:var(--dim)">${(L.avg_r>=0?'+':'')+L.avg_r.toFixed(2)}R</span>`),
+      E.band.avg_trade_usdt, money(E.avg_trade_usdt), T.avg_r)+
     gauge('Trades / day',L.trades_per_day, fmt(L.trades_per_day,1), E.band.trades_per_day, E.trades_per_day.toFixed(1), T.trades_per_day);
 
   // stat strip
