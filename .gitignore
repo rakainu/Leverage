@@ -60,3 +60,8 @@ Screenshot*.png
 
 # Local off-site backup tarballs (contain .env secrets — never commit)
 _local_backups/
+
+# Dashboard preview artifacts (throwaway)
+v32_*.png
+.playwright-mcp/
+scripts/scalping/v3.2-dashboard/*.db
