@@ -11,6 +11,10 @@ services:
     volumes:
       # bridge DB, read-only — the app also opens it in ro mode (belt + braces)
       - /docker/scalping-v3.2/data:/data:ro
+      # bind-mount code so UI tweaks apply on `compose up -d` (no rebuild)
+      - ./app.py:/app/app.py:ro
+      - ./benchmark.py:/app/benchmark.py:ro
+      - ./templates:/app/templates:ro
     ports:
       - "127.0.0.1:8097:8080"
     healthcheck:
