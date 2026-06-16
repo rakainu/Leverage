@@ -149,13 +149,14 @@ def _fmt_duration(seconds: int) -> str:
 async def notify_startup(cfg, restored: Optional[list] = None) -> None:
     """Bridge-came-up alert. If `restored` is provided, list the rehydrated positions."""
     _exit_model = getattr(cfg, "exit_model", "trail")
+    _title = {"regime": "Scalper UP", "rebound": "Rebound UP"}.get(_exit_model, "Bridge UP")
     lines = [
-        "🟢 <b>Scalper UP</b>" if _exit_model == "regime" else "🟢 <b>Bridge UP</b>",
+        f"🟢 <b>{_title}</b>",
         f"Host: <code>{_esc(cfg.host)}</code>",
         f"Paper collateral: ${cfg.initial_collateral_usdc:,.0f}",
         f"Symbols: {', '.join(cfg.symbols.keys())}",
     ]
-    if _exit_model != "regime":
+    if _exit_model not in ("regime", "rebound"):
         lines.append(
             f"Entry: slope≥{cfg.entry.min_abs_slope_pct:.2f}%  "
             f"body{cfg.entry.block_body_band}  noSun"
@@ -169,6 +170,16 @@ async def notify_startup(cfg, restored: Optional[list] = None) -> None:
         lines.append(
             f"Entry: maker limit {rg.limit_atr:g}×ATR  •  "
             f"SL={rg.sl_atr:g}×ATR  TP={rg.tp_frac:g}×dist-to-VWAP  time={rg.max_bars}b"
+        )
+    elif _exit_model == "rebound":
+        rb = cfg.rebound
+        lines.append(
+            f"Strategy: Rebound 1h VWAP-fade | VWAP({rb.vwap_len}) band {rb.bb_mult:g}σ, "
+            f"ADX&lt;{rb.adx_max:g} range"
+        )
+        lines.append(
+            f"Exit: bank {rb.tp1_frac*100:.0f}% @ VWAP-mean → {rb.atr_trail:g}×ATR runner trail  •  "
+            f"SL={rb.atr_stop:g}×ATR  time={rb.max_bars}b  •  risk={rb.risk_frac*100:g}%/trade"
         )
     elif _exit_model == "scaleout":
         sc = cfg.scaleout
