@@ -26,8 +26,8 @@ from .ema import compute_ema_series
 from .entry_gate import EntryGate
 from .handlers.entry import handle_entry, _dollar_to_price_distance
 from .notify import (
-    Notifier, format_entry, format_trail_activated, format_trail_update,
-    format_pending_filled, format_pending_expired,
+    Notifier, format_entry, format_exit, format_trail_activated,
+    format_trail_update, format_pending_filled, format_pending_expired,
 )
 from .state import Store
 
@@ -220,8 +220,7 @@ class PositionPoller:
                 if now >= expires_at:
                     self.store.expire_pending_signal(sig["id"])
                     log.info("Pending signal %d expired for %s", sig["id"], sig["symbol"])
-                    if self.notifier:
-                        self.notifier.send(format_pending_expired(sig["action"], sig["symbol"]))
+                    # V3.2 'Fin': silent on expiry — no signal chatter.
                     continue
 
                 # Operator pause: drop the pending signal without firing.
@@ -336,11 +335,7 @@ class PositionPoller:
                 if result.get("opened"):
                     self.store.fill_pending_signal(sig["id"], current_price)
                     if self.notifier:
-                        self.notifier.send(format_pending_filled(
-                            sig["action"], sig["symbol"],
-                            result["entry_price"], sig["signal_price"],
-                        ))
-                        # Also send the full entry notification
+                        # V3.2 'Fin': entry + SL only (no signal/fill chatter).
                         result["symbol"] = sig["symbol"]
                         self.notifier.send(format_entry(result))
                 else:
@@ -404,6 +399,14 @@ class PositionPoller:
             initial_sl=initial_sl_price, tp_ceiling=None,
         )
         self.store.close_position(pos.id, realized_pnl=None)
+
+        # V3.2 'Fin': exit alert with signed P&L (the only close-side message).
+        if self.notifier and exit_price is not None and pos.entry_price:
+            try:
+                pnl = self._compute_unrealized_pnl_usdt(pos, exit_price)
+                self.notifier.send(format_exit(pos.symbol, pos.side, pnl, exit_reason))
+            except Exception:
+                log.exception("exit notify failed for pos %s", pos.id)
 
     def _compute_unrealized_pnl_usdt(self, pos, current_price: float) -> float:
         """Compute unrealized P&L in USDT for this position."""
@@ -486,13 +489,7 @@ class PositionPoller:
         self._replace_sl(pos, new_sl)
         self.store.update_trail(pos.id, trail_high_price=0, trail_active=1)
         log.info("Breakeven SL for %s: SL=%.4f (entry)", pos.symbol, new_sl)
-        if self.notifier:
-            self.notifier.send(
-                f"🟡 BREAKEVEN {pos.symbol}\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"🛑 SL moved to entry: ${new_sl:,.2f}\n"
-                f"💰 Zero risk"
-            )
+        # V3.2 'Fin': silent on trail-state moves — entry + exit only.
 
     def _lock_profit(self, pos) -> None:
         """SL moves to lock in `lock_profit_usdt` profit."""
@@ -511,13 +508,7 @@ class PositionPoller:
             "Lock profit SL for %s: locking $%.0f, SL=%.4f",
             pos.symbol, thr.lock_profit_usdt, new_sl,
         )
-        if self.notifier:
-            self.notifier.send(
-                f"🔒 LOCK PROFIT {pos.symbol}\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"🛑 SL moved to +${thr.lock_profit_usdt:.0f}: ${new_sl:,.2f}\n"
-                f"💰 ${thr.lock_profit_usdt:.0f} locked in"
-            )
+        # V3.2 'Fin': silent on lock-profit move.
 
     def _activate_trail(self, pos, current_price: float) -> None:
         """SL jumps to lock in (trail_start - trail_distance) profit. Dead zone until trail_start."""
@@ -542,9 +533,7 @@ class PositionPoller:
             "Trail jumped for %s: locking $%.0f profit, SL=%.4f (dead zone until +$%.0f)",
             pos.symbol, lock_in_usdt, new_sl, thr.trail_start_usdt,
         )
-        if self.notifier:
-            pnl = self._compute_unrealized_pnl_usdt(pos, current_price)
-            self.notifier.send(format_trail_activated(pos.symbol, pnl, new_sl))
+        # V3.2 'Fin': silent on trail activation.
 
     def _update_trail(self, pos, current_price: float) -> None:
         """Trail is active. Move SL if price made a new high."""
@@ -568,8 +557,7 @@ class PositionPoller:
             "Trail updated for %s: high=%.4f → %.4f, SL=%.4f",
             pos.symbol, old_high, new_high, new_sl,
         )
-        if self.notifier:
-            self.notifier.send(format_trail_update(pos.symbol, new_high, new_sl))
+        # V3.2 'Fin': silent on each trail step.
 
     def _replace_sl(self, pos, new_trigger: float) -> None:
         """Cancel existing SL and place a new one."""
