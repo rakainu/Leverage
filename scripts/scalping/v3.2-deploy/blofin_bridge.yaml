@@ -1,9 +1,8 @@
 # Scalping V3.2 — V3.1 strategy DNA (slope/Sunday/body filters + 5-stage trail)
 # with a SELF-GENERATED HA-V3 entry signal replacing the TradingView Pro V3
-# webhook. The audit showed the live Pro V3 signal was sparse (~36% fill) and
-# its longs lost even with a perfect exit; this swaps in the engine-proven
-# (+$19k / PF 2.80 over 181d) HA-V3 signal and removes the TV alert dependency.
-# Exits, stops, filters, sizing, leverage = unchanged from V3.1.
+# webhook. 7-coin basket — each validated through the engine (PF>=2.76 demo,
+# robust ex-top3, survives BloFin fees, both sides positive). Identical %-based
+# geometry per coin: $250 margin x 30x = $7,500 notional, $82.50 stop = 1.1%.
 
 defaults:
   margin_usdt: 100
@@ -11,7 +10,6 @@ defaults:
   margin_mode: isolated
   position_mode: net
   sl_policy: p2_step_stop
-  # --- SL / Trail / TP @ baseline margin ($100) — identical to V3.1 ---
   sl_loss_usdt: 13
   breakeven_usdt: 12
   lock_profit_activate_usdt: 18
@@ -20,14 +18,12 @@ defaults:
   trail_start_usdt: 32
   trail_distance_usdt: 15
   tp_limit_margin_pct: 2.0
-  # --- EMA retest entry (unchanged) ---
   ema_retest_period: 9
   ema_retest_timeframe: "5m"
   ema_retest_timeout_minutes: 30
   ema_retest_max_overshoot_pct: 0.2
   min_5m_slope_pct: 0.15
   poll_interval_seconds: 2
-  # --- V3.1 entry filters (unchanged) ---
   block_weekdays_utc: [6]
   block_body_atr_band: [0.3, 0.5]
   min_body_atr_ratio: 0.0
@@ -38,15 +34,16 @@ defaults:
   signal_range_filt: 0.2
   signal_lookback_bars: 300
   signal_scan_interval_seconds: 30
-  signal_min_adx: 0.0   # 0=off (full net). Set 18 for the risk-adjusted profile.
+  signal_min_adx: 0.0
 
+# 7-coin basket. All use $250 margin / 30x / $82.50 stop (= the exact %-geometry
+# every coin was validated at). Per-coin demo backtest (120d, HYPE 31d):
+#   ZEC PF3.09  XRP PF3.30  DOGE PF2.93  SOL PF2.82  BTC PF3.86  BNB PF4.16  HYPE PF2.76
 symbols:
-  # ZEC only — the proven instrument. SOL dropped (live -\$10/30t noise, no 5m
-  # backtest data). Re-add by copying this block + changing margin_usdt.
-  ZEC-USDT:
-    enabled: true
-    margin_usdt: 250
-    leverage: 30
-    margin_mode: isolated
-    sl_policy: p2_step_stop
-    sl_loss_usdt: 82.50
+  ZEC-USDT:  {enabled: true, margin_usdt: 250, leverage: 30, margin_mode: isolated, sl_policy: p2_step_stop, sl_loss_usdt: 82.50}
+  XRP-USDT:  {enabled: true, margin_usdt: 250, leverage: 30, margin_mode: isolated, sl_policy: p2_step_stop, sl_loss_usdt: 82.50}
+  DOGE-USDT: {enabled: true, margin_usdt: 250, leverage: 30, margin_mode: isolated, sl_policy: p2_step_stop, sl_loss_usdt: 82.50}
+  SOL-USDT:  {enabled: true, margin_usdt: 250, leverage: 30, margin_mode: isolated, sl_policy: p2_step_stop, sl_loss_usdt: 82.50}
+  BTC-USDT:  {enabled: true, margin_usdt: 250, leverage: 30, margin_mode: isolated, sl_policy: p2_step_stop, sl_loss_usdt: 82.50}
+  BNB-USDT:  {enabled: true, margin_usdt: 250, leverage: 30, margin_mode: isolated, sl_policy: p2_step_stop, sl_loss_usdt: 82.50}
+  HYPE-USDT: {enabled: true, margin_usdt: 250, leverage: 30, margin_mode: isolated, sl_policy: p2_step_stop, sl_loss_usdt: 82.50}
