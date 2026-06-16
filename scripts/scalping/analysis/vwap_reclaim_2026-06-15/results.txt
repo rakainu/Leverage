@@ -1,0 +1,60 @@
+
+=== SOL 5m | 2025-12-02 -> 2026-05-31 (51840 bars, 179d) | venue=Lighter 0-fee unless noted ===
+
+[0] SIGNAL CADENCE — doc targets 2-4 trades/day (= 358-716 over window)
+    config                                         cands  /day
+    doc 'tuned starting' (trend filter ON)             1  0.01
+    same, trend filter OFF                            41  0.23
+    trendOFF + swing3 + hardmax0.80                   53  0.30
+    trendOFF + vwap0.30/rsi40 + swing3               136  0.76
+    LOOSEST tradeable (vwap0.30/rsi40/swing3/hmax0.80)   173  0.97
+
+[1] BASELINE — doc 'Tuned starting version' EXACTLY (trend filter ON), $5k/10x, slip 0.05%
+  full-sample                    n=   1  PF=  inf  WR= 100%  net=     +34  maxDD= 0.0%  avgW= +34.3  avgL=  +0.0  t/day=0.01  bars~13
+    -> the spec as written does not trade. Trend filter (rule #7) blocks ~all longs.
+
+[2] REALISTIC BASELINE — doc params but trend filter OFF + swing3 + hardmax0.80
+  full-sample                    n=  52  PF= 0.93  WR=  31%  net=     -40  maxDD= 8.9%  avgW= +31.5  avgL= -15.1  t/day=0.29  bars~8
+  in-sample 70%                  n=  31  PF= 0.80  WR=  29%  net=     -74  maxDD= 6.8%  avgW= +33.5  avgL= -17.1  t/day=0.25  bars~6
+  out-sample 30%                 n=  21  PF= 1.20  WR=  33%  net=     +34  maxDD= 3.9%  avgW= +28.8  avgL= -12.0  t/day=0.39  bars~10
+
+[3] COST / SLIPPAGE SENSITIVITY (realistic baseline, full sample)
+  Lighter 0-fee slip 0.02%       n=  52  PF= 1.03  WR=  33%  net=     +16  maxDD= 7.0%  avgW= +29.8  avgL= -14.0  t/day=0.29  bars~8
+  Lighter 0-fee slip 0.05%       n=  52  PF= 0.93  WR=  31%  net=     -40  maxDD= 8.9%  avgW= +31.5  avgL= -15.1  t/day=0.29  bars~8
+  Lighter 0-fee slip 0.10%       n=  52  PF= 0.79  WR=  31%  net=    -132  maxDD=12.2%  avgW= +31.2  avgL= -17.5  t/day=0.29  bars~8
+  BloFin fees + slip 0.05%       n=  52  PF= 0.68  WR=  31%  net=    -218  maxDD=14.8%  avgW= +29.3  avgL= -19.1  t/day=0.29  bars~8
+
+[4] ENTRY STYLE (realistic baseline, Lighter slip 0.05%)
+  entry=close                    n=  52  PF= 0.93  WR=  31%  net=     -40  maxDD= 8.9%  avgW= +31.5  avgL= -15.1  t/day=0.29  bars~8
+  entry=retrace25                n=  54  PF= 0.98  WR=  37%  net=      -9  maxDD=10.8%  avgW= +27.1  avgL= -16.2  t/day=0.30  bars~8
+
+[5] PARAMETER SWEEP — ranked by OUT-OF-SAMPLE profit factor
+    evaluating 1152 configs (IS train / OOS score) ...
+    1152/1152 configs cleared min-trade filter (IS>=15, OOS>=6). Top 15 by OOS PF:
+     vwX rsi sw  atr  mxS  tp1  tp2 cd     entry | IS_PF IS_n | OOS_PF OOS_n OOS_WR OOS_DD  OOSnet
+    0.45  35  3  1.0 0.65 0.60 1.25  3     close |  0.83   23 |   1.97   17    41%   2.2%    +100
+    0.45  35  3  1.0 0.65 0.60 1.25  6     close |  0.83   23 |   1.97   17    41%   2.2%    +100
+    0.45  35  3  1.2 0.65 0.60 1.25  3     close |  0.83   23 |   1.97   17    41%   2.2%    +100
+    0.45  35  3  1.2 0.65 0.60 1.25  6     close |  0.83   23 |   1.97   17    41%   2.2%    +100
+    0.45  35  5  1.0 0.65 0.60 1.25  3     close |  0.83   23 |   1.97   17    41%   2.2%    +100
+    0.45  35  5  1.0 0.65 0.60 1.25  6     close |  0.83   23 |   1.97   17    41%   2.2%    +100
+    0.45  35  5  1.2 0.65 0.60 1.25  3     close |  0.83   23 |   1.97   17    41%   2.2%    +100
+    0.45  35  5  1.2 0.65 0.60 1.25  6     close |  0.83   23 |   1.97   17    41%   2.2%    +100
+    0.45  35  3  1.0 0.65 0.60 1.00  3     close |  0.83   23 |   1.95   17    41%   2.2%     +98
+    0.45  35  3  1.0 0.65 0.60 1.00  6     close |  0.83   23 |   1.95   17    41%   2.2%     +98
+    0.45  35  3  1.2 0.65 0.60 1.00  3     close |  0.83   23 |   1.95   17    41%   2.2%     +98
+    0.45  35  3  1.2 0.65 0.60 1.00  6     close |  0.83   23 |   1.95   17    41%   2.2%     +98
+    0.45  35  5  1.0 0.65 0.60 1.00  3     close |  0.83   23 |   1.95   17    41%   2.2%     +98
+    0.45  35  5  1.0 0.65 0.60 1.00  6     close |  0.83   23 |   1.95   17    41%   2.2%     +98
+    0.45  35  5  1.2 0.65 0.60 1.00  3     close |  0.83   23 |   1.95   17    41%   2.2%     +98
+
+    robustness: 400/1152 OOS-profitable; 208/1152 clear OOS PF>=1.35
+
+[6] $100/DAY FEASIBILITY (realistic baseline, full sample, Lighter slip 0.05%)
+     notional margin@10x     net$   $/day    PF  maxDD$  DD%margin
+        4,000        400      -32   -0.18  0.93     145      36.3%
+        6,000        600      -48   -0.27  0.93     218      36.3%
+        8,000        800      -63   -0.35  0.93     291      36.3%
+       10,000      1,000      -79   -0.44  0.93     363      36.3%
+
+    (window 179d; $/day = net/179. To hit $100/day you need ~17900 net over the window.)
