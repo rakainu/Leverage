@@ -49,13 +49,14 @@ body::after{ /* grain */
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
 /* ---- header ---- */
-header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;
+header{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;
   border-bottom:1px solid var(--line);padding-bottom:9px;margin-bottom:12px}
 .brand{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
 .brand h1{font-family:var(--disp);font-weight:700;font-size:27px;letter-spacing:.04em;line-height:.95;
   background:linear-gradient(90deg,var(--ink),var(--engine));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .brand .sub{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:0;letter-spacing:.04em}
-.hdr-right{text-align:right;font-family:var(--mono);font-size:12px;color:var(--dim)}
+.hdr-right{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:12px;color:var(--dim)}
+.hdr-meta{white-space:nowrap}
 .tag{display:inline-flex;align-items:center;gap:7px;border:1px solid #2f8a5c;color:var(--good);
   padding:4px 10px;font-family:var(--disp);letter-spacing:.16em;font-size:12px;font-weight:600;text-transform:uppercase;
   background:rgba(70,224,160,.06)}
@@ -164,8 +165,7 @@ td{font-family:var(--mono);font-size:12.5px;padding:7px 8px;border-bottom:1px so
     </div>
     <div class="hdr-right">
       <div class="tag"><span class="dot"></span><span id="envtag">DEMO · LIVE</span></div>
-      <div style="margin-top:8px">UPLINK <span id="updated" style="color:var(--ink)">—</span></div>
-      <div style="margin-top:3px">T+<span id="days" style="color:var(--ink)">0.0</span>d TRACKING ENGINE</div>
+      <div class="hdr-meta">UPLINK <span id="updated" style="color:var(--ink)">—</span> · T+<span id="days" style="color:var(--ink)">0.0</span>d · TRACKING ENGINE</div>
     </div>
   </header>
 
