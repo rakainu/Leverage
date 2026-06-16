@@ -10,7 +10,10 @@ Env:
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
+import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,7 +27,33 @@ import benchmark as B
 DB_PATH = Path(os.environ.get("V32_DB", "data/bridge.db"))
 TITLE = os.environ.get("V32_TITLE", "SCALPING V3.2")
 SUBTITLE = os.environ.get("V32_SUBTITLE", "self-generated HA-V3 · BloFin demo")
-STOP_USDT = float(os.environ.get("V32_STOP_USDT", "82.5"))  # ZEC %-stop in $
+STOP_USDT = float(os.environ.get("V32_STOP_USDT", "82.5"))  # %-stop in $ (all coins)
+SYMBOLS = [s.strip() for s in os.environ.get(
+    "V32_SYMBOLS",
+    "ZEC-USDT,XRP-USDT,DOGE-USDT,SOL-USDT,BTC-USDT,BNB-USDT,HYPE-USDT",
+).split(",") if s.strip()]
+
+# Mark-price cache (public BloFin tickers) for open-position unrealized P&L.
+_marks: dict = {"t": 0.0, "px": {}}
+
+
+def _fetch_marks() -> dict:
+    now = time.time()
+    if now - _marks["t"] < 3.0 and _marks["px"]:
+        return _marks["px"]
+    try:
+        req = urllib.request.Request(
+            "https://openapi.blofin.com/api/v1/market/tickers",
+            headers={"User-Agent": "Mozilla/5.0"},  # default UA is WAF-blocked (403)
+        )
+        with urllib.request.urlopen(req, timeout=3) as r:
+            data = json.load(r).get("data", [])
+        _marks["px"] = {row["instId"]: float(row["last"])
+                        for row in data if row.get("last")}
+        _marks["t"] = now
+    except Exception:
+        pass
+    return _marks["px"]
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app = FastAPI(title="Scalping V3.2 Telemetry")
@@ -123,6 +152,48 @@ def _track(metric: str, live, higher_is_better=True) -> str:
     return "lagging"
 
 
+def _open_positions() -> list[dict]:
+    rows = _rows(
+        "SELECT id, symbol, side, entry_price, margin_usdt, leverage, "
+        "trail_active, opened_at FROM positions WHERE closed_at IS NULL ORDER BY opened_at"
+    )
+    px = _fetch_marks() if rows else {}
+    states = {0: "armed", 1: "breakeven", 2: "locked", 3: "locked+", 4: "trailing"}
+    out = []
+    for p in rows:
+        cur = px.get(p["symbol"])
+        notional = (p["margin_usdt"] or 0) * (p["leverage"] or 0)
+        upnl = None
+        if cur and p["entry_price"]:
+            move = ((cur - p["entry_price"]) / p["entry_price"]) if p["side"] == "long" \
+                else ((p["entry_price"] - cur) / p["entry_price"])
+            upnl = move * notional
+        out.append({
+            "symbol": p["symbol"], "side": p["side"], "entry": p["entry_price"],
+            "mark": cur, "upnl": upnl, "upnl_r": (upnl / STOP_USDT) if upnl is not None else None,
+            "state": states.get(p["trail_active"], "—"), "opened_at": p["opened_at"],
+        })
+    return out
+
+
+def _per_coin(trades: list[dict], open_syms: set) -> list[dict]:
+    by: dict[str, list[float]] = {}
+    for t in trades:
+        by.setdefault(t["symbol"], []).append(t["pnl_usdt"] or 0.0)
+    out = []
+    for s in SYMBOLS:
+        pn = by.get(s, [])
+        wins = [x for x in pn if x > 0]
+        gw, gl = sum(wins), -sum(x for x in pn if x <= 0)
+        out.append({
+            "symbol": s, "n": len(pn), "net": round(sum(pn), 1),
+            "win_rate": (len(wins) / len(pn)) if pn else None,
+            "profit_factor": (gw / gl) if gl > 0 else (float("inf") if gw > 0 else None),
+            "open": s in open_syms,
+        })
+    return sorted(out, key=lambda r: (r["open"], r["net"]), reverse=True)
+
+
 def build_state() -> dict:
     trades = _rows(
         "SELECT id, symbol, side, entry_price, exit_price, exit_reason, "
@@ -165,7 +236,11 @@ def build_state() -> dict:
     }
 
     pend_open = [p for p in pending if p["status"] == "pending"]
+    open_pos = _open_positions()
+    per_coin = _per_coin(trades, {o["symbol"] for o in open_pos})
     return {
+        "open_positions": open_pos,
+        "per_coin": per_coin,
         "meta": {
             "title": TITLE, "subtitle": SUBTITLE,
             "updated": now.strftime("%H:%M:%S UTC"),

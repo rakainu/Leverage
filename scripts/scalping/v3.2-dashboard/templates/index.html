@@ -131,6 +131,19 @@ td{font-family:var(--mono);font-size:12.5px;padding:7px 8px;border-bottom:1px so
 .foot{margin-top:14px;border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;
   font-family:var(--mono);font-size:11px;color:var(--dim);flex-wrap:wrap;gap:8px}
 
+/* open positions */
+.opos{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:8px}
+.opos .o{border:1px solid var(--line);padding:10px 12px;background:#0a1117;position:relative;overflow:hidden}
+.opos .o.win{border-color:var(--good)}.opos .o.lose{border-color:var(--bad)}
+.opos .o.win::before,.opos .o.lose::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.opos .o.win::before{background:var(--good)}.opos .o.lose::before{background:var(--bad)}
+.opos .otop{display:flex;align-items:center;gap:8px}
+.opos .osym{font-family:var(--disp);font-weight:700;letter-spacing:.05em;font-size:16px}
+.opos .ostate{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.12em}
+.opos .opnl{font-family:var(--mono);font-size:22px;font-weight:600;margin-top:7px;letter-spacing:-.01em}
+.opos .ometa{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:3px}
+.coindot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--faint);margin-right:7px;vertical-align:middle}
+.coindot.on{background:var(--live);box-shadow:0 0 7px var(--live)}
 /* staggered load */
 .panel,.hero{opacity:0;transform:translateY(10px);animation:rise .6s cubic-bezier(.2,.7,.2,1) forwards}
 @keyframes rise{to{opacity:1;transform:none}}
@@ -164,6 +177,16 @@ td{font-family:var(--mono);font-size:12.5px;padding:7px 8px;border-bottom:1px so
     </div>
     <div class="gauges" id="gauges"></div>
     <div class="stats" id="stats"></div>
+  </section>
+
+  <section class="panel hero d2" style="margin-bottom:11px">
+    <div class="label">Open positions — live unrealized (<span id="opcount">0</span>)</div>
+    <div id="openpos"></div>
+  </section>
+
+  <section class="panel hero d3" style="margin-bottom:11px">
+    <div class="label">Per-coin — closed-trade scoreboard · dot = open now</div>
+    <div id="percoin"></div>
   </section>
 
   <div class="grid row2 hero">
@@ -268,6 +291,28 @@ function render(s){
     <div class="stat"><div class="sv">${fmt(L.net_per_day,1)===null?'—':money(L.net_per_day)}</div><div class="sl">Net / day · eng ${money(E.net_per_day_usdt)}</div></div>
     <div class="stat"><div class="sv ${ddCls}">${money(L.max_dd)}</div><div class="sl">Max DD · eng ${money(E.max_dd_usdt)}</div></div>
     <div class="stat"><div class="sv">${L.max_consec_loss}</div><div class="sl">Max consec loss</div></div>`;
+
+  // open positions (current trades)
+  $('opcount').textContent=s.open_positions.length;
+  $('openpos').innerHTML = s.open_positions.length ? '<div class="opos">'+s.open_positions.map(o=>{
+    const has=o.upnl!==null&&o.upnl!==undefined; const cls=has?(o.upnl>=0?'win':'lose'):'';
+    return `<div class="o ${cls}">
+      <div class="otop"><span class="osym s-${o.side}">${o.symbol.replace('-USDT','')}</span>
+        <span class="sa a-${o.side==='long'?'buy':'sell'}" style="font-size:11px;padding:1px 7px">${o.side.toUpperCase()}</span>
+        <span class="ostate">${o.state}</span></div>
+      <div class="opnl ${has?(o.upnl>=0?'pos':'neg'):''}">${has?money(o.upnl):'—'} <span style="font-size:12px;color:var(--dim)">${has?o.upnl_r.toFixed(2)+'R':''}</span></div>
+      <div class="ometa">entry ${Number(o.entry).toFixed(2)} · mark ${o.mark?Number(o.mark).toFixed(2):'—'} · ${(o.opened_at||'').slice(5,16).replace('T',' ')}</div>
+    </div>`;}).join('')+'</div>'
+    : '<div class="empty">flat — no open positions</div>';
+
+  // per-coin scoreboard
+  $('percoin').innerHTML = '<table><thead><tr><th>coin</th><th>n</th><th>win %</th><th>PF</th><th>net</th></tr></thead><tbody>'+
+    s.per_coin.map(c=>`<tr>
+      <td><span class="coindot ${c.open?'on':''}"></span>${c.symbol.replace('-USDT','')}</td>
+      <td>${c.n}</td>
+      <td>${c.win_rate===null?'—':(c.win_rate*100).toFixed(0)+'%'}</td>
+      <td>${c.profit_factor===null?'—':pf(c.profit_factor)}</td>
+      <td class="${c.net>=0?'pos':'neg'}">${money(c.net)}</td></tr>`).join('')+'</tbody></table>';
 
   sparkline(s.equity);
 
