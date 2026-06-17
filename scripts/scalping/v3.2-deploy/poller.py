@@ -385,8 +385,12 @@ class PositionPoller:
         else:
             initial_sl_price = pos.entry_price + sl_price_distance
 
-        if pos.trail_active:
+        if pos.trail_active and pos.trail_active >= 2:
+            # state >=2 = profit actually locked (lock/jump/trail)
             exit_reason = "trail_sl"
+        elif pos.trail_active == 1:
+            # state 1 = breakeven stop (SL at entry); fills ~$0 or small +/- on slip
+            exit_reason = "sl_be"
         elif exit_price is not None and abs(exit_price - initial_sl_price) / pos.entry_price <= 0.003:
             # Within 0.3% of the initial SL price — treat as SL hit.
             exit_reason = "sl"
