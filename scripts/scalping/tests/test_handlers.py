@@ -153,6 +153,24 @@ def test_entry_persists_position_row(store, blofin):
     assert row.trail_high_price is None
 
 
+def test_entry_persists_explicit_source(store, blofin):
+    handle_entry(
+        action="buy", symbol="SOL-USDT",
+        store=store, blofin=blofin, source="ha_v3", **_entry_kwargs(),
+    )
+    row = store.get_open_position("SOL-USDT")
+    assert row.source == "ha_v3"
+
+
+def test_entry_defaults_source_pro_v3(store, blofin):
+    handle_entry(
+        action="buy", symbol="SOL-USDT",
+        store=store, blofin=blofin, **_entry_kwargs(),
+    )
+    row = store.get_open_position("SOL-USDT")
+    assert row.source == "pro_v3"
+
+
 def test_sl_adjusts_with_margin_size(store, blofin, sol_instrument):
     """$150 margin should give a tighter SL price distance."""
     blofin.get_instrument.return_value = sol_instrument

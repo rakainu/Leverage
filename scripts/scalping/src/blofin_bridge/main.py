@@ -269,7 +269,7 @@ def create_app() -> FastAPI:
             result = dispatch(
                 action=payload.action, symbol=payload.symbol,
                 store=store, blofin=blofin, symbol_configs=symbol_configs,
-                gate=gate,
+                gate=gate, source=payload.source,
             )
             store.mark_event_handled(event_id, outcome="ok", error_msg=None)
 

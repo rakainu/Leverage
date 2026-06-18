@@ -80,7 +80,11 @@ CREATE TABLE IF NOT EXISTS pending_signals (
     expires_at   TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'pending',
     filled_at    TEXT,
-    fill_price   REAL
+    fill_price   REAL,
+    -- Provenance of the signal: 'ha_v3' (self-generated, V3.2) or 'pro_v3'
+    -- (TradingView webhook). Threaded onto the opened position so trades
+    -- record their true origin.
+    source       TEXT DEFAULT 'pro_v3'
 );
 
 CREATE INDEX IF NOT EXISTS idx_pending_status

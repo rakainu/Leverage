@@ -40,6 +40,8 @@ def handle_entry(
     trail_activate_usdt: float,
     trail_distance_usdt: float,
     tp_limit_margin_pct: float,
+    # provenance
+    source: str = "pro_v3",
 ) -> dict[str, Any]:
     """Open a new position with fixed-dollar SL and hard TP ceiling.
 
@@ -108,7 +110,7 @@ def handle_entry(
     # --- Persist position row ---
     pid = store.create_position(
         symbol=symbol, side=side, entry_price=entry_price,
-        initial_size=contracts, sl_policy=sl_policy_name, source="pro_v3",
+        initial_size=contracts, sl_policy=sl_policy_name, source=source,
         margin_usdt=margin_usdt, leverage=leverage,
     )
 

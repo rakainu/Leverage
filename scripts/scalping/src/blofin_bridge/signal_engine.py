@@ -38,7 +38,7 @@ class _StoreLike(Protocol):
     def cancel_pending_signals_for_symbol(self, symbol: str) -> int: ...
     def create_pending_signal(
         self, *, symbol: str, action: str, signal_price: float,
-        timeout_minutes: int,
+        timeout_minutes: int, source: str = "pro_v3",
     ) -> int: ...
 
 
@@ -133,7 +133,7 @@ class SignalEngine:
         self.store.cancel_pending_signals_for_symbol(symbol)
         sid = self.store.create_pending_signal(
             symbol=symbol, action=action, signal_price=signal_price,
-            timeout_minutes=self.timeout_minutes,
+            timeout_minutes=self.timeout_minutes, source="ha_v3",
         )
         log.info(
             "HA-V3 %s signal for %s @ %.4f (adx=%.1f) -> pending %d",

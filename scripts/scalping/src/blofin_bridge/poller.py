@@ -330,6 +330,7 @@ class PositionPoller:
                     trail_activate_usdt=sym_cfg["trail_activate_usdt"],
                     trail_distance_usdt=sym_cfg["trail_distance_usdt"],
                     tp_limit_margin_pct=sym_cfg["tp_limit_margin_pct"],
+                    source=sig.get("source", "pro_v3"),
                 )
 
                 if result.get("opened"):

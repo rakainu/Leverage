@@ -48,6 +48,18 @@ class Store:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA_FILE.read_text())
+            self._migrate(c)
+
+    @staticmethod
+    def _migrate(c: sqlite3.Connection) -> None:
+        """Idempotent in-place migrations for DBs created before a column
+        existed. CREATE TABLE IF NOT EXISTS won't add columns to a live table,
+        so add them here. ADD COLUMN ... DEFAULT backfills existing rows."""
+        cols = {r[1] for r in c.execute("PRAGMA table_info(pending_signals)")}
+        if "source" not in cols:
+            c.execute(
+                "ALTER TABLE pending_signals ADD COLUMN source TEXT DEFAULT 'pro_v3'"
+            )
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -231,7 +243,7 @@ class Store:
 
     def create_pending_signal(
         self, *, symbol: str, action: str, signal_price: float,
-        timeout_minutes: int = 30,
+        timeout_minutes: int = 30, source: str = "pro_v3",
     ) -> int:
         now = datetime.now(timezone.utc)
         expires = now + __import__("datetime").timedelta(minutes=timeout_minutes)
@@ -239,10 +251,11 @@ class Store:
             cur = c.execute(
                 """
                 INSERT INTO pending_signals
-                  (symbol, action, signal_price, created_at, expires_at, status)
-                VALUES (?, ?, ?, ?, ?, 'pending')
+                  (symbol, action, signal_price, created_at, expires_at, status, source)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?)
                 """,
-                (symbol, action, signal_price, now.isoformat(), expires.isoformat()),
+                (symbol, action, signal_price, now.isoformat(), expires.isoformat(),
+                 source),
             )
             return cur.lastrowid
 

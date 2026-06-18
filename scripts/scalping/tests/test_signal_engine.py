@@ -189,6 +189,21 @@ def test_min_adx_gate_suppresses_weak_trend(tmp_path):
     assert len(eng_lo.scan_once()) == 1
 
 
+def test_queued_pending_tagged_ha_v3(tmp_path):
+    """Self-generated signals must be provenance-tagged 'ha_v3' (not the
+    webhook default 'pro_v3') so trades record their true origin."""
+    rows = _rows()
+    i = _first_index(rows, "buy_sig")
+    series = _ohlcv(rows[: i + 1])
+    series.append([series[-1][0] + 300_000, 999, 999, 999, 999, 0.0])
+    store = Store(tmp_path / "t.db")
+    eng = _engine(store, FakeBlofin({"ZEC-USDT": series}))
+
+    eng.scan_once()
+
+    assert store.list_pending_signals()[0]["source"] == "ha_v3"
+
+
 def test_new_closed_bar_rescans(tmp_path):
     """When a new bar closes (last_ts changes), the engine scans again."""
     rows = _rows()

@@ -388,6 +388,38 @@ async def test_pending_signal_for_paused_symbol_is_expired(store, blofin):
     blofin.place_market_entry.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_pending_source_threaded_to_entry(store, blofin, monkeypatch):
+    """The poller must pass a pending signal's source through to handle_entry,
+    so a self-generated ('ha_v3') signal opens an 'ha_v3'-tagged position."""
+    store.create_pending_signal(
+        symbol="SOL-USDT", action="buy", signal_price=300.0, source="ha_v3",
+    )
+    # Flat tape → EMA(9) retest fires immediately on this poll.
+    bars = [[i, 300.0, 300.0, 300.0, 300.0, 0.0] for i in range(25)]
+    blofin.fetch_recent_ohlcv.return_value = bars
+    blofin.fetch_last_price.return_value = 300.0
+
+    captured: dict = {}
+
+    def _fake_entry(**kwargs):
+        captured.update(kwargs)
+        return {"opened": False, "reason": "stub"}
+
+    monkeypatch.setattr("blofin_bridge.poller.handle_entry", _fake_entry)
+
+    cfg = {"SOL-USDT": {
+        "margin_usdt": 100, "leverage": 30, "margin_mode": "isolated",
+        "sl_policy": "p2_step_stop", "sl_loss_usdt": 15,
+        "trail_activate_usdt": 25, "trail_distance_usdt": 10,
+        "tp_limit_margin_pct": 2.0,
+    }}
+    poller = _make_poller(store, blofin, symbol_configs=cfg)
+    poller._process_pending_signals()
+
+    assert captured.get("source") == "ha_v3"
+
+
 # === Full lifecycle ===
 
 

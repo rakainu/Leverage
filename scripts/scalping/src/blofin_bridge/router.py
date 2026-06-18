@@ -29,6 +29,7 @@ def dispatch(
     blofin: BloFinClient,
     symbol_configs: dict[str, dict[str, Any]],
     gate: "EntryGate | None" = None,
+    source: str = "pro_v3",
 ) -> dict[str, Any]:
     if action not in VALID_ACTIONS:
         raise UnknownAction(action)
@@ -57,6 +58,7 @@ def dispatch(
     sig_id = store.create_pending_signal(
         symbol=symbol, action=action, signal_price=signal_price,
         timeout_minutes=sym_cfg.get("ema_retest_timeout_minutes", 30),
+        source=source,
     )
     return {
         "pending": True,

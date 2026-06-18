@@ -115,6 +115,58 @@ def test_clear_tp_order_id_invalid_stage_raises(store):
         store.clear_tp_order_id(pid, stage=5)
 
 
+def test_create_pending_signal_defaults_source_pro_v3(store):
+    store.create_pending_signal(
+        symbol="SOL-USDT", action="buy", signal_price=300.0,
+    )
+    sigs = store.list_pending_signals()
+    assert len(sigs) == 1
+    assert sigs[0]["source"] == "pro_v3"
+
+
+def test_create_pending_signal_records_explicit_source(store):
+    store.create_pending_signal(
+        symbol="ZEC-USDT", action="sell", signal_price=500.0, source="ha_v3",
+    )
+    assert store.list_pending_signals()[0]["source"] == "ha_v3"
+
+
+def test_pending_signals_source_column_added_to_legacy_db(tmp_path):
+    """A pre-source DB (pending_signals with no `source` column) must be
+    migrated in-place when the Store opens it — not crash, and legacy rows
+    backfilled to the 'pro_v3' default."""
+    import sqlite3
+
+    db = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE pending_signals (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol       TEXT NOT NULL,
+            action       TEXT NOT NULL,
+            signal_price REAL NOT NULL,
+            created_at   TEXT NOT NULL,
+            expires_at   TEXT NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'pending',
+            filled_at    TEXT,
+            fill_price   REAL
+        );
+        INSERT INTO pending_signals
+            (symbol, action, signal_price, created_at, expires_at, status)
+        VALUES ('SOL-USDT', 'buy', 300.0,
+                '2026-01-01T00:00:00+00:00', '2026-01-01T00:30:00+00:00', 'pending');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = Store(db)  # opening must migrate, not raise
+    sigs = store.list_pending_signals()
+    assert len(sigs) == 1
+    assert sigs[0]["source"] == "pro_v3"
+
+
 def test_append_event_and_update_outcome(store):
     eid = store.append_event(
         position_id=None, event_type="buy",

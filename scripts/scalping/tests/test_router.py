@@ -110,4 +110,13 @@ def test_dispatch_returns_paused_when_gate_is_paused(store, blofin, cfg):
     assert store.list_pending_signals() == []
 
 
+def test_dispatch_tags_source_pro_v3(store, blofin, cfg):
+    """A webhook-dispatched signal is tagged 'pro_v3' by default."""
+    dispatch(
+        action="buy", symbol="SOL-USDT",
+        store=store, blofin=blofin, symbol_configs=cfg,
+    )
+    assert store.list_pending_signals()[0]["source"] == "pro_v3"
+
+
 # sl / reversal action dispatch tests removed — bridge owns all exits.
