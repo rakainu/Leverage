@@ -18,6 +18,8 @@ from .notify import (
 )
 from .poller import PositionPoller
 from .router import dispatch, UnknownAction
+from .signal_engine import SignalEngine
+from .signals import SignalParams
 from .state import Store
 from .tg_commander import TelegramCommander
 
@@ -112,17 +114,48 @@ def create_app() -> FastAPI:
         ema_retest_timeframe=settings.defaults.ema_retest_timeframe,
         ema_retest_max_overshoot_pct=settings.defaults.ema_retest_max_overshoot_pct,
         min_5m_slope_pct=settings.defaults.min_5m_slope_pct,
+        block_weekdays_utc=settings.defaults.block_weekdays_utc,
+        block_body_atr_band=settings.defaults.block_body_atr_band,
+        min_body_atr_ratio=settings.defaults.min_body_atr_ratio,
         symbol_configs=symbol_configs,
         gate=gate,
     )
+
+    # V3.2: when signal_source == "ha_v3", the bridge generates its own entry
+    # signals from closed 5m bars (the engine-proven HA-V3 model) instead of
+    # waiting on TradingView Pro V3 webhooks. The poller's retest/gates/trail
+    # are unchanged — SignalEngine just feeds the pending-signal queue.
+    signal_engine: SignalEngine | None = None
+    if settings.defaults.signal_source == "ha_v3":
+        signal_engine = SignalEngine(
+            store=store,
+            blofin=blofin,
+            symbols=[n for n, c in settings.symbols.items() if c.enabled],
+            params=SignalParams(
+                sensitivity=settings.defaults.signal_sensitivity,
+                fakeout=settings.defaults.signal_fakeout,
+                range_filt=settings.defaults.signal_range_filt,
+            ),
+            timeframe=settings.defaults.ema_retest_timeframe,
+            lookback_bars=settings.defaults.signal_lookback_bars,
+            timeout_minutes=settings.defaults.ema_retest_timeout_minutes,
+            scan_interval_seconds=settings.defaults.signal_scan_interval_seconds,
+            min_adx=settings.defaults.signal_min_adx,
+            gate=gate,
+            notifier=notifier,
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         poller.start()
         commander.start()
+        if signal_engine is not None:
+            signal_engine.start()
         try:
             yield
         finally:
+            if signal_engine is not None:
+                await signal_engine.stop()
             await commander.stop()
             await poller.stop()
 

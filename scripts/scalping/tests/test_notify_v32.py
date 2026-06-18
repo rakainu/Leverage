@@ -3,15 +3,9 @@
 Rich's spec: signed from V3, less info — only entry (with SL) on open, and exit
 with ±P&L on close. No signal/pending/trail/breakeven chatter.
 """
-import importlib.util
-from pathlib import Path
-
 import pytest
 
-_path = Path(__file__).parents[1] / "v3.2-deploy" / "notify.py"
-_spec = importlib.util.spec_from_file_location("v32_notify", _path)
-notify = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(notify)
+from blofin_bridge import notify
 
 
 def test_entry_is_slim_branded_v3():

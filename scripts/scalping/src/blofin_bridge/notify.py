@@ -9,26 +9,26 @@ log = logging.getLogger(__name__)
 
 
 def format_entry(result: dict[str, Any]) -> str:
+    """Minimal 'Fin' entry alert, signed from V3 — entry + SL only."""
     side = result.get("side", "?")
-    symbol = result.get("symbol", "?")
+    symbol = str(result.get("symbol", "?")).replace("-USDT", "")
     entry = result.get("entry_price", 0)
     sl = result.get("sl_trigger", 0)
-    tp_ceil = result.get("tp_ceiling_price", 0)
-    sl_loss = result.get("sl_loss_usdt", 0)
-    trail_act = result.get("trail_activate_usdt", 0)
-    trail_dist = result.get("trail_distance_usdt", 0)
-
     icon = "🟢" if side == "long" else "🔴"
     direction = "LONG" if side == "long" else "SHORT"
-
     return (
-        f"{icon} {direction} {symbol}\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"📍 Entry: ${entry:,.2f}\n"
-        f"🛑 SL: ${sl:,.2f} (−${sl_loss:,.0f})\n"
-        f"🎯 TP Ceiling: ${tp_ceil:,.2f}\n"
-        f"📈 Trail: activates +${trail_act:,.0f} → follows ${trail_dist:,.0f} behind"
+        f"{icon} V3 · {direction} {symbol}\n"
+        f"Entry ${entry:,.2f}  ·  SL ${sl:,.2f}"
     )
+
+
+def format_exit(symbol: str, side: str, pnl_usdt: float, exit_reason: str = "") -> str:
+    """Minimal 'Fin' exit alert, signed from V3 — just the ±P&L."""
+    sym = str(symbol).replace("-USDT", "")
+    win = pnl_usdt >= 0
+    icon = "🟢" if win else "🔴"
+    sign = "+" if win else "−"
+    return f"{icon} V3 · {sym} exit  {sign}${abs(pnl_usdt):,.2f}"
 
 
 def format_trail_activated(symbol: str, pnl: float, sl_price: float) -> str:

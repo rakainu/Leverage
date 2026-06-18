@@ -26,12 +26,37 @@ from .ema import compute_ema_series
 from .entry_gate import EntryGate
 from .handlers.entry import handle_entry, _dollar_to_price_distance
 from .notify import (
-    Notifier, format_entry, format_trail_activated, format_trail_update,
-    format_pending_filled, format_pending_expired,
+    Notifier, format_entry, format_exit, format_trail_activated,
+    format_trail_update, format_pending_filled, format_pending_expired,
 )
 from .state import Store
 
 log = logging.getLogger(__name__)
+
+
+def _compute_atr_last(bars: list, period: int = 14) -> Optional[float]:
+    """Wilder's ATR (SMMA of true range) over the last `period+1` bars.
+    Returns the most recent ATR value, or None if too few bars."""
+    if len(bars) < period + 1:
+        return None
+    highs = [b[2] for b in bars]
+    lows  = [b[3] for b in bars]
+    closes = [b[4] for b in bars]
+    trs: list[float] = []
+    for i in range(1, len(bars)):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i-1]),
+            abs(lows[i] - closes[i-1]),
+        )
+        trs.append(tr)
+    if len(trs) < period:
+        return None
+    # SMMA seed = SMA of first `period` TRs; then SMMA: atr = (prev_atr*(period-1) + tr) / period
+    atr = sum(trs[:period]) / period
+    for tr in trs[period:]:
+        atr = (atr * (period - 1) + tr) / period
+    return atr
 
 
 @dataclass(frozen=True)
@@ -73,6 +98,10 @@ class PositionPoller:
         ema_retest_timeframe: str = "5m",
         ema_retest_max_overshoot_pct: float = 0.2,
         min_5m_slope_pct: float = 0.0,
+        # V3.1 entry filters (default off → V3 behavior preserved)
+        block_weekdays_utc: Optional[list[int]] = None,
+        block_body_atr_band: Optional[list[float]] = None,
+        min_body_atr_ratio: float = 0.0,
         # Symbol configs for executing pending entries
         symbol_configs: Optional[dict[str, dict[str, Any]]] = None,
         # Operator-initiated per-symbol pause
@@ -95,6 +124,13 @@ class PositionPoller:
         self.ema_retest_timeframe = ema_retest_timeframe
         self.ema_retest_max_overshoot_pct = ema_retest_max_overshoot_pct
         self.min_5m_slope_pct = min_5m_slope_pct
+        # V3.1 filters
+        self.block_weekdays_utc = set(block_weekdays_utc or [])
+        self.block_body_atr_band = (
+            (float(block_body_atr_band[0]), float(block_body_atr_band[1]))
+            if block_body_atr_band else None
+        )
+        self.min_body_atr_ratio = float(min_body_atr_ratio)
         self.symbol_configs = symbol_configs or {}
         self.gate = gate
         self._task: Optional[asyncio.Task] = None
@@ -184,8 +220,7 @@ class PositionPoller:
                 if now >= expires_at:
                     self.store.expire_pending_signal(sig["id"])
                     log.info("Pending signal %d expired for %s", sig["id"], sig["symbol"])
-                    if self.notifier:
-                        self.notifier.send(format_pending_expired(sig["action"], sig["symbol"]))
+                    # V3.2 'Fin': silent on expiry — no signal chatter.
                     continue
 
                 # Operator pause: drop the pending signal without firing.
@@ -197,12 +232,13 @@ class PositionPoller:
                     )
                     continue
 
-                # Fetch current price and EMA series
+                # Fetch current price and OHLCV — need enough bars for both
+                # EMA(period) slope check and ATR(14) for the body/ATR filter.
                 current_price = self.blofin.fetch_last_price(sig["symbol"])
                 bars = self.blofin.fetch_recent_ohlcv(
                     sig["symbol"],
                     timeframe=self.ema_retest_timeframe,
-                    limit=self.ema_retest_period + 10,
+                    limit=max(self.ema_retest_period + 10, 20),
                 )
                 closes = [bar[4] for bar in bars]  # index 4 = close
                 ema_series = compute_ema_series(closes, self.ema_retest_period)
@@ -237,6 +273,40 @@ class PositionPoller:
                         )
                         continue
 
+                # V3.1 entry filters — applied AFTER retest+slope, BEFORE entry.
+                # All check the most-recently-closed bar's state. Each filter
+                # uses `continue` to keep pending alive (matches slope-gate semantics)
+                # so the signal can release on a later tick if conditions change.
+                if self.block_weekdays_utc and now.weekday() in self.block_weekdays_utc:
+                    log.info(
+                        "Pending %d (%s %s) fill blocked: weekday %d in block list %s",
+                        sig["id"], sig["action"], sig["symbol"],
+                        now.weekday(), sorted(self.block_weekdays_utc),
+                    )
+                    continue
+                if self.block_body_atr_band is not None or self.min_body_atr_ratio > 0:
+                    atr_val = _compute_atr_last(bars, period=14)
+                    if atr_val and atr_val > 0 and len(bars) >= 2:
+                        last_bar = bars[-1]
+                        body = abs(last_bar[4] - last_bar[1])  # |close - open|
+                        body_atr = body / atr_val
+                        if self.min_body_atr_ratio > 0 and body_atr < self.min_body_atr_ratio:
+                            log.info(
+                                "Pending %d (%s %s) fill blocked: body/ATR %.3f < min %.3f",
+                                sig["id"], sig["action"], sig["symbol"],
+                                body_atr, self.min_body_atr_ratio,
+                            )
+                            continue
+                        if self.block_body_atr_band is not None:
+                            lo, hi = self.block_body_atr_band
+                            if lo <= body_atr < hi:
+                                log.info(
+                                    "Pending %d (%s %s) fill blocked: body/ATR %.3f in skip band [%.2f, %.2f)",
+                                    sig["id"], sig["action"], sig["symbol"],
+                                    body_atr, lo, hi,
+                                )
+                                continue
+
                 log.info(
                     "EMA(%d) retest confirmed for %s %s: price=%.2f, ema=%.2f",
                     self.ema_retest_period, sig["action"], sig["symbol"],
@@ -265,11 +335,7 @@ class PositionPoller:
                 if result.get("opened"):
                     self.store.fill_pending_signal(sig["id"], current_price)
                     if self.notifier:
-                        self.notifier.send(format_pending_filled(
-                            sig["action"], sig["symbol"],
-                            result["entry_price"], sig["signal_price"],
-                        ))
-                        # Also send the full entry notification
+                        # V3.2 'Fin': entry + SL only (no signal/fill chatter).
                         result["symbol"] = sig["symbol"]
                         self.notifier.send(format_entry(result))
                 else:
@@ -319,8 +385,12 @@ class PositionPoller:
         else:
             initial_sl_price = pos.entry_price + sl_price_distance
 
-        if pos.trail_active:
+        if pos.trail_active and pos.trail_active >= 2:
+            # state >=2 = profit actually locked (lock/jump/trail)
             exit_reason = "trail_sl"
+        elif pos.trail_active == 1:
+            # state 1 = breakeven stop (SL at entry); fills ~$0 or small +/- on slip
+            exit_reason = "sl_be"
         elif exit_price is not None and abs(exit_price - initial_sl_price) / pos.entry_price <= 0.003:
             # Within 0.3% of the initial SL price — treat as SL hit.
             exit_reason = "sl"
@@ -333,6 +403,14 @@ class PositionPoller:
             initial_sl=initial_sl_price, tp_ceiling=None,
         )
         self.store.close_position(pos.id, realized_pnl=None)
+
+        # V3.2 'Fin': exit alert with signed P&L (the only close-side message).
+        if self.notifier and exit_price is not None and pos.entry_price:
+            try:
+                pnl = self._compute_unrealized_pnl_usdt(pos, exit_price)
+                self.notifier.send(format_exit(pos.symbol, pos.side, pnl, exit_reason))
+            except Exception:
+                log.exception("exit notify failed for pos %s", pos.id)
 
     def _compute_unrealized_pnl_usdt(self, pos, current_price: float) -> float:
         """Compute unrealized P&L in USDT for this position."""
@@ -415,13 +493,7 @@ class PositionPoller:
         self._replace_sl(pos, new_sl)
         self.store.update_trail(pos.id, trail_high_price=0, trail_active=1)
         log.info("Breakeven SL for %s: SL=%.4f (entry)", pos.symbol, new_sl)
-        if self.notifier:
-            self.notifier.send(
-                f"🟡 BREAKEVEN {pos.symbol}\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"🛑 SL moved to entry: ${new_sl:,.2f}\n"
-                f"💰 Zero risk"
-            )
+        # V3.2 'Fin': silent on trail-state moves — entry + exit only.
 
     def _lock_profit(self, pos) -> None:
         """SL moves to lock in `lock_profit_usdt` profit."""
@@ -440,13 +512,7 @@ class PositionPoller:
             "Lock profit SL for %s: locking $%.0f, SL=%.4f",
             pos.symbol, thr.lock_profit_usdt, new_sl,
         )
-        if self.notifier:
-            self.notifier.send(
-                f"🔒 LOCK PROFIT {pos.symbol}\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"🛑 SL moved to +${thr.lock_profit_usdt:.0f}: ${new_sl:,.2f}\n"
-                f"💰 ${thr.lock_profit_usdt:.0f} locked in"
-            )
+        # V3.2 'Fin': silent on lock-profit move.
 
     def _activate_trail(self, pos, current_price: float) -> None:
         """SL jumps to lock in (trail_start - trail_distance) profit. Dead zone until trail_start."""
@@ -471,9 +537,7 @@ class PositionPoller:
             "Trail jumped for %s: locking $%.0f profit, SL=%.4f (dead zone until +$%.0f)",
             pos.symbol, lock_in_usdt, new_sl, thr.trail_start_usdt,
         )
-        if self.notifier:
-            pnl = self._compute_unrealized_pnl_usdt(pos, current_price)
-            self.notifier.send(format_trail_activated(pos.symbol, pnl, new_sl))
+        # V3.2 'Fin': silent on trail activation.
 
     def _update_trail(self, pos, current_price: float) -> None:
         """Trail is active. Move SL if price made a new high."""
@@ -497,8 +561,7 @@ class PositionPoller:
             "Trail updated for %s: high=%.4f → %.4f, SL=%.4f",
             pos.symbol, old_high, new_high, new_sl,
         )
-        if self.notifier:
-            self.notifier.send(format_trail_update(pos.symbol, new_high, new_sl))
+        # V3.2 'Fin': silent on each trail step.
 
     def _replace_sl(self, pos, new_trigger: float) -> None:
         """Cancel existing SL and place a new one."""

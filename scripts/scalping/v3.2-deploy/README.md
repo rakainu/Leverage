@@ -1,4 +1,13 @@
-# Scalping V3.2 — self-generated HA-V3 signal (deployed mirror)
+# Scalping V3.2 — self-generated HA-V3 signal (deploy artifacts)
+
+> **Single source of truth: `src/blofin_bridge/`.** This folder no longer holds
+> code. The `main.py` / `poller.py` / `config.py` / `notify.py` snapshots that
+> used to live here were one-time cutover copies that drifted ahead of `src/`;
+> on 2026-06-18 they were reconciled into `src/` (byte-identical to the live
+> box) and removed from here. Deploys pull from `src/` (`scp -r src config …`),
+> so edit `src/blofin_bridge/` and run the `tests/` suite — never re-add code
+> copies here. What remains below is deploy config only (compose / yaml /
+> teardown).
 
 V3.2 keeps the entire V3.1 strategy (EMA9-retest entry, slope/Sunday/body
 filters, 5-stage trailing exit, ZEC SL $82.50, 30×) but **replaces the

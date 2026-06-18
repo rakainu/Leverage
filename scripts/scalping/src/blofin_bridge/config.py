@@ -126,10 +126,32 @@ class Defaults(BaseModel):
     ema_retest_timeout_minutes: int = 30
     ema_retest_max_overshoot_pct: float = 0.2
     # Minimum |EMA(9) slope-over-3-bars| in % for a fill to release.
-    # 0 disables the gate. Historical 14-day audit (137 trades) showed every
-    # trade with |slope| < 0.03% lost (0/14 WR, -$197).
+    # 0 disables the gate. V3 used 0.03. V3.1 raised to 0.15 based on a
+    # 52k-bar engine sweep: slope buckets 0.03-0.06 and 0.06-0.10 were the
+    # dominant losers (-$5.7K and -$3.7K respectively over 6mo).
     min_5m_slope_pct: float = 0.03
+    # V3.1 entry filters — symbol-agnostic gates applied AFTER slope check.
+    # Empty/zero disables each filter (so a V3.1 binary with V3 config = V3
+    # behavior exactly).
+    block_weekdays_utc: list[int] = Field(default_factory=list)  # 0=Mon ... 6=Sun
+    block_body_atr_band: Optional[list[float]] = None  # e.g. [0.3, 0.5] — skip mid-body
+    min_body_atr_ratio: float = 0.0  # skip if body/ATR(14) below this
     poll_interval_seconds: int = 10
+    # --- V3.2 self-generated HA-V3 signal (replaces the TradingView webhook) ---
+    # "webhook" keeps the legacy Pro V3 path; "ha_v3" runs the in-process
+    # SignalEngine on every closed 5m bar — the engine-proven (+$19k / PF 2.80)
+    # signal. The audit showed the live Pro V3 signal was sparse and its longs
+    # lost even with a perfect exit; this swaps in the proven signal and drops
+    # the TV alert-expiration dependency.
+    signal_source: Literal["webhook", "ha_v3"] = "webhook"
+    signal_sensitivity: int = 8        # smooth_len = 16 - sensitivity
+    signal_fakeout: float = 0.2        # min body/ATR to confirm a cross (0 = off)
+    signal_range_filt: float = 0.2     # ADX must exceed 20 * range_filt (0 = off)
+    signal_lookback_bars: int = 300    # bars fetched per scan (warm-up + signal)
+    signal_scan_interval_seconds: int = 30
+    # Risk-adjusted quality gate, default OFF. Engine: min_adx=18 lifts PF
+    # 2.80->2.90 and cuts maxDD ~30%, at the cost of ~25% of net.
+    signal_min_adx: float = 0.0
 
     @field_validator("sl_loss_usdt", "breakeven_usdt", "lock_profit_activate_usdt", "lock_profit_usdt", "trail_activate_usdt", "trail_start_usdt", "trail_distance_usdt")
     @classmethod
@@ -157,6 +179,53 @@ class Defaults(BaseModel):
     def _slope_non_negative(cls, v: float) -> float:
         if v < 0:
             raise ValueError(f"min_5m_slope_pct must be >= 0, got {v}")
+        return v
+
+    @field_validator("block_weekdays_utc")
+    @classmethod
+    def _weekdays_in_range(cls, v: list[int]) -> list[int]:
+        for d in v:
+            if not 0 <= d <= 6:
+                raise ValueError(f"block_weekdays_utc entries must be 0..6, got {d}")
+        return v
+
+    @field_validator("block_body_atr_band")
+    @classmethod
+    def _body_band_valid(cls, v: Optional[list[float]]) -> Optional[list[float]]:
+        if v is None:
+            return v
+        if len(v) != 2 or v[0] >= v[1] or v[0] < 0:
+            raise ValueError(f"block_body_atr_band must be [low, high] with 0 <= low < high, got {v}")
+        return v
+
+    @field_validator("min_body_atr_ratio")
+    @classmethod
+    def _body_min_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError(f"min_body_atr_ratio must be >= 0, got {v}")
+        return v
+
+    @field_validator("signal_lookback_bars")
+    @classmethod
+    def _lookback_enough_warmup(cls, v: int) -> int:
+        # SignalEngine needs >=160 closed bars for the recursive seeds to wash
+        # out and match the engine; require a margin above that.
+        if v < 200:
+            raise ValueError(f"signal_lookback_bars must be >= 200, got {v}")
+        return v
+
+    @field_validator("signal_scan_interval_seconds")
+    @classmethod
+    def _scan_at_least_one(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"signal_scan_interval_seconds must be >= 1, got {v}")
+        return v
+
+    @field_validator("signal_min_adx")
+    @classmethod
+    def _min_adx_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError(f"signal_min_adx must be >= 0, got {v}")
         return v
 
 
