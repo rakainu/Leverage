@@ -60,6 +60,9 @@ class Store:
             c.execute(
                 "ALTER TABLE pending_signals ADD COLUMN source TEXT DEFAULT 'pro_v3'"
             )
+        tl_cols = {r[1] for r in c.execute("PRAGMA table_info(trade_log)")}
+        if tl_cols and "fee_usdt" not in tl_cols:
+            c.execute("ALTER TABLE trade_log ADD COLUMN fee_usdt REAL DEFAULT 0")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -188,8 +191,15 @@ class Store:
         self, *, position_id: int, exit_price: Optional[float],
         exit_reason: str, margin_usdt: float, leverage: float,
         initial_sl: Optional[float], tp_ceiling: Optional[float],
+        fee_usdt: float = 0.0,
     ) -> int:
-        """Record a completed trade for research/analysis."""
+        """Record a completed trade for research/analysis.
+
+        ``pnl_usdt`` is GROSS P&L, computed from the real ``exit_price`` and the
+        entry — it never depends on fee reporting. ``fee_usdt`` is the venue fee
+        (signed, <=0) stored alongside, defaulting to 0 for zero-fee venues so
+        net = gross + fee is always derivable downstream.
+        """
         pos = self.get_position(position_id)
         if pos is None:
             return -1
@@ -222,13 +232,13 @@ class Store:
                   (position_id, symbol, side, entry_price, exit_price,
                    margin_usdt, leverage, initial_sl, tp_ceiling,
                    trail_activated, trail_high_price, exit_reason,
-                   pnl_usdt, pnl_pct, opened_at, closed_at, duration_secs)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   pnl_usdt, fee_usdt, pnl_pct, opened_at, closed_at, duration_secs)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (position_id, pos.symbol, pos.side, pos.entry_price,
                  exit_price, margin_usdt, leverage, initial_sl, tp_ceiling,
                  pos.trail_active, pos.trail_high_price, exit_reason,
-                 pnl_usdt, pnl_pct, pos.opened_at, closed_at, duration_secs),
+                 pnl_usdt, fee_usdt, pnl_pct, pos.opened_at, closed_at, duration_secs),
             )
             return cur.lastrowid
 

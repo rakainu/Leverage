@@ -19,6 +19,52 @@ def _instid_to_ccxt(inst_id: str) -> str:
     return f"{base}/{quote}:{quote}"
 
 
+def _f(v: Any, default: float = 0.0) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def match_closed_position(
+    rows: list[dict[str, Any]], *,
+    inst_id: str, opened_at_ms: float, entry_price: float,
+    tolerance_pct: float = 1.0,
+) -> Optional[dict[str, Any]]:
+    """Pick the closed position from a venue's positions-history that matches
+    our locally-tracked position, and normalize it.
+
+    Matching is venue-agnostic: same instrument, and the position whose open
+    timestamp is nearest our own open. A sanity gate rejects the match if its
+    open price disagrees with our recorded entry by more than ``tolerance_pct``
+    (guards against grabbing an unrelated round-trip on the same symbol).
+
+    Returns ``{"close_price": float, "fee": float}`` or ``None``. ``fee`` is a
+    signed number (negative = cost) and defaults to ``0.0`` when the venue does
+    not report fees — so zero-fee venues (e.g. Lighter) work unchanged. Gross
+    P&L is computed downstream from ``close_price``, never from a fee figure, so
+    nothing here depends on fee reporting existing.
+    """
+    candidates = [r for r in rows if r.get("instId") == inst_id]
+    if not candidates:
+        return None
+
+    best = min(
+        candidates,
+        key=lambda r: abs(_f(r.get("createTime")) - opened_at_ms),
+    )
+
+    open_px = _f(best.get("openAveragePrice"))
+    if entry_price and open_px:
+        if abs(open_px - entry_price) / entry_price > (tolerance_pct / 100.0):
+            return None
+
+    return {
+        "close_price": _f(best.get("closeAveragePrice")),
+        "fee": _f(best.get("fee"), 0.0),
+    }
+
+
 def build_ccxt_client(
     *, api_key: str, secret: str, passphrase: str, env: str,
 ) -> ccxt.Exchange:
@@ -303,6 +349,29 @@ class BloFinClient:
         """
         ccxt_sym = _instid_to_ccxt(inst_id)
         return self._ccxt.fetch_closed_orders(ccxt_sym, limit=limit)
+
+    def fetch_closed_position(
+        self, inst_id: str, *, opened_at_ms: float, entry_price: float,
+        limit: int = 50,
+    ) -> Optional[dict[str, Any]]:
+        """Return the real close fill for the position we opened on ``inst_id``.
+
+        Reads the venue's closed-position history and matches our position by
+        instrument + open time (see :func:`match_closed_position`). Returns
+        ``{"close_price", "fee"}`` or ``None`` if unavailable / no confident
+        match — callers fall back to a price estimate so a trade is never lost.
+        """
+        try:
+            resp = self._ccxt.private_get_account_positions_history(
+                {"instId": inst_id, "limit": str(limit)}
+            )
+        except Exception:
+            return None
+        rows = resp.get("data") or []
+        return match_closed_position(
+            rows, inst_id=inst_id, opened_at_ms=opened_at_ms,
+            entry_price=entry_price,
+        )
 
     def fetch_recent_ohlcv(
         self, inst_id: str, *, timeframe: str = "5m", limit: int = 20,

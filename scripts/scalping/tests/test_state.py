@@ -167,6 +167,75 @@ def test_pending_signals_source_column_added_to_legacy_db(tmp_path):
     assert sigs[0]["source"] == "pro_v3"
 
 
+def _open_long(store, entry_price=300.0):
+    return store.create_position(
+        symbol="SOL-USDT", side="long", entry_price=entry_price,
+        initial_size=10, sl_policy="p2_step_stop", source="ha_v3",
+        margin_usdt=100.0, leverage=30.0,
+    )
+
+
+def test_log_trade_records_fee_and_gross_pnl(store):
+    """pnl_usdt is GROSS (from the real exit price); fee_usdt is stored
+    separately so net = gross + fee is derivable. Gross never depends on fees."""
+    pid = _open_long(store, entry_price=300.0)
+    # long, exit below entry: gross = (297/300 - 1) * (100*30 notional) = -30
+    tid = store.log_trade(
+        position_id=pid, exit_price=297.0, exit_reason="sl",
+        margin_usdt=100.0, leverage=30.0, initial_sl=297.0, tp_ceiling=None,
+        fee_usdt=-9.0,
+    )
+    assert tid > 0
+    row = store.get_trade_log(limit=1)[0]
+    assert row["pnl_usdt"] == pytest.approx(-30.0)   # gross, from exit price
+    assert row["fee_usdt"] == pytest.approx(-9.0)
+
+
+def test_log_trade_fee_defaults_zero(store):
+    """Zero-fee venue / caller omits fee → fee_usdt stored as 0.0, not NULL-crash."""
+    pid = _open_long(store, entry_price=300.0)
+    store.log_trade(
+        position_id=pid, exit_price=303.0, exit_reason="trail_sl",
+        margin_usdt=100.0, leverage=30.0, initial_sl=None, tp_ceiling=None,
+    )
+    row = store.get_trade_log(limit=1)[0]
+    assert row["pnl_usdt"] == pytest.approx(30.0)   # (303/300-1)*3000 gross
+    assert row["fee_usdt"] == 0.0
+
+
+def test_trade_log_fee_column_added_to_legacy_db(tmp_path):
+    """A pre-fee trade_log (no fee_usdt column) is migrated in-place on open."""
+    import sqlite3
+    db = tmp_path / "legacy_fee.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE trade_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            position_id INTEGER, symbol TEXT NOT NULL, side TEXT NOT NULL,
+            entry_price REAL NOT NULL, exit_price REAL,
+            margin_usdt REAL NOT NULL, leverage REAL NOT NULL,
+            initial_sl REAL, tp_ceiling REAL,
+            trail_activated INTEGER NOT NULL DEFAULT 0, trail_high_price REAL,
+            exit_reason TEXT, pnl_usdt REAL, pnl_pct REAL,
+            opened_at TEXT NOT NULL, closed_at TEXT NOT NULL, duration_secs INTEGER
+        );
+        INSERT INTO trade_log
+            (position_id, symbol, side, entry_price, exit_price, margin_usdt,
+             leverage, exit_reason, pnl_usdt, opened_at, closed_at)
+        VALUES (1, 'SOL-USDT', 'long', 300.0, 297.0, 100.0, 30.0, 'sl', -300.0,
+                '2026-01-01T00:00:00+00:00', '2026-01-01T00:10:00+00:00');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = Store(db)  # opening must migrate, not raise
+    rows = store.get_trade_log(limit=10)
+    assert len(rows) == 1
+    assert rows[0]["fee_usdt"] == 0.0   # legacy row backfilled to 0
+
+
 def test_append_event_and_update_outcome(store):
     eid = store.append_event(
         position_id=None, event_type="buy",

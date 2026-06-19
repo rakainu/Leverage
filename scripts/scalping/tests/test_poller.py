@@ -24,6 +24,8 @@ def blofin():
     }]
     m.fetch_last_price.return_value = 300.0
     m.place_sl_order.return_value = "sl-trail-id"
+    # Default: no exchange close-fill available → poller falls back to last price.
+    m.fetch_closed_position.return_value = None
     return m
 
 
@@ -337,6 +339,61 @@ async def test_drift_exit_short_sl_relabel(store, blofin):
 
     trades = store.get_trade_log(limit=1)
     assert trades[0]["exit_reason"] == "sl"
+
+
+@pytest.mark.asyncio
+async def test_stale_close_uses_real_exchange_fill_not_last_price(store, blofin):
+    """When the venue reports the real closed-position fill, the trade is logged
+    with that fill price + fee — NOT the (possibly drifted) last price."""
+    pid = _long_position(store, entry_price=300.0)
+    blofin.fetch_positions.return_value = []
+    # Real SL fill at 298.6 (near the 298.7 initial SL); fee reported.
+    blofin.fetch_closed_position.return_value = {"close_price": 298.6, "fee": -4.5}
+    # last_price is deliberately wrong/drifted — must be ignored.
+    blofin.fetch_last_price.return_value = 305.0
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    t = store.get_trade_log(limit=1)[0]
+    assert t["exit_price"] == pytest.approx(298.6)   # real fill, not 305
+    assert t["fee_usdt"] == pytest.approx(-4.5)
+    assert t["exit_reason"] == "sl"                  # near SL → correctly labeled
+    # gross from real fill: (298.6/300 - 1) * 3000 = -14.0
+    assert t["pnl_usdt"] == pytest.approx(-14.0)
+
+
+@pytest.mark.asyncio
+async def test_stale_close_zero_fee_venue_records_zero_fee(store, blofin):
+    """Zero-fee venue (no fee key handling upstream) → fee_usdt is 0.0, net=gross."""
+    pid = _long_position(store, entry_price=300.0)
+    blofin.fetch_positions.return_value = []
+    blofin.fetch_closed_position.return_value = {"close_price": 303.0, "fee": 0.0}
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    t = store.get_trade_log(limit=1)[0]
+    assert t["exit_price"] == pytest.approx(303.0)
+    assert t["fee_usdt"] == 0.0
+    assert t["pnl_usdt"] == pytest.approx(30.0)
+
+
+@pytest.mark.asyncio
+async def test_stale_close_falls_back_to_last_price_when_no_fill(store, blofin):
+    """No exchange fill available → fall back to last price, fee 0 (never lose a trade)."""
+    pid = _long_position(store, entry_price=300.0)
+    blofin.fetch_positions.return_value = []
+    blofin.fetch_closed_position.return_value = None
+    blofin.fetch_last_price.return_value = 298.7   # ~initial SL
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    t = store.get_trade_log(limit=1)[0]
+    assert t["exit_price"] == pytest.approx(298.7)
+    assert t["fee_usdt"] == 0.0
+    assert t["exit_reason"] == "sl"
 
 
 @pytest.mark.asyncio

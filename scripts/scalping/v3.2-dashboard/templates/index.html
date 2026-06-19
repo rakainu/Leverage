@@ -293,8 +293,10 @@ function render(s){
 
   // stat strip
   const netCls=L.net>=0?'pos':'neg', ddCls='neg';
+  const feeStr = (L.fees===undefined||L.fees===null) ? '' :
+    `gross ${money(L.gross)} · fees ${money(L.fees)}`;
   $('stats').innerHTML=`
-    <div class="stat"><div class="sv ${netCls}">${money(L.net)}</div><div class="sl">Net realized</div></div>
+    <div class="stat"><div class="sv ${netCls}">${money(L.net)}</div><div class="sl">Net realized${feeStr?` · ${feeStr}`:''}</div></div>
     <div class="stat"><div class="sv">${L.net_per_day===null||L.net_per_day===undefined?'—':money(L.net_per_day)}</div><div class="sl">Net / day · eng ${money(E.net_per_day_usdt)}</div></div>
     <div class="stat"><div class="sv ${ddCls}">${money(L.max_dd)}</div><div class="sl">Max DD · eng ${money(E.max_dd_usdt)}</div></div>
     <div class="stat"><div class="sv">${L.max_consec_loss}</div><div class="sl">Max consec loss</div></div>`;

@@ -2,7 +2,106 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from blofin_bridge.blofin_client import BloFinClient, Instrument
+from blofin_bridge.blofin_client import (
+    BloFinClient, Instrument, match_closed_position,
+)
+
+
+# --- positions-history matcher (real close fill + realized PnL incl. fees) ---
+
+def _hist_row(inst_id, *, open_px, close_px, create_ms, update_ms, fee=None):
+    """A venue positions-history row (string fields, as BloFin returns them).
+
+    `fee` is optional: a zero-fee venue (e.g. Lighter) may omit it entirely.
+    """
+    row = {
+        "instId": inst_id,
+        "openAveragePrice": str(open_px),
+        "closeAveragePrice": str(close_px),
+        "createTime": str(create_ms),
+        "updateTime": str(update_ms),
+    }
+    if fee is not None:
+        row["fee"] = str(fee)
+    return row
+
+
+def test_match_closed_position_returns_real_close_price_and_fee():
+    rows = [_hist_row("ZEC-USDT", open_px=513.65, close_px=507.34,
+                      fee=-9.05, create_ms=1000, update_ms=2000)]
+    m = match_closed_position(
+        rows, inst_id="ZEC-USDT", opened_at_ms=1000, entry_price=513.65,
+    )
+    assert m is not None
+    assert m["close_price"] == pytest.approx(507.34)
+    assert m["fee"] == pytest.approx(-9.05)
+
+
+def test_match_closed_position_fee_defaults_zero_when_absent():
+    """Zero-fee venue: no `fee` field → fee is 0.0, not an error."""
+    rows = [_hist_row("ZEC-USDT", open_px=513.65, close_px=507.34,
+                      create_ms=1000, update_ms=2000)]   # no fee key
+    m = match_closed_position(
+        rows, inst_id="ZEC-USDT", opened_at_ms=1000, entry_price=513.65,
+    )
+    assert m["close_price"] == pytest.approx(507.34)
+    assert m["fee"] == 0.0
+
+
+def test_match_closed_position_none_when_no_symbol():
+    rows = [_hist_row("SOL-USDT", open_px=100, close_px=101,
+                      fee=-0.5, create_ms=1000, update_ms=2000)]
+    assert match_closed_position(
+        rows, inst_id="ZEC-USDT", opened_at_ms=1000, entry_price=513.65,
+    ) is None
+
+
+def test_match_closed_position_picks_nearest_create_time():
+    """Two ZEC positions; pick the one whose createTime matches our open."""
+    rows = [
+        _hist_row("ZEC-USDT", open_px=480.0, close_px=479.0,
+                  fee=-9, create_ms=1000, update_ms=1500),  # old
+        _hist_row("ZEC-USDT", open_px=513.65, close_px=507.34,
+                  fee=-9.05, create_ms=5000, update_ms=5600),  # ours
+    ]
+    m = match_closed_position(
+        rows, inst_id="ZEC-USDT", opened_at_ms=5010, entry_price=513.65,
+    )
+    assert m["close_price"] == pytest.approx(507.34)
+
+
+def test_match_closed_position_none_when_entry_price_disagrees():
+    """Best candidate's open price is >1% off our entry → untrustworthy match."""
+    rows = [_hist_row("ZEC-USDT", open_px=450.0, close_px=448.0,
+                      fee=-9, create_ms=1000, update_ms=2000)]
+    assert match_closed_position(
+        rows, inst_id="ZEC-USDT", opened_at_ms=1000, entry_price=513.65,
+    ) is None
+
+
+def test_fetch_closed_position_delegates_to_positions_history(mock_ccxt):
+    mock_ccxt.private_get_account_positions_history = MagicMock(return_value={
+        "code": "0",
+        "data": [_hist_row("SOL-USDT", open_px=80.0, close_px=79.5,
+                           fee=-4.5, create_ms=1000, update_ms=2000)],
+    })
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    m = client.fetch_closed_position(
+        "SOL-USDT", opened_at_ms=1000, entry_price=80.0,
+    )
+    assert m["close_price"] == pytest.approx(79.5)
+    assert m["fee"] == pytest.approx(-4.5)
+
+
+def test_fetch_closed_position_none_on_api_error(mock_ccxt):
+    mock_ccxt.private_get_account_positions_history = MagicMock(
+        side_effect=Exception("ccxt boom"))
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    assert client.fetch_closed_position(
+        "SOL-USDT", opened_at_ms=1000, entry_price=80.0,
+    ) is None
 
 
 @pytest.fixture

@@ -59,8 +59,9 @@ CREATE TABLE IF NOT EXISTS trade_log (
     trail_activated INTEGER NOT NULL DEFAULT 0,
     trail_high_price REAL,
     exit_reason     TEXT,       -- 'sl', 'trail_sl', 'tp_ceiling', 'manual', 'drift'
-    pnl_usdt       REAL,
-    pnl_pct        REAL,       -- percent of margin
+    pnl_usdt       REAL,        -- GROSS P&L from the real exit fill (no fees)
+    fee_usdt       REAL DEFAULT 0,  -- venue fees (signed, <=0); 0 on zero-fee venues
+    pnl_pct        REAL,       -- percent of margin (gross)
     opened_at      TEXT NOT NULL,
     closed_at      TEXT NOT NULL,
     duration_secs  INTEGER

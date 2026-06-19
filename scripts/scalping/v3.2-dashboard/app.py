@@ -198,14 +198,25 @@ def _per_coin(trades: list[dict], open_syms: set) -> list[dict]:
 def build_state() -> dict:
     trades = _rows(
         "SELECT id, symbol, side, entry_price, exit_price, exit_reason, "
-        "pnl_usdt, pnl_pct, opened_at, closed_at, duration_secs "
+        "pnl_usdt, COALESCE(fee_usdt, 0.0) AS fee_usdt, pnl_pct, "
+        "opened_at, closed_at, duration_secs "
         "FROM trade_log ORDER BY closed_at"
     )
+    # `pnl_usdt` from the DB is GROSS (price-move only). Make every panel report
+    # NET = gross + fee so the headline is honest. fee_usdt is 0 on zero-fee
+    # venues, so net == gross there with no special-casing.
+    gross_total = sum((t["pnl_usdt"] or 0.0) for t in trades)
+    fees_total = sum((t["fee_usdt"] or 0.0) for t in trades)
+    for t in trades:
+        t["gross_usdt"] = t["pnl_usdt"] or 0.0
+        t["pnl_usdt"] = t["gross_usdt"] + (t["fee_usdt"] or 0.0)
     pending = _rows(
         "SELECT id, symbol, action, signal_price, created_at, status, fill_price "
         "FROM pending_signals ORDER BY id DESC LIMIT 40"
     )
     live = _kpis(trades)
+    live["gross"] = gross_total
+    live["fees"] = fees_total
 
     # running span
     first = _parse(trades[0]["opened_at"]) if trades else None

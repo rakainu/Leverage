@@ -366,12 +366,33 @@ class PositionPoller:
             except Exception:
                 pass
 
-        # Try to get last price for trade log
-        exit_price = None
+        # Resolve the REAL close fill from the venue's closed-position history
+        # (actual fill price + fees), so the trade log records what really
+        # happened — not the market's last price at the moment we noticed the
+        # position was gone (which has drifted, and mislabels SL hits as
+        # 'drift'). Falls back to last price if the venue can't tell us, so a
+        # trade is never lost. fee defaults to 0 → zero-fee venues unaffected.
+        exit_price: Optional[float] = None
+        fee_usdt: float = 0.0
         try:
-            exit_price = self.blofin.fetch_last_price(pos.symbol)
+            opened_ms = datetime.fromisoformat(pos.opened_at).timestamp() * 1000
         except Exception:
-            pass
+            opened_ms = 0.0
+        real = None
+        try:
+            real = self.blofin.fetch_closed_position(
+                pos.symbol, opened_at_ms=opened_ms, entry_price=pos.entry_price,
+            )
+        except Exception:
+            real = None
+        if real and real.get("close_price"):
+            exit_price = float(real["close_price"])
+            fee_usdt = float(real.get("fee") or 0.0)
+        else:
+            try:
+                exit_price = self.blofin.fetch_last_price(pos.symbol)
+            except Exception:
+                pass
 
         thr = self._thresholds_for(pos)
 
@@ -402,6 +423,7 @@ class PositionPoller:
             position_id=pos.id, exit_price=exit_price, exit_reason=exit_reason,
             margin_usdt=thr.margin_usdt, leverage=thr.leverage,
             initial_sl=initial_sl_price, tp_ceiling=None,
+            fee_usdt=fee_usdt,
         )
         self.store.close_position(pos.id, realized_pnl=None)
 

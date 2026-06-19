@@ -14,8 +14,8 @@ CREATE TABLE positions(id INTEGER PRIMARY KEY AUTOINCREMENT,symbol TEXT,side TEX
  realized_pnl REAL,source TEXT);
 CREATE TABLE trade_log(id INTEGER PRIMARY KEY AUTOINCREMENT,position_id INTEGER,symbol TEXT,side TEXT,
  entry_price REAL,exit_price REAL,margin_usdt REAL,leverage REAL,initial_sl REAL,tp_ceiling REAL,
- trail_activated INTEGER,trail_high_price REAL,exit_reason TEXT,pnl_usdt REAL,pnl_pct REAL,
- opened_at TEXT,closed_at TEXT,duration_secs INTEGER);
+ trail_activated INTEGER,trail_high_price REAL,exit_reason TEXT,pnl_usdt REAL,fee_usdt REAL DEFAULT 0,
+ pnl_pct REAL,opened_at TEXT,closed_at TEXT,duration_secs INTEGER);
 CREATE TABLE pending_signals(id INTEGER PRIMARY KEY AUTOINCREMENT,symbol TEXT,action TEXT,signal_price REAL,
  created_at TEXT,expires_at TEXT,status TEXT,filled_at TEXT,fill_price REAL);
 """)
@@ -31,11 +31,12 @@ for i in range(40):
     side,reason,pnl=pat[i%len(pat)]; pnl=float(pnl); sym=COINS[i%len(COINS)]; p=PX[sym]
     op=t0+timedelta(hours=i*3+(i%2)); cl=op+timedelta(minutes=12+(i%5)*4)
     entry=p*(1+(i%7)*0.001); exitp=entry*(1+(pnl/7500)*(1 if side=="long" else -1))
+    fee=-8.98  # ~BloFin taker round-trip on $7.5k notional; 0 on a zero-fee venue
     con.execute("INSERT INTO trade_log(position_id,symbol,side,entry_price,exit_price,margin_usdt,leverage,"
-      "initial_sl,tp_ceiling,trail_activated,trail_high_price,exit_reason,pnl_usdt,pnl_pct,opened_at,closed_at,duration_secs)"
-      " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "initial_sl,tp_ceiling,trail_activated,trail_high_price,exit_reason,pnl_usdt,fee_usdt,pnl_pct,opened_at,closed_at,duration_secs)"
+      " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       (i+1,sym,side,round(entry,4),round(exitp,4),250,30,round(entry*(1-0.011),4),None,
-       1 if reason=="trail_sl" else 0,round(exitp,4),reason,pnl,round(pnl/250*100,2),
+       1 if reason=="trail_sl" else 0,round(exitp,4),reason,pnl,fee,round(pnl/250*100,2),
        op.isoformat(),cl.isoformat(),int((cl-op).total_seconds())))
 
 # 2 open positions (current trades)
