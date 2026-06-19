@@ -124,6 +124,7 @@ table{width:100%;border-collapse:collapse;margin-top:8px}
 th{font-family:var(--disp);text-transform:uppercase;letter-spacing:.1em;font-size:13px;color:var(--dim);text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
 td{font-family:var(--mono);font-size:15px;padding:9px 8px;border-bottom:1px solid #121a22;color:var(--ink)}
 .sidecell{font-weight:600}.s-long{color:var(--engine)}.s-short{color:var(--live)}
+.coincell{font-family:var(--disp);font-weight:700;letter-spacing:.04em}
 .empty{font-family:var(--mono);color:var(--dim);font-size:15px;padding:18px 4px;text-align:center}
 
 .feed .sig{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid #121a22}
@@ -344,8 +345,9 @@ function render(s){
     : `<div class="empty">no pending signals — engine scanning every 30s</div>`;
 
   // recent
-  $('recent').innerHTML = s.recent.length? `<table><thead><tr><th>side</th><th>exit</th><th>pnl</th><th>R</th><th>opened</th></tr></thead><tbody>`+
+  $('recent').innerHTML = s.recent.length? `<table><thead><tr><th>coin</th><th>side</th><th>exit</th><th>pnl</th><th>R</th><th>opened</th></tr></thead><tbody>`+
     s.recent.map(t=>{const r=(t.pnl_usdt/s.meta.stop_usdt);return `<tr>
+      <td class="coincell">${(t.symbol||'').replace('-USDT','')||'—'}</td>
       <td class="sidecell s-${t.side}">${t.side.toUpperCase()}</td>
       <td>${t.exit_reason||'—'}</td>
       <td class="${t.pnl_usdt>=0?'pos':'neg'}">${money(t.pnl_usdt)}</td>
@@ -355,8 +357,4 @@ function render(s){
 }
 
 render(window.__STATE__);
-async function poll(){try{const r=await fetch('/api/state',{cache:'no-store'});if(r.ok)render(await r.json());}catch(e){}}
-setInterval(poll,4000);
-</script>
-</body>
-</html>
+async funct
