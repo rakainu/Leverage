@@ -357,4 +357,8 @@ function render(s){
 }
 
 render(window.__STATE__);
-async funct
+async function poll(){try{const r=await fetch('/api/state',{cache:'no-store'});if(r.ok)render(await r.json());}catch(e){}}
+setInterval(poll,4000);
+</script>
+</body>
+</html>
