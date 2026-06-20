@@ -28,6 +28,15 @@ symbols:                               # market_id : 24h vol on Lighter
   HYPE: { market_id: 24, enabled: true, margin_usdt: 500, leverage: 10 }   # $218M
   BNB:  { market_id: 25, enabled: true, margin_usdt: 500, leverage: 10 }   # $4.2M
   XMR:  { market_id: 77, enabled: true, margin_usdt: 500, leverage: 10 }   # $4.8M
+  # Basket expansion 2026-06-20. Validated on 90d OKX 15m, live regime_mr params
+  # + accel 3.0 (regime_newcoins.py): both clear the bar IN and OUT of sample at
+  # the existing-basket profile. DOGE OOS +$113/PF 2.34/92%WR; SUI OOS +$61/PF
+  # 1.51/91%WR. (AVAX/LINK REJECTED — negative in-sample; XRP excluded — already
+  # cut as a loser.) Per-coin sizing unchanged ($500@10x); collateral left at
+  # 3600 (sizing is per-coin, not basket-scaled) — watch logs for margin
+  # contention if 8 coins open at once. REVERT = set enabled:false on both.
+  DOGE: { market_id: 3,  enabled: true, margin_usdt: 500, leverage: 10 }
+  SUI:  { market_id: 16, enabled: true, margin_usdt: 500, leverage: 10 }
 regime:
   trend_len: 200          # EMA length for the higher-tf trend gate
   slope_lb: 20            # slope = EMA - EMA.shift(20); sign sets the regime
