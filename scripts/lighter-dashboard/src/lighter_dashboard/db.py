@@ -60,6 +60,29 @@ class DashboardDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def per_side_stats(self) -> list[dict]:
+        """Net / count / wins / avg-win / avg-loss split by side (long vs short).
+        Surfaces which direction is carrying or bleeding the book."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT side, COUNT(*) AS n, "
+                "SUM(CASE WHEN pnl_usdt > 0 THEN 1 ELSE 0 END) AS wins, "
+                "ROUND(SUM(pnl_usdt), 2) AS net, "
+                "ROUND(AVG(CASE WHEN pnl_usdt > 0 THEN pnl_usdt END), 2) AS avg_win, "
+                "ROUND(AVG(CASE WHEN pnl_usdt <= 0 THEN pnl_usdt END), 2) AS avg_loss "
+                "FROM trade_log WHERE pnl_usdt IS NOT NULL GROUP BY side"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def all_pnls_ordered(self) -> list[float]:
+        """Every closed trade's PnL, oldest -> newest (by id). Drives the rolling
+        profit-factor and the max-consecutive-loss / recent-streak readouts."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT pnl_usdt FROM trade_log WHERE pnl_usdt IS NOT NULL ORDER BY id"
+            ).fetchall()
+        return [float(r["pnl_usdt"]) for r in rows]
+
     def exit_reason_mix(self) -> list[dict]:
         with self._conn() as c:
             rows = c.execute(

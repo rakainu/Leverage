@@ -24,8 +24,21 @@ def test_index_renders(fixture_db):
     client = TestClient(app)
     r = client.get("/")
     assert r.status_code == 200
-    assert "Lighter" in r.text
-    assert "hx-get" in r.text          # HTMX wiring present
+    assert "Edge health" in r.text     # the new edge-tracking hero
+    assert "/api/state" in r.text      # client polls the state endpoint
+
+
+def test_api_state(fixture_db):
+    app = create_app(_cfg(fixture_db), marks=_StubMarks())
+    client = TestClient(app)
+    r = client.get("/api/state")
+    assert r.status_code == 200
+    s = r.json()
+    # the new state carries the edge-health + side-health + protections blocks
+    for key in ("edge", "stat", "sides", "protections", "per_coin", "fillq"):
+        assert key in s
+    assert s["edge"]["wr_bt"] == 88.0
+    assert isinstance(s["sides"], list)
 
 
 def test_kpis_partial(fixture_db):

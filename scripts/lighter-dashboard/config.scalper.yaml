@@ -3,20 +3,18 @@
 # (/docker/scalper-paper/data/scalper.db, mounted into the container).
 db_path: "data/scalper.db"
 lighter_host: "https://mainnet.zklighter.elliot.ai"
-initial_collateral_usdc: 6000   # MUST match bridge config.scalper.yaml (else phantom equity/DD)
-symbols:                                  # name -> market_id (live Lighter ids); 10-coin test basket
+initial_collateral_usdc: 3600   # MUST match bridge config.scalper.yaml (connection.initial_collateral_usdc) — else phantom equity/DD
+title: "Scalper"
+subtitle: "regime_mr · VWAP-z fade · Lighter zero-fee · 8 coins"
+symbols:                          # name -> market_id (live Lighter ids); LIVE 8-coin basket (2026-06-20)
   ETH: 0
   BTC: 1
   SOL: 2
-  XRP: 7
-  WLD: 6
-  NEAR: 10
-  TON: 12
   HYPE: 24
   BNB: 25
-  ZEC: 90
-  MKR: 28    # parity (disabled/inactive on bridge, but avoids 500 if ever enabled)
-  XMR: 77    # added to bridge basket 2026-06-09 (open short #176)
+  XMR: 77
+  DOGE: 3
+  SUI: 16
 refresh:
   live_ms: 3000
   static_ms: 15000

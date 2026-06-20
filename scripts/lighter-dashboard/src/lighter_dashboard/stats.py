@@ -46,6 +46,25 @@ def max_drawdown(equity_series: list[float]) -> float:
     return mdd
 
 
+def max_consecutive_losses(pnls_ordered: list[float]) -> int:
+    """Longest run of consecutive losing trades in a chronologically-ordered list."""
+    worst = run = 0
+    for p in pnls_ordered:
+        if p is not None and p <= 0:
+            run += 1
+            worst = max(worst, run)
+        else:
+            run = 0
+    return worst
+
+
+def recent_streak(pnls_ordered: list[float], k: int = 3) -> str:
+    """Last k outcomes as 'W'/'L', oldest->newest — a cooldown-proximity readout
+    (the bridge pauses after 3 straight losses)."""
+    last = pnls_ordered[-k:] if pnls_ordered else []
+    return " ".join("W" if (p is not None and p > 0) else "L" for p in last)
+
+
 def unrealized_pnl(side: str, entry: float, mark: float, base: float) -> float:
     if side == "long":
         return (mark - entry) * base

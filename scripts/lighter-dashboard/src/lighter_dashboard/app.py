@@ -47,6 +47,32 @@ _SIGNAL_LOOKBACK_HOURS = 12
 # small a sample to keep/cut). PF thresholds mirror the strategy kill-switch.
 _SCOREBOARD_MIN_SAMPLE = 10
 
+# Backtest reference the live edge is measured against (validated regime_mr
+# basket). The dashboard's whole "is the edge holding?" framing compares live to
+# these. WR ~88% / PF ~1.5 are the conservative validated baselines.
+_BT_WR = 88.0
+_BT_PF = 1.5
+# Deployed bridge protections, shown so the operator can see the guards are on.
+# Mirror scalper-bridge config.scalper.yaml (regime block).
+_PROTECTIONS = [
+    {"name": "Accel guard", "value": "skip range ≥ 3.0×ATR"},
+    {"name": "Trend gate", "value": "min slope 0.08%"},
+    {"name": "Cooldown", "value": "3 losses → pause 180m"},
+    {"name": "Sizing", "value": "compound · cap 3× · $500 base"},
+]
+_MIN_EDGE_SAMPLE = 20   # below this, the hero reads WARMING UP
+
+
+def _edge_verdict(n: int, pf, cushion) -> tuple[str, str, str]:
+    """(verdict_label, chip_label, css_class) for the edge-health hero."""
+    if n < _MIN_EDGE_SAMPLE:
+        return "WARMING UP", f"{n} / {_MIN_EDGE_SAMPLE} closed", "warn"
+    if pf is None or pf < 1.0 or (cushion is not None and cushion < 0):
+        return "BLEEDING", "below water", "bad"
+    if pf < _BT_PF * 0.9 or (cushion is not None and cushion < 4):
+        return "LAGGING · THIN", (f"cushion +{cushion:.1f}pt" if cushion is not None else "thin"), "warn"
+    return "ON TRACK", (f"cushion +{cushion:.1f}pt" if cushion is not None else "tracking"), "good"
+
 
 def _keep_cut(n: int, pf, cushion) -> str:
     """At-a-glance keep/cut verdict for a coin. 'new' until enough trades, then
@@ -151,10 +177,129 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
             out.append({**row, "mark": mark, "upnl": upnl})
         return out
 
+    async def _build_state() -> dict:
+        """Assemble the full dashboard state (one JSON the page renders). Mirrors
+        the V3.2 telemetry approach: server computes, client draws + polls."""
+        pnls = db.closed_pnls()
+        ordered = db.all_pnls_ordered()
+        positions = await _open_positions_with_pnl()
+        per_symbol = db.per_symbol_stats()
+        per_side = db.per_side_stats()
+        snaps = db.snapshots()
+        withdrawn = db.withdrawn_total()
+        fq = db.fill_quality(limit=12)
+        hb = _heartbeat_status(db.last_heartbeat_ts())
+
+        n = len(pnls)
+        realized = sum(pnls)
+        wins = sum(1 for p in pnls if p > 0)
+        wr_live = (wins / n * 100) if n else None
+        avg_win = (sum(p for p in pnls if p > 0) / max(1, sum(1 for p in pnls if p > 0))) if wins else 0.0
+        n_loss = sum(1 for p in pnls if p <= 0)
+        avg_loss = (sum(p for p in pnls if p <= 0) / n_loss) if n_loss else 0.0
+        be = stats.breakeven_win_rate(avg_win, avg_loss)
+        be_pct = be * 100 if be is not None else None
+        cushion = (wr_live - be_pct) if (wr_live is not None and be_pct is not None) else None
+        pf_live = stats.profit_factor(pnls)
+        pf_roll = stats.profit_factor(ordered[-30:]) if len(ordered) >= 5 else None
+        avg_trade = (realized / n) if n else 0.0
+
+        # account
+        unrealized = sum(p["upnl"] or 0 for p in positions)
+        gross = cfg.initial_collateral_usdc + realized + unrealized
+        equity = gross - withdrawn
+        snap_vals = [s["portfolio_value"] for s in snaps] + [gross]
+        max_dd = stats.max_drawdown(snap_vals)
+        # days running from the first snapshot (or 1 to avoid /0)
+        days = 1.0
+        if snaps:
+            try:
+                t0 = datetime.fromisoformat(snaps[0]["ts"])
+                if t0.tzinfo is None:
+                    t0 = t0.replace(tzinfo=timezone.utc)
+                days = max(1.0, (datetime.now(timezone.utc) - t0).total_seconds() / 86400)
+            except (ValueError, TypeError, KeyError):
+                pass
+        target = cfg.initial_collateral_usdc * 3  # withdrawal target ~3x base
+
+        v_label, v_chip, v_cls = _edge_verdict(n, pf_live, cushion)
+        streak = stats.recent_streak(ordered, 3)
+        cd_active = streak == "L L L"
+
+        open_syms = {p["symbol"] for p in positions}
+        per_coin = []
+        for r in per_symbol:
+            cn, cwins = r["n"], (r["wins"] or 0)
+            cwr = (cwins / cn * 100) if cn else 0
+            gl = r.get("gross_loss") or 0
+            cpf = (r["gross_win"] / gl) if gl > 0 else None
+            cbe = stats.breakeven_win_rate(r.get("avg_win") or 0, r.get("avg_loss") or 0)
+            ccush = (cwr - cbe * 100) if cbe is not None else None
+            per_coin.append({
+                "symbol": r["symbol"].replace("-USDT", ""), "n": cn, "win_pct": cwr,
+                "pf": cpf, "net": r["net"], "cushion": ccush,
+                "verdict": _keep_cut(cn, cpf, ccush), "open": r["symbol"] in open_syms,
+            })
+
+        sides = []
+        for r in per_side:
+            sn, swins = r["n"], (r["wins"] or 0)
+            sides.append({"side": r["side"], "n": sn,
+                          "wr": (swins / sn * 100) if sn else 0, "net": r["net"] or 0})
+        sides.sort(key=lambda s: s["side"])  # long, short
+
+        exits_total = sum(e["n"] for e in db.exit_reason_mix()) or 1
+        exits = [{"reason": e["exit_reason"], "n": e["n"], "net": e["net"] or 0,
+                  "frac": e["n"] / exits_total} for e in db.exit_reason_mix()]
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=_SIGNAL_LOOKBACK_HOURS)).isoformat()
+        sigs = [{"symbol": s["symbol"].replace("-USDT", ""), "side": s["side"],
+                 "outcome": s["outcome"], "slope": s.get("slope_pct"),
+                 "time": _fmt_hm(s.get("detected_at"))}
+                for s in db.signals(limit=16, since_iso=cutoff)]
+
+        recent = [{"symbol": t["symbol"].replace("-USDT", ""), "side": t["side"],
+                   "exit_reason": t["exit_reason"], "pnl": t["pnl_usdt"],
+                   "closed": _fmt_close(t.get("closed_at"))}
+                  for t in db.closed_trades(limit=12)]
+
+        pos = [{"symbol": p["symbol"].replace("-USDT", ""), "side": p["side"],
+                "upnl": p["upnl"], "entry": p["entry_price"], "mark": p["mark"],
+                "opened_at": _fmt_close(p.get("opened_at"))} for p in positions]
+
+        eq_curve = [s["portfolio_value"] for s in snaps]
+
+        return {
+            "meta": {"updated": hb["ago"] or "—", "hb_state": hb["state"],
+                     "days": round(days, 1), "equity": equity,
+                     "equity_pct": (gross / cfg.initial_collateral_usdc - 1) * 100,
+                     "coins": [s.replace("-USDT", "") for s in cfg.symbols.keys()],
+                     "tz": _tz_label()},
+            "edge": {"n": n, "verdict": v_label, "chip": v_chip, "cls": v_cls,
+                     "wr_live": wr_live, "wr_bt": _BT_WR, "be_pct": be_pct, "cushion": cushion,
+                     "pf_live": pf_live, "pf_bt": _BT_PF, "pf_roll": pf_roll,
+                     "avg_trade": avg_trade, "avg_win": avg_win, "avg_loss": avg_loss,
+                     "trades_per_day": n / days if days else 0},
+            "stat": {"net": realized, "net_per_day": realized / days if days else 0,
+                     "max_dd": max_dd, "max_consec": stats.max_consecutive_losses(ordered),
+                     "withdrawn": withdrawn},
+            "sides": sides, "protections": _PROTECTIONS, "streak": streak,
+            "cooldown_active": cd_active,
+            "equity_curve": eq_curve, "per_coin": per_coin, "positions": pos,
+            "recent": recent, "exits": exits, "signals": sigs,
+            "withdrawals": {"total": withdrawn, "account_now": equity, "target": target},
+            "fillq": {"maker_pct": fq["maker_pct"], "slip": fq["avg_slip_bps"],
+                      "n": fq["n"], "live_wr": wr_live, "bt_wr": _BT_WR},
+        }
+
+    @app.get("/api/state")
+    async def api_state():
+        return await _build_state()
+
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         return templates.TemplateResponse(
-            request, "index.html", {"cfg": cfg}
+            request, "index.html", {"cfg": cfg, "state": await _build_state()},
         )
 
     @app.get("/panel/kpis", response_class=HTMLResponse)
