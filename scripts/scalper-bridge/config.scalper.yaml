@@ -39,6 +39,13 @@ regime:
   limit_atr: 0.25         # maker limit offset beyond close, in ATR
   atr_period: 14
   entry_valid_bars: 3     # cancel the resting limit if unfilled after 3 bars
+  # Acceleration guard (2026-06-20). Skip fading a signal bar whose range
+  # (High-Low) >= accel_mult*ATR — a news-rip / volatility-climax bar, the source
+  # of the rare full-2ATR stop that ate the thin wins. Validated on the live
+  # 6-coin basket over the current 45d window (fresh_basket_test.py): pooled
+  # PF 1.46->1.54, maxDD 4.7%->4.1%, helps 4/5 coins (BNB 1.81->2.20), ~1% fewer
+  # trades, 0 liquidations. REVERT = set accel_mult: 0.0 + restart.
+  accel_mult: 3.0
 
 # Entry block: only `timeframe` is used by the regime path (drives the bar feed).
 entry:

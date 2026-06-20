@@ -386,21 +386,30 @@ def orb_fade(df, side="both", open_bars=12, sl_atr=1.0, tp_frac=0.7, atr_p=14,
 def regime_mr(df, side="both", trend_len=200, slope_lb=20, z_period=30, z_entry=1.5,
               sl_atr=1.5, tp_frac=0.4, max_bars=12, limit_atr=0.25, atr_p=14,
               be_trigger_r=0.0, be_offset_r=0.0, tp1_frac=1.0, tp2_mult=0.0,
-              be_after_tp1=False):
+              be_after_tp1=False, accel_mult=0.0):
     """Regime-gated VWAP mean-reversion: fade extensions ONLY in the direction of
     the higher-timeframe trend (EMA(trend_len) slope). Buy dips back to session
     VWAP in an uptrend; sell rips in a downtrend. Maker limit entry. This is the
     'MTF regime filter + LTF trigger' family and the one that GENERALIZES across
-    coins (vs plain vwap_revert which only worked on the trending coin)."""
+    coins (vs plain vwap_revert which only worked on the trending coin).
+
+    accel_mult>0 = acceleration guard: skip the fade when the TRIGGER bar's range
+    is >= accel_mult*ATR (a volatility-climax / news-rip bar). Fading into an
+    accelerating move is what turns the rare loss into a full 2-ATR stop — this
+    declines to fade the blow-off bars. Default 0.0 = off (behavior preserved)."""
+    O, H, L = df["Open"], df["High"], df["Low"]
     C = df["Close"]; a = atr(df, atr_p)
     e = ema(C, trend_len); slope = e - e.shift(slope_lb)
     vwap = session_vwap(df)
     z = rolling_zscore(C - vwap, z_period)
     cv, av, vv, zv, slv = C.values, a.values, vwap.values, z.values, slope.values
+    hv, lv = H.values, L.values
     sigs = []
     for i in range(len(df)):
         if np.isnan(zv[i]) or np.isnan(av[i]) or av[i] <= 0 or np.isnan(slv[i]) or np.isnan(vv[i]):
             continue
+        if accel_mult > 0 and (hv[i] - lv[i]) >= accel_mult * av[i]:
+            continue  # acceleration guard: don't fade a volatility-climax bar
         up = slv[i] > 0
         side_val = 1 if (zv[i] <= -z_entry and up) else (-1 if (zv[i] >= z_entry and not up) else 0)
         if side_val == 0 or not _allow(side_val, side):

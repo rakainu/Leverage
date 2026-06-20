@@ -78,6 +78,9 @@ class RegimeConfig:
     limit_atr: float = 0.25    # maker limit offset beyond close, in ATR
     atr_period: int = 14
     entry_valid_bars: int = 3  # cancel the resting limit if unfilled after N bars
+    accel_mult: float = 0.0    # acceleration guard: skip fading a signal bar whose
+                               # range >= accel_mult*ATR (news-rip / climax bar).
+                               # 0 = off. Validated 3.0: PF 1.46->1.54, lower DD.
 
 
 @dataclass
