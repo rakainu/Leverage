@@ -55,6 +55,15 @@ regime:
   # PF 1.46->1.54, maxDD 4.7%->4.1%, helps 4/5 coins (BNB 1.81->2.20), ~1% fewer
   # trades, 0 liquidations. REVERT = set accel_mult: 0.0 + restart.
   accel_mult: 3.0
+  # Trend-clarity gate (2026-06-20). Require |EMA200-slope|% over slope_lb bars
+  # >= this before fading against the trend. The sign-only gate fires into a
+  # flat-but-rising tape (shorts a rally) and gets run over — forensic on the
+  # worst losing 10-day window showed it was ALL shorts (-$768/-$926) with
+  # near-zero slope. Validated across 9 time-chunks (slope_gate_test.py): 0.08
+  # nearly eliminates that window (-$926 -> -$126), LIFTS total net +20%, good
+  # windows stay above baseline — drops only net-losing ambiguous-trend fades,
+  # not good trades. REVERT = set min_slope_pct: 0.0 + restart.
+  min_slope_pct: 0.08
 
 # Entry block: only `timeframe` is used by the regime path (drives the bar feed).
 entry:

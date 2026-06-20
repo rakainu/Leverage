@@ -81,6 +81,10 @@ class RegimeConfig:
     accel_mult: float = 0.0    # acceleration guard: skip fading a signal bar whose
                                # range >= accel_mult*ATR (news-rip / climax bar).
                                # 0 = off. Validated 3.0: PF 1.46->1.54, lower DD.
+    min_slope_pct: float = 0.0  # trend-clarity gate: require |EMA-slope|% >= this
+                                # before fading against the trend (sign-only gate
+                                # shorts a flat-but-rising tape). 0 = off. Validated
+                                # 0.08: worst losing window -$926->-$126, total +20%.
 
 
 @dataclass

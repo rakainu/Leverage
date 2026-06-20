@@ -386,7 +386,7 @@ def orb_fade(df, side="both", open_bars=12, sl_atr=1.0, tp_frac=0.7, atr_p=14,
 def regime_mr(df, side="both", trend_len=200, slope_lb=20, z_period=30, z_entry=1.5,
               sl_atr=1.5, tp_frac=0.4, max_bars=12, limit_atr=0.25, atr_p=14,
               be_trigger_r=0.0, be_offset_r=0.0, tp1_frac=1.0, tp2_mult=0.0,
-              be_after_tp1=False, accel_mult=0.0):
+              be_after_tp1=False, accel_mult=0.0, min_slope_pct=0.0):
     """Regime-gated VWAP mean-reversion: fade extensions ONLY in the direction of
     the higher-timeframe trend (EMA(trend_len) slope). Buy dips back to session
     VWAP in an uptrend; sell rips in a downtrend. Maker limit entry. This is the
@@ -403,13 +403,17 @@ def regime_mr(df, side="both", trend_len=200, slope_lb=20, z_period=30, z_entry=
     vwap = session_vwap(df)
     z = rolling_zscore(C - vwap, z_period)
     cv, av, vv, zv, slv = C.values, a.values, vwap.values, z.values, slope.values
-    hv, lv = H.values, L.values
+    hv, lv, ev = H.values, L.values, e.values
     sigs = []
     for i in range(len(df)):
         if np.isnan(zv[i]) or np.isnan(av[i]) or av[i] <= 0 or np.isnan(slv[i]) or np.isnan(vv[i]):
             continue
         if accel_mult > 0 and (hv[i] - lv[i]) >= accel_mult * av[i]:
             continue  # acceleration guard: don't fade a volatility-climax bar
+        # trend-clarity gate: don't fade against a barely-sloped (ambiguous) trend
+        # — the sign-only gate shorts a flat-but-rising tape and gets run over.
+        if min_slope_pct > 0 and ev[i] and abs(slv[i] / ev[i] * 100.0) < min_slope_pct:
+            continue
         up = slv[i] > 0
         side_val = 1 if (zv[i] <= -z_entry and up) else (-1 if (zv[i] >= z_entry and not up) else 0)
         if side_val == 0 or not _allow(side_val, side):

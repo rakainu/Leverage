@@ -61,13 +61,23 @@ def _session_vwap(df: pd.DataFrame) -> pd.Series:
 
 def prepare_regime(df: pd.DataFrame, trend_len: int = 200, slope_lb: int = 20,
                    z_period: int = 30, z_entry: float = 1.5,
-                   atr_period: int = 14, accel_mult: float = 0.0) -> pd.DataFrame:
+                   atr_period: int = 14, accel_mult: float = 0.0,
+                   min_slope_pct: float = 0.0) -> pd.DataFrame:
     """accel_mult>0 = acceleration guard: a signal bar whose range (High-Low) is
     >= accel_mult*ATR is a volatility-climax / news-rip bar; decline to fade it.
     Fading into an accelerating move is what turns the rare loss into a full
     sl_atr stop. Validated on the live 6-coin basket (fresh_basket_test.py):
     accel_mult=3.0 lifts pooled PF 1.46->1.54, lowers DD, helps 4/5 coins,
-    ~1% fewer trades. Default 0.0 = OFF (exact prior behavior preserved)."""
+    ~1% fewer trades. Default 0.0 = OFF (exact prior behavior preserved).
+
+    min_slope_pct>0 = trend-clarity gate: require |EMA-slope| (% of EMA over
+    slope_lb bars) >= min_slope_pct before fading against the trend. The sign-only
+    gate fires into a flat-but-rising tape (shorting a rally) and gets run over —
+    the regime forensic on the -$926 window (chunk1_forensics.py) showed the
+    losers had near-zero slope. Validated across 9 time-chunks (slope_gate_test.py):
+    0.08 nearly eliminates the worst losing window (-$926 -> -$126), LIFTS total
+    net +20%, and the good windows stay above baseline — NOT conservatism, it
+    drops only net-losing ambiguous-trend fades. Default 0.0 = OFF."""
     out = df.copy()
     c = out["Close"].astype(float)
     e = _ema(c, trend_len)
@@ -77,7 +87,7 @@ def prepare_regime(df: pd.DataFrame, trend_len: int = 200, slope_lb: int = 20,
     a = _atr(out, atr_period)
 
     cv, av, vv, zv, slv = c.values, a.values, vwap.values, z.values, slope.values
-    hv, lv = out["High"].values, out["Low"].values
+    hv, lv, ev = out["High"].values, out["Low"].values, e.values
     n = len(out)
     reg_long = np.zeros(n, dtype=bool)
     reg_short = np.zeros(n, dtype=bool)
@@ -86,6 +96,8 @@ def prepare_regime(df: pd.DataFrame, trend_len: int = 200, slope_lb: int = 20,
             continue
         if accel_mult > 0 and (hv[i] - lv[i]) >= accel_mult * av[i]:
             continue  # acceleration guard: don't fade a volatility-climax bar
+        if min_slope_pct > 0 and ev[i] and abs(slv[i] / ev[i] * 100.0) < min_slope_pct:
+            continue  # trend-clarity gate: don't fade a flat/ambiguous trend
         up = slv[i] > 0
         if zv[i] <= -z_entry and up:
             reg_long[i] = True

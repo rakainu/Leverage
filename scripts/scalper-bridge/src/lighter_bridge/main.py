@@ -776,7 +776,8 @@ class Bridge:
         rg = self.cfg.regime
         enriched = prepare_regime(df, trend_len=rg.trend_len, slope_lb=rg.slope_lb,
                                   z_period=rg.z_period, z_entry=rg.z_entry,
-                                  atr_period=rg.atr_period, accel_mult=rg.accel_mult)
+                                  atr_period=rg.atr_period, accel_mult=rg.accel_mult,
+                                  min_slope_pct=rg.min_slope_pct)
         is_bootstrap = symbol not in self.bars
         self.bars[symbol] = enriched
         last = enriched.iloc[-1]
