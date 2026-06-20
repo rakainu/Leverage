@@ -24,7 +24,8 @@ from typing import Any, Optional
 from .blofin_client import BloFinClient
 from .ema import compute_ema_series
 from .entry_gate import EntryGate
-from .handlers.entry import handle_entry, _dollar_to_price_distance
+from .handlers.entry import finalize_filled_entry, _dollar_to_price_distance
+from .sizing import contracts_for_margin, SizingError
 from .notify import (
     Notifier, format_entry, format_exit, format_trail_activated,
     format_trail_update, format_pending_filled, format_pending_expired,
@@ -171,23 +172,10 @@ class PositionPoller:
         )
 
     async def poll_once(self) -> None:
-        # --- Check pending signals for EMA retest ---
-        try:
-            self._process_pending_signals()
-        except Exception:
-            log.exception("failed to process pending signals")
-
-        # --- Check open positions ---
-        try:
-            positions = self.store.list_open_positions()
-        except Exception:
-            log.exception("failed to list open positions")
-            return
-
-        if not positions:
-            return
-
-        # Fetch BloFin positions ONCE per cycle for drift detection.
+        # Fetch BloFin open positions ONCE per cycle — used both to detect when a
+        # resting EMA9 limit has filled (a new position appeared) and for open-
+        # position drift detection. Fetched unconditionally now (even with no
+        # local positions) so a limit fill on a fresh symbol is caught.
         blofin_open_symbols: Optional[set[str]] = None
         try:
             blofin_positions = self.blofin.fetch_positions()
@@ -199,8 +187,21 @@ class PositionPoller:
                     blofin_open_symbols.add(inst_id)
         except Exception as exc:
             log.warning(
-                "fetch_positions failed in poller, skipping drift check: %s", exc,
+                "fetch_positions failed in poller, skipping drift/fill check: %s", exc,
             )
+
+        # --- Pending signals: place / refresh / detect-fill / cancel EMA9 limits ---
+        try:
+            self._process_pending_signals(blofin_open_symbols=blofin_open_symbols)
+        except Exception:
+            log.exception("failed to process pending signals")
+
+        # --- Open positions: trailing-stop state machine ---
+        try:
+            positions = self.store.list_open_positions()
+        except Exception:
+            log.exception("failed to list open positions")
+            return
 
         for pos in positions:
             try:
@@ -208,144 +209,217 @@ class PositionPoller:
             except Exception:
                 log.exception("poller failed for position id=%s", pos.id)
 
-    def _process_pending_signals(self) -> None:
-        """Check each pending signal for EMA retest or expiry."""
-        signals = self.store.list_pending_signals()
-        now = datetime.now(timezone.utc)
+    def _process_pending_signals(self, *, blofin_open_symbols=None) -> None:
+        """Drive each pending signal's resting-EMA9-limit lifecycle.
 
+        Replaces the old "poll last-price every 2s and market-enter on retest"
+        with a resting limit at EMA9: the engine fires when a bar's low/high
+        TOUCHES EMA9 (intrabar) and fills at EMA9 — a tick-poller misses ~60% of
+        those, so we rest a limit at EMA9 instead and let the wick fill it.
+        """
+        try:
+            signals = self.store.list_pending_signals()
+        except Exception:
+            log.exception("failed to list pending signals")
+            return
+        now = datetime.now(timezone.utc)
         for sig in signals:
             try:
-                # Check expiry
-                expires_at = datetime.fromisoformat(sig["expires_at"])
-                if now >= expires_at:
-                    self.store.expire_pending_signal(sig["id"])
-                    log.info("Pending signal %d expired for %s", sig["id"], sig["symbol"])
-                    # V3.2 'Fin': silent on expiry — no signal chatter.
-                    continue
-
-                # Operator pause: drop the pending signal without firing.
-                if self.gate is not None and self.gate.is_paused(sig["symbol"]):
-                    self.store.expire_pending_signal(sig["id"])
-                    log.info(
-                        "Pending signal %d for %s dropped: entries paused",
-                        sig["id"], sig["symbol"],
-                    )
-                    continue
-
-                # Fetch current price and OHLCV — need enough bars for both
-                # EMA(period) slope check and ATR(14) for the body/ATR filter.
-                current_price = self.blofin.fetch_last_price(sig["symbol"])
-                bars = self.blofin.fetch_recent_ohlcv(
-                    sig["symbol"],
-                    timeframe=self.ema_retest_timeframe,
-                    limit=max(self.ema_retest_period + 10, 20),
-                )
-                closes = [bar[4] for bar in bars]  # index 4 = close
-                ema_series = compute_ema_series(closes, self.ema_retest_period)
-                ema_value = ema_series[-1]
-
-                # Check for retest (with overshoot cap)
-                max_overshoot = ema_value * (self.ema_retest_max_overshoot_pct / 100)
-                retest = False
-                if sig["action"] == "buy" and current_price <= ema_value:
-                    retest = current_price >= ema_value - max_overshoot
-                elif sig["action"] == "sell" and current_price >= ema_value:
-                    retest = current_price <= ema_value + max_overshoot
-
-                if not retest:
-                    continue
-
-                # Flat-slope gate: 14-day audit (137 trades) showed every fill
-                # with |EMA(9) 3-bar slope| < 0.03% lost. Skip the fill on this
-                # poll tick only — leave the pending alive; it can release on a
-                # later tick if the tape wakes up, or expire normally.
-                if self.min_5m_slope_pct > 0 and len(ema_series) >= 4:
-                    prior_ema = ema_series[-4]
-                    slope_pct = (ema_value - prior_ema) / prior_ema * 100.0 \
-                        if prior_ema else 0.0
-                    if abs(slope_pct) < self.min_5m_slope_pct:
-                        log.info(
-                            "Pending %d (%s %s) fill blocked by flat EMA slope: "
-                            "|%.4f%%| < %.3f%% threshold (price=%.4f, ema=%.4f)",
-                            sig["id"], sig["action"], sig["symbol"],
-                            slope_pct, self.min_5m_slope_pct,
-                            current_price, ema_value,
-                        )
-                        continue
-
-                # V3.1 entry filters — applied AFTER retest+slope, BEFORE entry.
-                # All check the most-recently-closed bar's state. Each filter
-                # uses `continue` to keep pending alive (matches slope-gate semantics)
-                # so the signal can release on a later tick if conditions change.
-                if self.block_weekdays_utc and now.weekday() in self.block_weekdays_utc:
-                    log.info(
-                        "Pending %d (%s %s) fill blocked: weekday %d in block list %s",
-                        sig["id"], sig["action"], sig["symbol"],
-                        now.weekday(), sorted(self.block_weekdays_utc),
-                    )
-                    continue
-                if self.block_body_atr_band is not None or self.min_body_atr_ratio > 0:
-                    atr_val = _compute_atr_last(bars, period=14)
-                    if atr_val and atr_val > 0 and len(bars) >= 2:
-                        last_bar = bars[-1]
-                        body = abs(last_bar[4] - last_bar[1])  # |close - open|
-                        body_atr = body / atr_val
-                        if self.min_body_atr_ratio > 0 and body_atr < self.min_body_atr_ratio:
-                            log.info(
-                                "Pending %d (%s %s) fill blocked: body/ATR %.3f < min %.3f",
-                                sig["id"], sig["action"], sig["symbol"],
-                                body_atr, self.min_body_atr_ratio,
-                            )
-                            continue
-                        if self.block_body_atr_band is not None:
-                            lo, hi = self.block_body_atr_band
-                            if lo <= body_atr < hi:
-                                log.info(
-                                    "Pending %d (%s %s) fill blocked: body/ATR %.3f in skip band [%.2f, %.2f)",
-                                    sig["id"], sig["action"], sig["symbol"],
-                                    body_atr, lo, hi,
-                                )
-                                continue
-
-                log.info(
-                    "EMA(%d) retest confirmed for %s %s: price=%.2f, ema=%.2f",
-                    self.ema_retest_period, sig["action"], sig["symbol"],
-                    current_price, ema_value,
-                )
-
-                # Execute the entry
-                sym_cfg = self.symbol_configs.get(sig["symbol"])
-                if sym_cfg is None:
-                    log.warning("No config for %s, skipping pending signal", sig["symbol"])
-                    continue
-
-                result = handle_entry(
-                    action=sig["action"], symbol=sig["symbol"],
-                    store=self.store, blofin=self.blofin,
-                    margin_usdt=sym_cfg["margin_usdt"],
-                    leverage=sym_cfg["leverage"],
-                    margin_mode=sym_cfg["margin_mode"],
-                    sl_policy_name=sym_cfg["sl_policy"],
-                    sl_loss_usdt=sym_cfg["sl_loss_usdt"],
-                    trail_activate_usdt=sym_cfg["trail_activate_usdt"],
-                    trail_distance_usdt=sym_cfg["trail_distance_usdt"],
-                    tp_limit_margin_pct=sym_cfg["tp_limit_margin_pct"],
-                    source=sig.get("source", "pro_v3"),
-                )
-
-                if result.get("opened"):
-                    self.store.fill_pending_signal(sig["id"], current_price)
-                    if self.notifier:
-                        # V3.2 'Fin': entry + SL only (no signal/fill chatter).
-                        result["symbol"] = sig["symbol"]
-                        self.notifier.send(format_entry(result))
-                else:
-                    log.warning(
-                        "Pending signal %d: entry failed: %s",
-                        sig["id"], result.get("reason"),
-                    )
+                self._process_one_pending(sig, now, blofin_open_symbols)
             except Exception:
                 log.exception("Failed processing pending signal %d", sig["id"])
+
+    def _process_one_pending(self, sig, now, blofin_open_symbols) -> None:
+        symbol = sig["symbol"]
+
+        # 1. Fill detection: a resting limit + a fresh exchange position (no local
+        #    row yet) means the limit filled. Finalize it into a tracked position.
+        if (sig.get("limit_order_id") and blofin_open_symbols is not None
+                and symbol in blofin_open_symbols
+                and self.store.get_open_position(symbol) is None):
+            self._finalize_limit_fill(sig)
+            return
+
+        # 2. Expiry / timeout — pull the resting limit and drop the signal.
+        try:
+            expires_at = datetime.fromisoformat(sig["expires_at"])
+        except Exception:
+            expires_at = now
+        if now >= expires_at:
+            self._cancel_resting_limit(sig)
+            self.store.expire_pending_signal(sig["id"])
+            log.info("Pending signal %d expired for %s", sig["id"], symbol)
+            return
+
+        # 3. Operator pause.
+        if self.gate is not None and self.gate.is_paused(symbol):
+            self._cancel_resting_limit(sig)
+            self.store.expire_pending_signal(sig["id"])
+            log.info("Pending %d for %s dropped: entries paused", sig["id"], symbol)
+            return
+
+        # 4. EMA9 + gates on the last CLOSED bar (forming bar dropped, like the
+        #    engine — and like SignalEngine).
+        sym_cfg = self.symbol_configs.get(symbol)
+        if sym_cfg is None:
+            log.warning("No config for %s, skipping pending signal", symbol)
+            return
+        try:
+            raw = self.blofin.fetch_recent_ohlcv(
+                symbol, timeframe=self.ema_retest_timeframe,
+                limit=max(self.ema_retest_period + 10, 20),
+            )
+        except Exception as exc:
+            log.warning("fetch_recent_ohlcv failed for %s: %s", symbol, exc)
+            return
+        closed = raw[:-1]
+        if len(closed) < self.ema_retest_period + 1:
+            return
+        closes = [b[4] for b in closed]
+        ema_series = compute_ema_series(closes, self.ema_retest_period)
+        ema9 = ema_series[-1]
+
+        # 5. Gates fail → pull any resting limit (don't fill on a bad bar), wait.
+        if not self._gates_pass(closed, ema_series, now):
+            self._cancel_resting_limit(sig)
+            return
+
+        # 6. Place or refresh the resting limit at EMA9.
+        self._place_or_refresh_limit(sig, sym_cfg, ema9)
+
+    def _gates_pass(self, closed_bars, ema_series, now) -> bool:
+        """Engine-faithful entry gates evaluated on the last closed bar."""
+        # Flat-slope gate (EMA9 3-bar slope).
+        if self.min_5m_slope_pct > 0 and len(ema_series) >= 4:
+            prior = ema_series[-4]
+            slope_pct = (ema_series[-1] - prior) / prior * 100.0 if prior else 0.0
+            if abs(slope_pct) < self.min_5m_slope_pct:
+                return False
+        # Weekday block (UTC).
+        if self.block_weekdays_utc and now.weekday() in self.block_weekdays_utc:
+            return False
+        # Body/ATR filters.
+        if self.block_body_atr_band is not None or self.min_body_atr_ratio > 0:
+            atr_val = _compute_atr_last(closed_bars, period=14)
+            if atr_val and atr_val > 0 and len(closed_bars) >= 1:
+                last = closed_bars[-1]
+                body_atr = abs(last[4] - last[1]) / atr_val
+                if self.min_body_atr_ratio > 0 and body_atr < self.min_body_atr_ratio:
+                    return False
+                if self.block_body_atr_band is not None:
+                    lo, hi = self.block_body_atr_band
+                    if lo <= body_atr < hi:
+                        return False
+        return True
+
+    def _entry_geometry(self, symbol, sym_cfg, side, price):
+        """(contracts, sl_trigger, tp_ceiling) for an entry at `price`."""
+        instrument = self.blofin.get_instrument(symbol)
+        contracts = contracts_for_margin(
+            margin_usdt=sym_cfg["margin_usdt"], leverage=sym_cfg["leverage"],
+            last_price=price, instrument=instrument,
+        )
+        sl_dist = _dollar_to_price_distance(
+            sym_cfg["sl_loss_usdt"], sym_cfg["margin_usdt"], sym_cfg["leverage"], price,
+        )
+        tp_dollar = sym_cfg["margin_usdt"] * sym_cfg["tp_limit_margin_pct"]
+        tp_dist = _dollar_to_price_distance(
+            tp_dollar, sym_cfg["margin_usdt"], sym_cfg["leverage"], price,
+        )
+        if side == "long":
+            return contracts, price - sl_dist, price + tp_dist
+        return contracts, price + sl_dist, price - tp_dist
+
+    def _place_or_refresh_limit(self, sig, sym_cfg, ema9) -> None:
+        symbol = sig["symbol"]
+        side = "long" if sig["action"] == "buy" else "short"
+        try:
+            tick = self.blofin.get_instrument(symbol)["tickSize"]
+        except Exception:
+            tick = 0.0
+        target = round(round(ema9 / tick) * tick, 10) if tick > 0 else ema9
+        # EMA9 unchanged within this bar → leave the resting limit alone.
+        existing_px = sig.get("limit_price")
+        if sig.get("limit_order_id") and existing_px is not None \
+                and abs(existing_px - target) <= (tick / 2 if tick > 0 else 1e-9):
+            return
+        # New / moved EMA9: cancel any stale limit, rest a fresh one at EMA9.
+        self._cancel_resting_limit(sig)
+        try:
+            contracts, sl_trigger, _tp = self._entry_geometry(symbol, sym_cfg, side, ema9)
+        except SizingError as exc:
+            log.warning("sizing error resting limit for %s: %s", symbol, exc)
+            return
+        try:
+            res = self.blofin.place_limit_entry(
+                inst_id=symbol, side=sig["action"], contracts=contracts,
+                price=ema9, safety_sl_trigger=sl_trigger,
+            )
+        except Exception as exc:
+            log.warning("place_limit_entry failed for %s @ %.4f: %s", symbol, ema9, exc)
+            return
+        px = res.get("price", target)
+        self.store.record_pending_limit(sig["id"], order_id=res.get("orderId"), price=px)
+        sig["limit_order_id"] = res.get("orderId")
+        sig["limit_price"] = px
+        log.info(
+            "Rested EMA9 limit for %s %s @ %.4f (sig %d)",
+            sig["action"], symbol, px, sig["id"],
+        )
+
+    def _cancel_resting_limit(self, sig) -> None:
+        oid = sig.get("limit_order_id")
+        if not oid:
+            return
+        try:
+            self.blofin.cancel_order(oid, sig["symbol"])
+        except Exception:
+            pass
+        self.store.clear_pending_limit(sig["id"])
+        sig["limit_order_id"] = None
+        sig["limit_price"] = None
+
+    def _finalize_limit_fill(self, sig) -> None:
+        symbol = sig["symbol"]
+        sym_cfg = self.symbol_configs.get(symbol)
+        if sym_cfg is None:
+            return
+        side = "long" if sig["action"] == "buy" else "short"
+        entry_price = sig.get("limit_price")
+        if not entry_price:
+            try:
+                entry_price = self.blofin.fetch_last_price(symbol)
+            except Exception:
+                return
+        try:
+            contracts, sl_trigger, tp_ceiling = self._entry_geometry(
+                symbol, sym_cfg, side, entry_price,
+            )
+        except SizingError as exc:
+            log.warning("sizing error finalizing %s: %s", symbol, exc)
+            return
+        result = finalize_filled_entry(
+            symbol=symbol, side=side, entry_price=entry_price, contracts=contracts,
+            sl_trigger=sl_trigger, tp_ceiling_price=tp_ceiling,
+            store=self.store, blofin=self.blofin,
+            margin_usdt=sym_cfg["margin_usdt"], leverage=sym_cfg["leverage"],
+            sl_policy_name=sym_cfg["sl_policy"], source=sig.get("source", "ha_v3"),
+            sl_loss_usdt=sym_cfg["sl_loss_usdt"],
+            trail_activate_usdt=sym_cfg["trail_activate_usdt"],
+            trail_distance_usdt=sym_cfg["trail_distance_usdt"],
+        )
+        self.store.fill_pending_signal(sig["id"], entry_price)
+        self.store.clear_pending_limit(sig["id"])
+        if self.notifier and result.get("opened"):
+            result["symbol"] = symbol
+            try:
+                self.notifier.send(format_entry(result))
+            except Exception:
+                log.exception("entry notify failed for %s", symbol)
+        log.info(
+            "Resting limit filled for %s %s @ %.4f -> position %s",
+            sig["action"], symbol, entry_price, result.get("position_id"),
+        )
 
     def _archive_stale_position(self, pos) -> None:
         """Position is gone from BloFin. Cancel leftover orders, archive row."""

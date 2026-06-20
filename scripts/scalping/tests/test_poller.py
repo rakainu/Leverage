@@ -446,24 +446,25 @@ async def test_pending_signal_for_paused_symbol_is_expired(store, blofin):
 
 
 @pytest.mark.asyncio
-async def test_pending_source_threaded_to_entry(store, blofin, monkeypatch):
-    """The poller must pass a pending signal's source through to handle_entry,
-    so a self-generated ('ha_v3') signal opens an 'ha_v3'-tagged position."""
-    store.create_pending_signal(
+async def test_pending_source_threaded_to_entry(store, blofin):
+    """A pending signal's source threads to the opened position when its resting
+    EMA9 limit fills — a self-generated ('ha_v3') signal opens an 'ha_v3' position."""
+    sid = store.create_pending_signal(
         symbol="SOL-USDT", action="buy", signal_price=300.0, source="ha_v3",
     )
-    # Flat tape → EMA(9) retest fires immediately on this poll.
-    bars = [[i, 300.0, 300.0, 300.0, 300.0, 0.0] for i in range(25)]
-    blofin.fetch_recent_ohlcv.return_value = bars
-    blofin.fetch_last_price.return_value = 300.0
-
-    captured: dict = {}
-
-    def _fake_entry(**kwargs):
-        captured.update(kwargs)
-        return {"opened": False, "reason": "stub"}
-
-    monkeypatch.setattr("blofin_bridge.poller.handle_entry", _fake_entry)
+    store.record_pending_limit(sid, order_id="lim-9", price=300.0)
+    # BloFin now reports a position for the symbol → the resting limit filled.
+    blofin.fetch_positions.return_value = [
+        {"info": {"instId": "SOL-USDT"}, "contracts": 10},
+    ]
+    blofin.get_instrument.return_value = {
+        "instId": "SOL-USDT", "contractValue": 1.0, "minSize": 1.0,
+        "lotSize": 1.0, "tickSize": 0.001,
+    }
+    blofin.list_pending_tpsl.return_value = [
+        {"tpslId": "sl-9", "slTriggerPrice": "299.0"},
+    ]
+    blofin.place_limit_reduce_only.return_value = "tp-9"
 
     cfg = {"SOL-USDT": {
         "margin_usdt": 100, "leverage": 30, "margin_mode": "isolated",
@@ -472,9 +473,11 @@ async def test_pending_source_threaded_to_entry(store, blofin, monkeypatch):
         "tp_limit_margin_pct": 2.0,
     }}
     poller = _make_poller(store, blofin, symbol_configs=cfg)
-    poller._process_pending_signals()
+    await poller.poll_once()
 
-    assert captured.get("source") == "ha_v3"
+    pos = store.get_open_position("SOL-USDT")
+    assert pos is not None
+    assert pos.source == "ha_v3"
 
 
 # === Full lifecycle ===

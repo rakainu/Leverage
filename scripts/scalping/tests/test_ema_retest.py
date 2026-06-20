@@ -48,6 +48,9 @@ def blofin():
     m.place_market_entry.return_value = {
         "orderId": "e-1", "fill_price": 100.0, "filled": 10,
     }
+    m.place_limit_entry.return_value = {"orderId": "lim-1", "price": 100.0}
+    m.list_pending_tpsl.return_value = [{"tpslId": "sl-7", "slTriggerPrice": "99.0"}]
+    m.cancel_order.return_value = None
     m.get_instrument.return_value = {
         "instId": "SOL-USDT", "contractValue": 1.0, "minSize": 1.0,
         "lotSize": 1.0, "tickSize": 0.001,
@@ -119,216 +122,160 @@ def _bars_with_ema_at(ema_target: float, num_bars: int = 15):
     return _bars_with_upward_slope(ema_target, num_bars)
 
 
+# === Resting-EMA9-limit entry lifecycle (Plan A: match the engine's retest) ===
+#
+# The engine fires when a bar's low/high TOUCHES EMA9 (intrabar) and fills at
+# EMA9. Live can't catch that by polling last-price every 2s, so instead it
+# rests a limit at EMA9 while the signal is live: the wick fills it at EMA9.
+
+
 @pytest.mark.asyncio
-async def test_pending_buy_fills_on_ema_retest(store, blofin):
-    """Price at or below EMA(9) triggers the pending buy."""
+async def test_pending_buy_places_resting_limit_at_ema(store, blofin):
+    """A fresh pending buy that passes gates rests a limit at EMA9 (no market entry)."""
     store.create_pending_signal(
         symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=30,
     )
-
-    # After entry, BloFin will report the position
-    blofin.fetch_positions.return_value = [{
-        "info": {"instId": "SOL-USDT"}, "contracts": 10,
-    }]
-    blofin.fetch_last_price.return_value = 100.0
-    blofin.fetch_recent_ohlcv.return_value = _bars_with_ema_at(100.0)
+    blofin.fetch_positions.return_value = []           # nothing filled yet
+    blofin.fetch_recent_ohlcv.return_value = _flat_bars(100.0)  # EMA9 == 100
+    blofin.place_limit_entry.return_value = {"orderId": "lim-7", "price": 100.0}
 
     poller = _make_poller(store, blofin)
     await poller.poll_once()
 
-    signals = store.list_pending_signals()
-    assert len(signals) == 0
-
-    pos = store.get_open_position("SOL-USDT")
-    assert pos is not None
-    assert pos.side == "long"
+    blofin.place_limit_entry.assert_called_once()
+    _, kw = blofin.place_limit_entry.call_args
+    assert kw["side"] == "buy"
+    assert kw["price"] == pytest.approx(100.0, abs=0.2)
+    blofin.place_market_entry.assert_not_called()      # NOT a market entry
+    sig = store.list_pending_signals()[0]
+    assert sig["limit_order_id"] == "lim-7"
+    assert store.get_open_position("SOL-USDT") is None  # not filled yet
 
 
 @pytest.mark.asyncio
-async def test_pending_buy_waits_when_above_ema(store, blofin):
-    """Price above EMA(9) → don't enter yet."""
-    store.create_pending_signal(
+async def test_resting_limit_finalizes_when_filled(store, blofin):
+    """When BloFin reports a position, the resting limit is treated as filled:
+    a position row is created at the rested EMA9 and the pending is consumed."""
+    sid = store.create_pending_signal(
         symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=30,
     )
-
-    # EMA at 100, price at 102 → above EMA → no retest
-    blofin.fetch_last_price.return_value = 102.0
-    blofin.fetch_recent_ohlcv.return_value = _bars_with_ema_at(100.0)
-
-    poller = _make_poller(store, blofin)
-    await poller.poll_once()
-
-    # Signal still pending
-    signals = store.list_pending_signals()
-    assert len(signals) == 1
-
-    # No position opened
-    assert store.get_open_position("SOL-USDT") is None
-
-
-@pytest.mark.asyncio
-async def test_pending_sell_fills_on_ema_retest(store, blofin):
-    """Price at or above EMA(9) triggers the pending sell."""
-    store.create_pending_signal(
-        symbol="SOL-USDT", action="sell", signal_price=95.0, timeout_minutes=30,
-    )
-
-    blofin.fetch_positions.return_value = [{
-        "info": {"instId": "SOL-USDT"}, "contracts": 10,
-    }]
-    blofin.fetch_last_price.return_value = 100.0
-    # Sell retest needs current_price >= EMA, so use a downward-sloping
-    # series whose EMA ends just below 100.
-    blofin.fetch_recent_ohlcv.return_value = _bars_with_downward_slope(100.0)
-    blofin.place_market_entry.return_value = {
-        "orderId": "e-2", "fill_price": 100.0, "filled": 10,
-    }
+    store.record_pending_limit(sid, order_id="lim-7", price=100.0)
+    blofin.fetch_positions.return_value = [
+        {"info": {"instId": "SOL-USDT"}, "contracts": 10},
+    ]
 
     poller = _make_poller(store, blofin)
     await poller.poll_once()
 
     pos = store.get_open_position("SOL-USDT")
     assert pos is not None
-    assert pos.side == "short"
+    assert pos.side == "long"
+    assert pos.entry_price == pytest.approx(100.0)     # filled at the rested EMA9
+    assert pos.sl_order_id == "sl-7"                   # attached SL captured
+    assert store.list_pending_signals() == []          # pending consumed
 
 
 @pytest.mark.asyncio
-async def test_pending_signal_expires(store, blofin):
-    """Signal past its timeout gets expired."""
-    # Create with 0 minutes timeout → already expired
-    store.create_pending_signal(
+async def test_resting_limit_refreshes_when_ema_moves(store, blofin):
+    """A new closed bar moves EMA9 → cancel the stale limit and re-place at the
+    new EMA9 (mirrors the engine refreshing ema[i] each bar)."""
+    sid = store.create_pending_signal(
+        symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=30,
+    )
+    store.record_pending_limit(sid, order_id="lim-old", price=100.0)
+    blofin.fetch_positions.return_value = []
+    blofin.fetch_recent_ohlcv.return_value = _flat_bars(101.0)   # EMA9 now 101
+    blofin.place_limit_entry.return_value = {"orderId": "lim-new", "price": 101.0}
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    blofin.cancel_order.assert_called_once_with("lim-old", "SOL-USDT")
+    blofin.place_limit_entry.assert_called_once()
+    sig = store.list_pending_signals()[0]
+    assert sig["limit_order_id"] == "lim-new"
+    assert sig["limit_price"] == pytest.approx(101.0)
+
+
+@pytest.mark.asyncio
+async def test_resting_limit_not_replaced_when_ema_unchanged(store, blofin):
+    """Within the same bar EMA9 is constant → don't churn the resting limit."""
+    sid = store.create_pending_signal(
+        symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=30,
+    )
+    store.record_pending_limit(sid, order_id="lim-keep", price=100.0)
+    blofin.fetch_positions.return_value = []
+    blofin.fetch_recent_ohlcv.return_value = _flat_bars(100.0)   # EMA9 still 100
+
+    poller = _make_poller(store, blofin)
+    await poller.poll_once()
+
+    blofin.cancel_order.assert_not_called()
+    blofin.place_limit_entry.assert_not_called()
+    assert store.list_pending_signals()[0]["limit_order_id"] == "lim-keep"
+
+
+@pytest.mark.asyncio
+async def test_expired_pending_cancels_resting_limit(store, blofin):
+    """Past timeout → cancel the resting limit and expire the signal."""
+    sid = store.create_pending_signal(
         symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=0,
     )
-
+    store.record_pending_limit(sid, order_id="lim-x", price=100.0)
     import time
-    time.sleep(0.1)  # ensure we're past expiry
+    time.sleep(0.1)
+    blofin.fetch_positions.return_value = []
 
     poller = _make_poller(store, blofin)
     await poller.poll_once()
 
-    signals = store.list_pending_signals()
-    assert len(signals) == 0
+    blofin.cancel_order.assert_called_once_with("lim-x", "SOL-USDT")
+    assert store.list_pending_signals() == []
     assert store.get_open_position("SOL-USDT") is None
+
+
+@pytest.mark.asyncio
+async def test_flat_slope_blocks_limit_placement_keeps_pending(store, blofin):
+    """Slope gate fails → no limit rested, pending stays alive for a later bar."""
+    store.create_pending_signal(
+        symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=30,
+    )
+    blofin.fetch_positions.return_value = []
+    blofin.fetch_recent_ohlcv.return_value = _flat_bars(100.0)   # zero slope
+
+    poller = _make_poller(store, blofin, min_5m_slope_pct=0.03)
+    await poller.poll_once()
+
+    blofin.place_limit_entry.assert_not_called()
+    assert len(store.list_pending_signals()) == 1
+
+
+@pytest.mark.asyncio
+async def test_gate_failure_cancels_existing_resting_limit(store, blofin):
+    """If gates start failing while a limit rests, pull the limit (don't fill on
+    a bad bar) but keep the pending alive."""
+    sid = store.create_pending_signal(
+        symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=30,
+    )
+    store.record_pending_limit(sid, order_id="lim-bad", price=100.0)
+    blofin.fetch_positions.return_value = []
+    blofin.fetch_recent_ohlcv.return_value = _flat_bars(100.0)   # zero slope now
+
+    poller = _make_poller(store, blofin, min_5m_slope_pct=0.03)
+    await poller.poll_once()
+
+    blofin.cancel_order.assert_called_once_with("lim-bad", "SOL-USDT")
+    sig = store.list_pending_signals()[0]
+    assert sig["limit_order_id"] is None
 
 
 @pytest.mark.asyncio
 async def test_new_signal_cancels_previous(store, blofin):
-    """A new buy signal cancels any existing pending for that symbol."""
+    """A new buy signal cancels any existing pending for that symbol (router)."""
     from blofin_bridge.router import dispatch
-
     blofin.fetch_last_price.return_value = 100.0
     cfg = _sym_cfg()
-
-    # First buy
     dispatch(action="buy", symbol="SOL-USDT", store=store, blofin=blofin, symbol_configs=cfg)
     assert len(store.list_pending_signals()) == 1
-
-    # Second buy — should cancel first
     dispatch(action="buy", symbol="SOL-USDT", store=store, blofin=blofin, symbol_configs=cfg)
-    assert len(store.list_pending_signals()) == 1  # only the new one
-
-
-# === Flat-slope fill gate (min_5m_slope_pct) ===
-#
-# Driven by 14-day historical analysis (137 trades, Apr 10–24 2026): every
-# pending whose EMA(9) 3-bar slope was below 0.03% lost ($-197.51 net, 0/14
-# WR). The gate skips fills on flat-slope ticks but leaves the pending alive
-# so a later, non-flat tick can still release it.
-
-
-@pytest.mark.asyncio
-async def test_flat_slope_blocks_buy_fill_but_keeps_pending_alive(store, blofin):
-    """EMA(9) slope == 0 → buy fill is held; pending row remains."""
-    store.create_pending_signal(
-        symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=30,
-    )
-
-    # Perfectly flat bars → EMA == 100 with zero slope.
-    flat_bars = _flat_bars(100.0)
-    closes = [b[4] for b in flat_bars]
-    series = compute_ema_series(closes, 9)
-    # Sanity-check the fixture: slope is exactly zero.
-    assert series[-1] == series[-4]
-
-    blofin.fetch_last_price.return_value = 100.0  # at EMA → retest condition true
-    blofin.fetch_recent_ohlcv.return_value = flat_bars
-
-    poller = _make_poller(store, blofin, min_5m_slope_pct=0.03)
-    await poller.poll_once()
-
-    # Pending preserved (NOT killed), no position opened.
-    signals = store.list_pending_signals()
-    assert len(signals) == 1
-    assert store.get_open_position("SOL-USDT") is None
-    # And we did NOT call place_market_entry — the gate cut it before entry.
-    assert blofin.place_market_entry.call_count == 0
-
-
-@pytest.mark.asyncio
-async def test_flat_slope_blocks_sell_fill_but_keeps_pending_alive(store, blofin):
-    """EMA(9) slope == 0 → sell fill is held; pending row remains."""
-    store.create_pending_signal(
-        symbol="SOL-USDT", action="sell", signal_price=95.0, timeout_minutes=30,
-    )
-
-    blofin.fetch_last_price.return_value = 100.0  # at EMA → retest condition true
-    blofin.fetch_recent_ohlcv.return_value = _flat_bars(100.0)
-
-    poller = _make_poller(store, blofin, min_5m_slope_pct=0.03)
-    await poller.poll_once()
-
-    signals = store.list_pending_signals()
-    assert len(signals) == 1
-    assert store.get_open_position("SOL-USDT") is None
-    assert blofin.place_market_entry.call_count == 0
-
-
-@pytest.mark.asyncio
-async def test_non_flat_slope_allows_buy_fill(store, blofin):
-    """EMA(9) slope above the threshold → fill proceeds normally."""
-    store.create_pending_signal(
-        symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=30,
-    )
-
-    bars = _bars_with_upward_slope(100.0)
-    closes = [b[4] for b in bars]
-    series = compute_ema_series(closes, 9)
-    slope_pct = (series[-1] - series[-4]) / series[-4] * 100.0
-    # Sanity-check the fixture: slope is comfortably above 0.03%.
-    assert abs(slope_pct) > 0.03
-
-    blofin.fetch_positions.return_value = [{
-        "info": {"instId": "SOL-USDT"}, "contracts": 10,
-    }]
-    blofin.fetch_last_price.return_value = 100.0  # below EMA (which is just above 100)
-    blofin.fetch_recent_ohlcv.return_value = bars
-
-    poller = _make_poller(store, blofin, min_5m_slope_pct=0.03)
-    await poller.poll_once()
-
-    # Pending consumed, position opened.
-    assert store.list_pending_signals() == []
-    pos = store.get_open_position("SOL-USDT")
-    assert pos is not None and pos.side == "long"
-
-
-@pytest.mark.asyncio
-async def test_slope_gate_disabled_at_zero_threshold(store, blofin):
-    """min_5m_slope_pct=0 disables the gate — flat slope no longer blocks."""
-    store.create_pending_signal(
-        symbol="SOL-USDT", action="buy", signal_price=105.0, timeout_minutes=30,
-    )
-
-    blofin.fetch_positions.return_value = [{
-        "info": {"instId": "SOL-USDT"}, "contracts": 10,
-    }]
-    blofin.fetch_last_price.return_value = 100.0
-    blofin.fetch_recent_ohlcv.return_value = _flat_bars(100.0)
-
-    poller = _make_poller(store, blofin, min_5m_slope_pct=0.0)
-    await poller.poll_once()
-
-    # Gate disabled — fill proceeds even with zero slope.
-    pos = store.get_open_position("SOL-USDT")
-    assert pos is not None
-    assert pos.side == "long"
+    assert len(store.list_pending_signals()) == 1
