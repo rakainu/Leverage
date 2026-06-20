@@ -107,6 +107,40 @@ def handle_entry(
 
     entry_price = fill.get("fill_price") or last_price
 
+    # Post-fill bookkeeping is shared with the resting-limit entry path.
+    return finalize_filled_entry(
+        symbol=symbol, side=side, entry_price=entry_price, contracts=contracts,
+        sl_trigger=sl_trigger, tp_ceiling_price=tp_ceiling_price,
+        store=store, blofin=blofin, margin_usdt=margin_usdt, leverage=leverage,
+        sl_policy_name=sl_policy_name, source=source, sl_loss_usdt=sl_loss_usdt,
+        trail_activate_usdt=trail_activate_usdt,
+        trail_distance_usdt=trail_distance_usdt,
+    )
+
+
+def finalize_filled_entry(
+    *,
+    symbol: str,
+    side: str,                             # "long" | "short"
+    entry_price: float,
+    contracts: float,
+    sl_trigger: float,
+    tp_ceiling_price: float,
+    store: Store,
+    blofin: BloFinClient,
+    margin_usdt: float,
+    leverage: float,
+    sl_policy_name: str,
+    source: str = "pro_v3",
+    sl_loss_usdt: Optional[float] = None,
+    trail_activate_usdt: Optional[float] = None,
+    trail_distance_usdt: Optional[float] = None,
+) -> dict[str, Any]:
+    """Post-fill bookkeeping shared by the market entry and the resting-limit
+    (EMA9 retest) entry: persist the position row, capture the exchange-attached
+    safety SL, and place the hard TP ceiling. The entry order itself has already
+    filled (market) or is known-filled (limit) by the time we get here.
+    """
     # --- Persist position row ---
     pid = store.create_position(
         symbol=symbol, side=side, entry_price=entry_price,
@@ -146,7 +180,7 @@ def handle_entry(
             inst_id=symbol, side=close_side,
             contracts=contracts, price=tp_ceiling_price,
         )
-    except Exception as exc:
+    except Exception:
         log.exception("Hard TP ceiling placement failed")
 
     store.record_tp_order_ids(

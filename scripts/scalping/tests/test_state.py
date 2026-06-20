@@ -236,6 +236,47 @@ def test_trade_log_fee_column_added_to_legacy_db(tmp_path):
     assert rows[0]["fee_usdt"] == 0.0   # legacy row backfilled to 0
 
 
+def test_record_and_clear_pending_limit(store):
+    """A pending signal tracks its resting limit-entry order id + price so the
+    poller can refresh/cancel it and detect the fill."""
+    sid = store.create_pending_signal(
+        symbol="SOL-USDT", action="buy", signal_price=80.0, source="ha_v3",
+    )
+    store.record_pending_limit(sid, order_id="lim-1", price=79.95)
+    row = [s for s in store.list_pending_signals() if s["id"] == sid][0]
+    assert row["limit_order_id"] == "lim-1"
+    assert row["limit_price"] == pytest.approx(79.95)
+
+    store.clear_pending_limit(sid)
+    row = [s for s in store.list_pending_signals() if s["id"] == sid][0]
+    assert row["limit_order_id"] is None
+    assert row["limit_price"] is None
+
+
+def test_pending_limit_columns_added_to_legacy_db(tmp_path):
+    """A pending_signals table without the limit columns migrates in-place."""
+    import sqlite3
+    db = tmp_path / "legacy_lim.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE pending_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL,
+            action TEXT NOT NULL, signal_price REAL NOT NULL,
+            created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending', filled_at TEXT, fill_price REAL
+        );
+        INSERT INTO pending_signals (symbol, action, signal_price, created_at, expires_at)
+        VALUES ('SOL-USDT','buy',80.0,'2026-01-01T00:00:00+00:00','2026-01-01T00:30:00+00:00');
+        """
+    )
+    conn.commit(); conn.close()
+    store = Store(db)  # must migrate, not raise
+    row = store.list_pending_signals()[0]
+    assert row["limit_order_id"] is None
+    assert row["limit_price"] is None
+
+
 def test_append_event_and_update_outcome(store):
     eid = store.append_event(
         position_id=None, event_type="buy",

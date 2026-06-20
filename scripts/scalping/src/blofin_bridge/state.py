@@ -63,6 +63,11 @@ class Store:
         tl_cols = {r[1] for r in c.execute("PRAGMA table_info(trade_log)")}
         if tl_cols and "fee_usdt" not in tl_cols:
             c.execute("ALTER TABLE trade_log ADD COLUMN fee_usdt REAL DEFAULT 0")
+        ps_cols = {r[1] for r in c.execute("PRAGMA table_info(pending_signals)")}
+        if ps_cols and "limit_order_id" not in ps_cols:
+            c.execute("ALTER TABLE pending_signals ADD COLUMN limit_order_id TEXT")
+        if ps_cols and "limit_price" not in ps_cols:
+            c.execute("ALTER TABLE pending_signals ADD COLUMN limit_price REAL")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -282,6 +287,26 @@ class Store:
                 "UPDATE pending_signals SET status = 'filled', filled_at = ?, "
                 "fill_price = ? WHERE id = ?",
                 (_now_iso(), fill_price, sig_id),
+            )
+
+    def record_pending_limit(
+        self, sig_id: int, *, order_id: Optional[str], price: Optional[float],
+    ) -> None:
+        """Track the resting EMA9 limit-entry order for a pending signal."""
+        with self._conn() as c:
+            c.execute(
+                "UPDATE pending_signals SET limit_order_id = ?, limit_price = ? "
+                "WHERE id = ?",
+                (order_id, price, sig_id),
+            )
+
+    def clear_pending_limit(self, sig_id: int) -> None:
+        """Forget the resting limit (after cancel/fill)."""
+        with self._conn() as c:
+            c.execute(
+                "UPDATE pending_signals SET limit_order_id = NULL, "
+                "limit_price = NULL WHERE id = ?",
+                (sig_id,),
             )
 
     def expire_pending_signal(self, sig_id: int) -> None:

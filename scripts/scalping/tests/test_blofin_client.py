@@ -167,6 +167,40 @@ def test_place_market_entry_with_attached_sl(mock_ccxt):
     assert params.get("slOrderPrice") == "-1"
 
 
+def test_place_limit_entry_places_limit_with_attached_sl(mock_ccxt):
+    mock_ccxt.create_order.return_value = {"id": "lim-e1"}
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    result = client.place_limit_entry(
+        inst_id="SOL-USDT", side="buy", contracts=12, price=80.0567,
+        safety_sl_trigger=78.0,
+    )
+    assert result["orderId"] == "lim-e1"
+    args, kwargs = mock_ccxt.create_order.call_args
+    assert kwargs["type"] == "limit"
+    assert kwargs["side"] == "buy"
+    assert kwargs["amount"] == 12
+    # price rounded to SOL tick (0.001)
+    assert kwargs["price"] == pytest.approx(80.057)
+    params = kwargs["params"] or {}
+    # entry limit, NOT reduce-only; SL attached as OCO like the market entry
+    assert params.get("reduceOnly") in (None, "false", False)
+    assert params.get("slTriggerPrice") == 78.0
+    assert params.get("slOrderPrice") == "-1"
+    assert params.get("marginMode") == "isolated"
+    assert params.get("positionSide") == "net"
+
+
+def test_place_limit_entry_rejects_nonpositive_price(mock_ccxt):
+    client = BloFinClient(ccxt_client=mock_ccxt)
+    client.load_instruments()
+    with pytest.raises(ValueError, match="price"):
+        client.place_limit_entry(
+            inst_id="SOL-USDT", side="buy", contracts=12, price=0.0,
+            safety_sl_trigger=78.0,
+        )
+
+
 def test_place_sl_order_returns_id(mock_ccxt):
     # ccxt doesn't have a dedicated tpsl method on BloFin; use privatePostTrade... style
     mock_ccxt.private_post_trade_order_tpsl = MagicMock(return_value={

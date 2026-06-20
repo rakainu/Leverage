@@ -85,7 +85,11 @@ CREATE TABLE IF NOT EXISTS pending_signals (
     -- Provenance of the signal: 'ha_v3' (self-generated, V3.2) or 'pro_v3'
     -- (TradingView webhook). Threaded onto the opened position so trades
     -- record their true origin.
-    source       TEXT DEFAULT 'pro_v3'
+    source       TEXT DEFAULT 'pro_v3',
+    -- Resting EMA9 limit-entry order (Plan A retest): the order id currently
+    -- resting at EMA9 for this signal, and its price. NULL when none resting.
+    limit_order_id TEXT,
+    limit_price    REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_pending_status

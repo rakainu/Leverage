@@ -164,6 +164,38 @@ class BloFinClient:
             return None
         return None
 
+    def place_limit_entry(
+        self, *, inst_id: str, side: str, contracts: float, price: float,
+        safety_sl_trigger: float,
+    ) -> dict[str, Any]:
+        """Resting LIMIT entry at `price` with an attached safety SL (OCO).
+
+        Mirrors :meth:`place_market_entry` but rests at a price instead of
+        filling at market — used to capture the engine's EMA9-retest fill: the
+        order sits at EMA9 and fills when price wicks through it intrabar. The
+        SL is attached so it goes live the instant the entry fills.
+        """
+        if price <= 0:
+            raise ValueError(f"refusing to place limit entry at price {price}")
+        try:
+            tick = self._instruments[inst_id]["tickSize"]
+        except KeyError:
+            tick = 0.0
+        if tick > 0:
+            price = round(round(price / tick) * tick, 10)
+        ccxt_sym = _instid_to_ccxt(inst_id)
+        params = {
+            "marginMode": "isolated",
+            "positionSide": "net",
+            "slTriggerPrice": safety_sl_trigger,
+            "slOrderPrice": "-1",            # -1 => market execution of SL
+        }
+        order = self._ccxt.create_order(
+            symbol=ccxt_sym, type="limit", side=side,
+            amount=contracts, price=price, params=params,
+        )
+        return {"orderId": order.get("id"), "price": price}
+
     def place_sl_order(
         self, *, inst_id: str, side: str, trigger_price: float,
         margin_mode: str,

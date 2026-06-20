@@ -2,7 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from blofin_bridge.handlers.entry import handle_entry, _dollar_to_price_distance
+from blofin_bridge.handlers.entry import (
+    handle_entry, finalize_filled_entry, _dollar_to_price_distance,
+)
 from blofin_bridge.state import Store
 
 
@@ -50,6 +52,28 @@ def _entry_kwargs(**overrides):
     )
     defaults.update(overrides)
     return defaults
+
+
+# === finalize_filled_entry (shared post-fill: position row + SL capture + TP) ===
+
+
+def test_finalize_filled_entry_creates_position_captures_sl_places_tp(blofin, store):
+    blofin.list_pending_tpsl.return_value = [
+        {"tpslId": "sl-99", "slTriggerPrice": "78.0"},
+    ]
+    res = finalize_filled_entry(
+        symbol="SOL-USDT", side="long", entry_price=80.0, contracts=12,
+        sl_trigger=78.0, tp_ceiling_price=82.0, store=store, blofin=blofin,
+        margin_usdt=100, leverage=30, sl_policy_name="p2_step_stop", source="ha_v3",
+    )
+    assert res["opened"] is True
+    pos = store.get_open_position("SOL-USDT")
+    assert pos is not None
+    assert pos.side == "long"
+    assert pos.entry_price == pytest.approx(80.0)
+    assert pos.source == "ha_v3"
+    assert pos.sl_order_id == "sl-99"          # captured the attached SL
+    blofin.place_limit_reduce_only.assert_called_once()   # TP ceiling placed
 
 
 # === Dollar-to-price distance tests ===
