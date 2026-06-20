@@ -18,7 +18,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 import pandas as pd
-from engine import load_tv_export, calc_ema, calc_atr, calc_smma
+from engine import calc_ema, calc_atr, calc_smma
+try:                                      # only used by __main__ TV-export modes
+    from engine import load_tv_export
+except ImportError:                       # lost in repo reconcile; not needed for
+    load_tv_export = None                 # the Binance-fed coin-expansion path
 
 DATA_FILE = "BINANCE_ZECUSDT, 5.csv"
 
