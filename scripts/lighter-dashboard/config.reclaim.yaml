@@ -1,0 +1,30 @@
+# Dashboard config for the Reclaim paper bridge (V3.2 honest twin, Lighter zero-fee).
+# Same shared lighter-dashboard image, pointed at the reclaim bridge's DB
+# (/docker/reclaim-bridge/data/reclaim.db, mounted read-only into the container).
+db_path: "data/reclaim.db"
+lighter_host: "https://mainnet.zklighter.elliot.ai"
+initial_collateral_usdc: 3600   # MUST match bridge config.reclaim.yaml connection.initial_collateral_usdc
+title: "Reclaim"
+subtitle: "HA-V3 flip · EMA9 reclaim-retest · 0.05% gap · trail exit · Lighter zero-fee · 7 coins"
+symbols:
+  BTC: 1
+  SOL: 2
+  DOGE: 3
+  XRP: 7
+  HYPE: 24
+  BNB: 25
+  ZEC: 90
+refresh:
+  live_ms: 3000
+  static_ms: 15000
+mark_cache_ttl_s: 2.0
+
+# Edge baselines the dashboard measures live against — Reclaim's OWN validated
+# numbers (entry_v2_search.py), NOT the scalper's. PF 1.27 / WR ~51% (M13 gap0.05).
+bt_wr: 51.0
+bt_pf: 1.27
+protections:
+  - {name: "Reclaim gate", value: "close back across EMA9"}
+  - {name: "Gap filter", value: "skip if > 0.05% from EMA9"}
+  - {name: "Entry filter", value: "slope ≥ 0.15% · no body 0.3-0.5 · no Sun"}
+  - {name: "Sizing", value: "fixed $250 · 30×"}

@@ -1,0 +1,22 @@
+# Traefik dynamic (file-provider) config for the Reclaim dashboard.
+# Container publishes 127.0.0.1:8097 -> :8080. Basic-auth reuses /config/lighter.htpasswd (radk9).
+http:
+  routers:
+    reclaim-dashboard:
+      rule: "Host(`reclaim.agentneo.cloud`)"
+      entryPoints:
+        - websecure
+      service: reclaim-dashboard
+      middlewares:
+        - reclaim-auth
+      tls:
+        certResolver: letsencrypt
+  services:
+    reclaim-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8097"
+  middlewares:
+    reclaim-auth:
+      basicAuth:
+        usersFile: "/config/lighter.htpasswd"

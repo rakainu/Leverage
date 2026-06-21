@@ -93,7 +93,7 @@ class Bridge:
 
     async def start(self):
         log.info("=" * 70)
-        log.info("LIGHTER PAPER BRIDGE — Pro V3 locked config")
+        log.info("RECLAIM PAPER BRIDGE — HA-V3 flip · EMA9 reclaim-retest · 0.05pct gap · trail exit")
         log.info("=" * 70)
         log.info("Host: %s", self.cfg.host)
         log.info("Paper collateral: $%.0f", self.cfg.initial_collateral_usdc)
