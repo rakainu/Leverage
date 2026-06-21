@@ -8,7 +8,7 @@ Per symbol:
     + slope gate + entry filters; if all pass, fire entry via PaperExecutor
   - State machine ticks every 5s while a position is open
 
-Logs both fills and signals to SQLite (data/lighter_paper.db).
+Logs both fills and signals to SQLite (data/reclaim.db).
 """
 from __future__ import annotations
 
@@ -167,7 +167,7 @@ class Bridge:
             self.pending[name] = []
         if not enabled:
             try:
-                await notify.notify_error("Scalper startup aborted: no market order books came up")
+                await notify.notify_error("Reclaim startup aborted: no market order books came up")
             except Exception:
                 pass
             raise RuntimeError("no markets subscribed — cannot run")
@@ -1037,8 +1037,8 @@ class Bridge:
     async def on_status(self) -> str:
         """Telegram /status callback — per-symbol entry switch + position state."""
         if self.executor is None:
-            return "Scalper starting up…"
-        lines = ["📋 <b>Scalper status</b>"]
+            return "Reclaim starting up…"
+        lines = ["📋 <b>Reclaim status</b>"]
         if self._cooldown_active():
             mins = int((self._cd_until - time.time()) / 60) + 1
             lines.append(f"🧊 COOLDOWN active \u2014 entries blocked ~{mins}m more")

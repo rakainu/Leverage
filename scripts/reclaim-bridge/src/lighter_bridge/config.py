@@ -148,7 +148,7 @@ class LoopConfig:
 @dataclass
 class LogConfig:
     level: str = "INFO"
-    db_path: str = "data/lighter_paper.db"
+    db_path: str = "data/reclaim.db"
 
 
 @dataclass
@@ -167,7 +167,7 @@ class NotifyConfig:
 class ControlConfig:
     """Inbound Telegram control listener (per-ticker entry switch).
     Off by default so other bridges sharing this code are unaffected; the
-    Scalper config opts in. Authorizes against TELEGRAM_CHAT_ID (env)."""
+    Reclaim config opts in. Authorizes against TELEGRAM_CHAT_ID (env)."""
     telegram_enabled: bool = False
 
 

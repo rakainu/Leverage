@@ -150,7 +150,7 @@ async def notify_startup(cfg, restored: Optional[list] = None) -> None:
     """Bridge-came-up alert. If `restored` is provided, list the rehydrated positions."""
     _exit_model = getattr(cfg, "exit_model", "trail")
     lines = [
-        "🟢 <b>Scalper UP</b>" if _exit_model == "regime" else "🟢 <b>Bridge UP</b>",
+        f"🟢 <b>{SENDER_TAG.title()} UP</b>",
         f"Host: <code>{_esc(cfg.host)}</code>",
         f"Paper collateral: ${cfg.initial_collateral_usdc:,.0f}",
         f"Symbols: {', '.join(cfg.symbols.keys())}",

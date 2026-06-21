@@ -1,4 +1,4 @@
-"""Telegram control listener for the Scalper bridge.
+"""Telegram control listener for the Reclaim bridge.
 
 Inbound counterpart to notify.py (which is send-only). Lets Rich flip per-ticker
 entry switches from his phone:
@@ -10,7 +10,7 @@ entry switches from his phone:
     /help        command list
 
 Design:
-  - Long-polls getUpdates with offset tracking on the EXISTING Scalper bot token.
+  - Long-polls getUpdates with offset tracking on the EXISTING bridge bot token.
   - Authorized to ONE chat id (TELEGRAM_CHAT_ID) — every other sender is ignored.
   - Resilient: any network/parse error is caught, logged, backed off; the loop
     never crashes the bridge.
@@ -182,7 +182,7 @@ class TelegramControl:
                 await self._reply(await self.on_status())
             elif cmd.action == "help":
                 await self._reply(
-                    "Scalper control:\n"
+                    "Reclaim control:\n"
                     "/kill — STOP ALL: close every open position + block all entries\n"
                     "/off SYM|ALL — block new entries (open trade still managed)\n"
                     "/on SYM|ALL — re-enable entries\n"
