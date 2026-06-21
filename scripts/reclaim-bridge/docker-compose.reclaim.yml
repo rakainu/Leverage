@@ -1,0 +1,33 @@
+# Reclaim PAPER bridge — the V3.2 "closest honest twin" on Lighter (zero-fee).
+# HA-V3 flip -> EMA9 reclaim-retest + 0.05% gap filter, both sides, fixed $250/30x,
+# V3.2 trail exit. Own image, own DB (data/reclaim.db), own container, own Telegram
+# bot ("Reclaim"). No inbound port (native signals, no webhook). The existing BloFin
+# scalping-v3.2 and the Lighter scalper-bridge are UNTOUCHED.
+#
+# Deploy:  docker compose -f docker-compose.reclaim.yml up -d --build
+services:
+  reclaim-bridge:
+    build: .
+    image: reclaim-bridge:latest
+    container_name: reclaim-bridge
+    restart: unless-stopped
+    env_file:
+      - .env                         # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (Reclaim bot)
+    environment:
+      TELEGRAM_SENDER_TAG: "RECLAIM"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./config.reclaim.yaml:/app/config.reclaim.yaml:ro
+    command: ["python", "-u", "run_bridge.py", "--config", "config.reclaim.yaml"]
+    healthcheck:
+      test: ["CMD-SHELL", "find /app/data/reclaim.db /app/data/reclaim.db-wal -mmin -15 -type f 2>/dev/null | grep -q . || exit 1"]
+      interval: 5m
+      timeout: 15s
+      start_period: 3m
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
