@@ -191,27 +191,26 @@ td{font-family:var(--mono);font-size:14px;padding:8px 9px;border-bottom:1px soli
     </section>
   </div>
 
-  <div class="grid row2" style="margin-bottom:11px">
-    <section class="panel">
-      <div class="label">Exit mix</div>
-      <div id="exitmix"></div>
-    </section>
-    <section class="panel feed">
-      <div class="label">Signal feed — last 12h</div>
+  <div class="grid row2" style="align-items:start">
+    <div class="grid" style="gap:11px">
+      <section class="panel">
+        <div class="label">Exit mix</div>
+        <div id="exitmix"></div>
+      </section>
+      <section class="panel">
+        <div class="label">Profit withdrawals — skim above target</div>
+        <div class="kchip" id="withdrawals"></div>
+        <div class="note" id="wdnote"></div>
+      </section>
+      <section class="panel">
+        <div class="label">Fill quality — does the maker edge hold?</div>
+        <div class="kchip" id="fillq"></div>
+        <div class="note" id="fqnote"></div>
+      </section>
+    </div>
+    <section class="panel feed" style="height:100%">
+      <div class="label">Signal feed — last 10</div>
       <div id="feed"></div>
-    </section>
-  </div>
-
-  <div class="grid row2">
-    <section class="panel">
-      <div class="label">Profit withdrawals — skim above target</div>
-      <div class="kchip" id="withdrawals"></div>
-      <div class="note" id="wdnote"></div>
-    </section>
-    <section class="panel">
-      <div class="label">Fill quality — does the maker edge hold?</div>
-      <div class="kchip" id="fillq"></div>
-      <div class="note" id="fqnote"></div>
     </section>
   </div>
 
@@ -347,7 +346,7 @@ function render(s){
     <span class="sa a-${p.outcome}">${(p.outcome||'').toUpperCase()}</span>
     <span class="sp">${p.symbol} ${p.side}${p.slope!==null&&p.slope!==undefined?' @ slope '+p.slope.toFixed(2):''}</span>
     <span class="st">${p.time}</span></div>`).join('')
-    :'<div class="empty">no signals in the last 12h</div>';
+    :'<div class="empty">no recent signals</div>';
 
   // withdrawals
   const w=s.withdrawals;

@@ -256,7 +256,7 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
         sigs = [{"symbol": s["symbol"].replace("-USDT", ""), "side": s["side"],
                  "outcome": s["outcome"], "slope": s.get("slope_pct"),
                  "time": _fmt_hm(s.get("detected_at"))}
-                for s in db.signals(limit=16, since_iso=cutoff)]
+                for s in db.signals(limit=10, since_iso=cutoff)]
 
         recent = [{"symbol": t["symbol"].replace("-USDT", ""), "side": t["side"],
                    "exit_reason": t["exit_reason"], "pnl": t["pnl_usdt"],
