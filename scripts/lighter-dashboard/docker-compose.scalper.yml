@@ -9,8 +9,8 @@ services:
     restart: unless-stopped
     volumes:
       - /docker/scalper-paper/data:/app/data   # read-only enforced via PRAGMA query_only
-      - ./src:/app/src
-      - ./templates:/app/templates
+      - /docker/scalper-dashboard/src:/app/src              # own copy — isolated from other dashboards
+      - /docker/scalper-dashboard/templates:/app/templates
       - ./config.scalper.yaml:/app/config.scalper.yaml:ro
     command: ["python", "-u", "run_dashboard.py", "--config", "config.scalper.yaml", "--host", "0.0.0.0", "--port", "8080"]
     ports:

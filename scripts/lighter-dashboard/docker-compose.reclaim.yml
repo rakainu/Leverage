@@ -8,8 +8,8 @@ services:
     restart: unless-stopped
     volumes:
       - /docker/reclaim-bridge/data:/app/data   # read-only enforced via PRAGMA query_only
-      - ./src:/app/src
-      - ./templates:/app/templates
+      - /docker/reclaim-dashboard/src:/app/src              # own copy — isolated from other dashboards
+      - /docker/reclaim-dashboard/templates:/app/templates
       - ./config.reclaim.yaml:/app/config.reclaim.yaml:ro
     command: ["python","-u","run_dashboard.py","--config","config.reclaim.yaml","--host","0.0.0.0","--port","8080"]
     ports:
