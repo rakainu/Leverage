@@ -261,7 +261,7 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
         recent = [{"symbol": t["symbol"].replace("-USDT", ""), "side": t["side"],
                    "exit_reason": t["exit_reason"], "pnl": t["pnl_usdt"],
                    "closed": _fmt_close(t.get("closed_at"))}
-                  for t in db.closed_trades(limit=12)]
+                  for t in db.closed_trades(limit=15)]
 
         pos = [{"symbol": p["symbol"].replace("-USDT", ""), "side": p["side"],
                 "upnl": p["upnl"], "entry": p["entry_price"], "mark": p["mark"],
