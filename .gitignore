@@ -65,3 +65,7 @@ _local_backups/
 v32_*.png
 .playwright-mcp/
 scripts/scalping/v3.2-dashboard/*.db
+
+# Data (large binaries — fetched/cached, never commit)
+*.parquet
+data_hist/
