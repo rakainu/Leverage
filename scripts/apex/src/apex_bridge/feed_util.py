@@ -4,8 +4,10 @@ Rate-limiting is now centralized in the shared lighter-gateway (one caching,
 rate-capped egress per VPS; see scripts/marketdata) — bridges point connection.host
 at it, so the box makes at most one upstream Lighter call per coin per TTL window.
 These per-bridge backoffs remain as a SAFETY NET for the degraded path where the
-gateway is unreachable and the bridge falls back to Lighter directly: WAF/captcha
-challenges get a long exponential backoff, ordinary transient errors a short one.
+gateway is briefly unreachable: the bridge backs off and retries against the gateway
+(which `restart: always` recovers within seconds). There is NO direct-to-Lighter
+fallback — the gateway is the sole egress. WAF/captcha challenges still get a long
+exponential backoff, ordinary transient errors a short one.
 """
 from __future__ import annotations
 
