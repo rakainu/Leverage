@@ -1,0 +1,7 @@
+lighter-sdk>=1.0.9
+pandas>=2.0
+numpy>=1.24
+pyyaml>=6.0
+aiohttp>=3.9
+fastapi>=0.110        # webhook signal source (signal_source: webhook)
+uvicorn>=0.29

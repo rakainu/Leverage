@@ -1,0 +1,88 @@
+# Reclaim — the V3.2 "closest honest twin" PAPER bridge (Lighter zero-fee).
+#
+# Native signals (no webhooks): the bridge computes the HA-V3 momentum-flip
+# signal on its own 5m candle feed, waits for price to pull back and RECLAIM
+# the EMA9 (M13), and only enters when the reclaim close sits within max_gap_pct
+# of EMA9 — the causal "honest twin" of the engine's non-causal ema[i] phantom
+# fill. Both sides, fixed $250 margin @ 30x, V3.2 trail-ladder exit.
+#
+# Validated: scripts/scalping/v3.2-analysis/entry_v2_search.py
+#   zero-fee 90d 7-coin basket — PF 1.27, OOS-stable (IS 1.28 / OOS 1.27),
+#   maxDD -$292, sharp gap-cliff at 0.06% (edge inverts past it), 30x = the
+#   leverage knee. Bar-magnifier (1m ground-truth): 5m-avg +$302 -> 1m-avg +$437
+#   (PF 1.44) -> 1m pessimistic +$581 (PF 1.59) — the edge STRENGTHENS at true
+#   intrabar resolution. BloFin fees kill it; this is a Lighter-only strategy.
+#
+# Deploy:  docker compose -f docker-compose.reclaim.yml up -d --build
+# Separate DB (reclaim.db) + container + Telegram bot ("Reclaim") from all other
+# bridges. The existing BloFin scalping-v3.2 is UNTOUCHED.
+
+connection:
+  host: "https://mainnet.zklighter.elliot.ai"
+  initial_collateral_usdc: 3600        # 7 coins x $250 margin = $1,750 max if all open + buffer
+
+signal_source: replica                 # native HA-V3 flip -> EMA9 reclaim-retest
+exit_model: trail                      # V3.2 trail ladder (state_machine.step)
+
+# 7-coin basket — all confirmed listed on Lighter (market_ids verified live
+# 2026-06-20). FIXED $250 margin @ 30x = $7,500 notional each (the exact unit the
+# PF 1.27 result is built on). NO cuts: BTC/ZEC/DOGE drag in the 45d sample but
+# have mean-reverted before; per-coin question is settled live, not on n=3.
+symbols:
+  BTC:  { market_id: 1,  enabled: true, margin_usdt: 250, leverage: 30 }
+  SOL:  { market_id: 2,  enabled: true, margin_usdt: 250, leverage: 30 }
+  DOGE: { market_id: 3,  enabled: true, margin_usdt: 250, leverage: 30 }
+  XRP:  { market_id: 7,  enabled: true, margin_usdt: 250, leverage: 30 }
+  HYPE: { market_id: 24, enabled: true, margin_usdt: 250, leverage: 30 }
+  BNB:  { market_id: 25, enabled: true, margin_usdt: 250, leverage: 30 }
+  ZEC:  { market_id: 90, enabled: true, margin_usdt: 250, leverage: 30 }
+
+pine:                                  # HA-V3 signal params (byte-identical to engine)
+  sensitivity: 8
+  noise: 0.0
+  fakeout: 0.2
+  range_filter: 0.2
+
+entry:
+  timeframe: "5m"
+  ema_period: 9
+  slope_lookback_bars: 3
+  retest_overshoot_pct: 0.2            # wick may break EMA9 by <=0.2% and still count
+  retest_timeout_bars: 6              # pending dies if no reclaim within 6 bars
+  require_retest: true
+  require_reclaim: true                # M13 — bar must CLOSE BACK across EMA9 (bounce)
+  max_gap_pct: 0.05                    # the validated knee: skip if |close-ema9|/ema9 > 0.05%
+  min_abs_slope_pct: 0.15             # F_LIVE
+  block_body_band: [0.3, 0.5]         # F_LIVE — block the chop body band
+  block_weekdays: [6]                 # F_LIVE — no Sunday
+
+exits:                                 # V3.2 trail ladder (TrailParams @ margin 250 / 30x)
+  sl_loss_usdt: 82.5
+  breakeven_usdt: 30.0
+  lock_profit_activate_usdt: 45.0
+  lock_profit_usdt: 37.5
+  trail_activate_usdt: 75.0
+  trail_start_usdt: 80.0
+  trail_distance_usdt: 37.5
+  tp_ceiling_pct: 2.0                  # hard TP at 2x margin = $500
+
+sizing:
+  mode: fixed                          # fixed $250/coin — matches the validated unit exactly
+
+notify:
+  startup: true
+  open: true
+  close: true
+  daily: true
+
+control:
+  telegram_enabled: true               # /off /on /close /status /kill per-ticker control
+
+loop:
+  bar_poll_interval_s: 30
+  position_check_interval_s: 5
+  mark_poll_interval_s: 3
+
+log:
+  level: INFO
+  db_path: data/reclaim.db
