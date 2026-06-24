@@ -5,7 +5,7 @@
 # Live signal module (lighter_bridge/rebound.py) is parity-proven bar-for-bar vs the
 # backtest. Replaces the sunset Booster (regime_mr clone) on this paper book.
 connection:
-  host: "https://mainnet.zklighter.elliot.ai"
+  host: "http://lighter-gateway:8060"   # via shared lighter-gateway (scripts/marketdata); was https://mainnet.zklighter.elliot.ai
   initial_collateral_usdc: 3000        # realistic starting capital
 
 execution:

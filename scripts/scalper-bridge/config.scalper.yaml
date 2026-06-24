@@ -9,7 +9,7 @@
 # Separate DB (scalper.db) + container + Telegram bot ("Scalper") from other bridges.
 
 connection:
-  host: "https://mainnet.zklighter.elliot.ai"
+  host: "http://lighter-gateway:8060"   # via shared lighter-gateway (scripts/marketdata); was https://mainnet.zklighter.elliot.ai
   initial_collateral_usdc: 3600        # 6 coins x $500 margin ($3000 notional) + 20% buffer
 
 signal_source: regime                  # native regime_mr signal computation

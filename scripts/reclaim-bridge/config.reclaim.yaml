@@ -18,7 +18,7 @@
 # bridges. The existing BloFin scalping-v3.2 is UNTOUCHED.
 
 connection:
-  host: "https://mainnet.zklighter.elliot.ai"
+  host: "http://lighter-gateway:8060"   # via shared lighter-gateway (scripts/marketdata); was https://mainnet.zklighter.elliot.ai
   initial_collateral_usdc: 3600        # 7 coins x $250 margin = $1,750 max if all open + buffer
 
 signal_source: replica                 # native HA-V3 flip -> EMA9 reclaim-retest

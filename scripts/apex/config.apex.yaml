@@ -5,7 +5,7 @@
 # Deploy:  docker compose -f docker-compose.apex.yml up -d --build
 
 connection:
-  host: "https://mainnet.zklighter.elliot.ai"
+  host: "http://lighter-gateway:8060"   # via shared lighter-gateway (scripts/marketdata); was https://mainnet.zklighter.elliot.ai
   initial_collateral_usdc: 3000
 
 signal_source: webhook        # SMRT Pro V3 alert -> /webhook/apex
