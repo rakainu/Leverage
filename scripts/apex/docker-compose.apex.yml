@@ -1,0 +1,39 @@
+# Apex PAPER bridge — SMRT Pro V3 webhook -> EMA9 retest -> 3-stage trail, on Lighter.
+# Own image, DB (data/apex.db), container, Telegram bot (@apexbot). Webhook at
+# apex.agentneo.cloud/webhook/apex. Isolated from every other bridge.
+#
+# Deploy:  docker compose -f docker-compose.apex.yml up -d --build
+services:
+  apex-bridge:
+    build: .
+    image: apex-bridge:latest
+    container_name: apex-bridge
+    restart: unless-stopped
+    env_file:
+      - .env                         # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (@apexbot), BRIDGE_SECRET
+    environment:
+      TELEGRAM_SENDER_TAG: "APEX"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./config.apex.yaml:/app/config.apex.yaml:ro
+    command: ["python", "-u", "run_bridge.py", "--config", "config.apex.yaml"]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.apex.rule=Host(`apex.agentneo.cloud`)"
+      - "traefik.http.routers.apex.entrypoints=websecure"
+      - "traefik.http.routers.apex.tls.certresolver=le"
+      - "traefik.http.services.apex.loadbalancer.server.port=8080"
+    healthcheck:
+      test: ["CMD-SHELL", "find /app/data/apex.db /app/data/apex.db-wal -mmin -15 -type f 2>/dev/null | grep -q . || exit 1"]
+      interval: 5m
+      timeout: 15s
+      start_period: 3m
+      retries: 3
+    networks:
+      - default
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -13,7 +13,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the app. Config is bind-mounted at runtime (config.squeeze.yaml), not baked in.
+# Copy the app. Config is bind-mounted at runtime via compose, not baked in.
 COPY src/ ./src/
 COPY run_bridge.py ./
 
@@ -31,6 +31,6 @@ ENV PYTHONUNBUFFERED=1 \
 # main .db mtime only advances on checkpoint, so we accept either file
 # being fresh. The 5-min heartbeat snapshot guarantees a write < 10 min.
 HEALTHCHECK --interval=5m --timeout=15s --start-period=2m --retries=3 \
-    CMD find /app/data/reclaim.db /app/data/reclaim.db-wal -mmin -10 -type f 2>/dev/null | grep -q . || exit 1
+    CMD find /app/data/apex.db /app/data/apex.db-wal -mmin -10 -type f 2>/dev/null | grep -q . || exit 1
 
 CMD ["python", "-u", "run_bridge.py", "--config", "config.yaml"]
