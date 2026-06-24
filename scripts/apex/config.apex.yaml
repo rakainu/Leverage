@@ -1,0 +1,77 @@
+# Apex — Rich's personal V3 on Lighter (zero-fee). PAPER.
+# SMRT Pro V3 TV alert -> 9 EMA (5m) retest -> 3-stage trail exit.
+# Standalone: own package (apex_bridge), DB (apex.db), container, bot (@apexbot).
+#
+# Deploy:  docker compose -f docker-compose.apex.yml up -d --build
+
+connection:
+  host: "https://mainnet.zklighter.elliot.ai"
+  initial_collateral_usdc: 3000
+
+signal_source: webhook        # SMRT Pro V3 alert -> /webhook/apex
+exit_model: trail             # 3-stage state_machine.step
+
+# HYPE / SOL / ZEC — market_ids verified live 2026-06-20. Fixed $250 @ 30x = $7,500 notional.
+symbols:
+  SOL:  { market_id: 2,  enabled: true, margin_usdt: 250, leverage: 30 }
+  HYPE: { market_id: 24, enabled: true, margin_usdt: 250, leverage: 30 }
+  ZEC:  { market_id: 90, enabled: true, margin_usdt: 250, leverage: 30 }
+
+pine:                         # SMRT Pro V3 / HA-V3 params (used to enrich bars; entry comes from webhook)
+  sensitivity: 8
+  noise: 0.0
+  fakeout: 0.2
+  range_filter: 0.2
+
+entry:
+  timeframe: "5m"
+  ema_period: 9
+  slope_lookback_bars: 3
+  retest_overshoot_pct: 0.2   # wick may break EMA9 by <=0.2% and still count as a retest
+  retest_timeout_bars: 6      # pending dies if no retest within 6 bars
+  require_retest: true        # V3.1 plain retest
+  require_reclaim: false      # NOT the V3.2 reclaim close-back
+  max_gap_pct: 0.0            # no gap filter
+  min_abs_slope_pct: 0.15     # slope gate (the proven V3.1 value)
+  block_body_band: [0.3, 0.5] # ATR body-band chop filter ON
+  block_weekdays: []          # Apex trades Sundays
+
+exits:                        # 3-stage ladder ($250 margin @ 30x)
+  sl_loss_usdt: 30.0          # initial hard stop -$30
+  breakeven_usdt: 20.0        # at +$20 -> SL to entry
+  trail_activate_usdt: 35.0   # at +$35 -> lock +$20 and start trailing
+  trail_distance_usdt: 15.0   # trail $15 behind the favorable extreme
+  tp_ceiling_pct: 2.0         # hard TP cap = 2x margin = $500 (near-never safety)
+
+sizing:
+  mode: fixed                 # fixed $250/coin
+
+cooldown:
+  enabled: true               # 3-loss breaker
+  consec_losses: 3
+  minutes: 60                 # block all entries 60 min, then auto-resume
+
+control:
+  telegram_enabled: true      # @apexbot /off /on /close /status + kill-all
+
+webhook:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  path: "/webhook/apex"
+  # secret comes from BRIDGE_SECRET env (never commit it)
+
+notify:
+  startup: true
+  open: true
+  close: true
+  daily: true
+
+loop:
+  bar_poll_interval_s: 30
+  position_check_interval_s: 5
+  mark_poll_interval_s: 3
+
+log:
+  level: INFO
+  db_path: data/apex.db

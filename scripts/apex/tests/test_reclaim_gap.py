@@ -109,7 +109,7 @@ def test_short_clean_reclaim_fires():
 def test_config_loads_reclaim_fields():
     from pathlib import Path
     from apex_bridge.config import load_config
-    cfg = load_config(Path(__file__).resolve().parents[1] / "config.reclaim.yaml")
+    cfg = load_config(Path(__file__).resolve().parent / "fixtures" / "reclaim_gap_config.yaml")
     assert cfg.entry.require_reclaim is True
     assert cfg.entry.max_gap_pct == 0.05
     assert cfg.entry.min_abs_slope_pct == 0.15
