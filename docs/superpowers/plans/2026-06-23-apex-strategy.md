@@ -45,7 +45,6 @@ cp -r scripts/reclaim-bridge/. scripts/apex/
 rm -rf scripts/apex/data scripts/apex/.env scripts/apex/__pycache__
 find scripts/apex -name '__pycache__' -type d -prune -exec rm -rf {} +
 rm -f scripts/apex/config.reclaim.yaml scripts/apex/docker-compose.reclaim.yml
-git -C scripts/apex rev-parse 2>/dev/null && echo "WARN nested repo" || true
 ```
 
 - [ ] **Step 2: Rename the package directory**
@@ -93,18 +92,51 @@ git commit -m "feat(apex): scaffold standalone bridge as apex_bridge (copy of Re
 
 ---
 
-### Task 2: Simplify the exit state machine to Rich's 3 stages
+### Task 2: Simplify the exit ladder to 3 stages (state machine + ExitConfig together)
+
+These two changes are atomic: the 3-state machine reads a trimmed `ExitConfig`, and trimming `ExitConfig` would break the old 4-state code. Do them in one task so the suite ends green.
 
 **Files:**
-- Modify: `scripts/apex/src/apex_bridge/state_machine.py`
+- Modify: `scripts/apex/src/apex_bridge/state_machine.py` (rewrite to 3 states)
+- Modify: `scripts/apex/src/apex_bridge/config.py` (trim `ExitConfig` to 5 fields)
+- Modify: `scripts/apex/src/apex_bridge/main.py` (startup log line that prints removed fields)
 - Create: `scripts/apex/tests/test_state_machine.py`
 
 **Interfaces:**
 - Consumes: `OpenPosition` (from `executor.py`) with fields `side` ("long"|"short"), `entry_price`, `sl_price`, `state` (int), `trail_high`, `max_state`, `base_amount`, `notional`, `margin_usdt`, `symbol`.
-- Consumes: `ExitConfig` with fields `sl_loss_usdt`, `breakeven_usdt`, `trail_activate_usdt`, `trail_distance_usdt`, `tp_ceiling_pct` (Task 3 trims it to exactly these).
-- Produces: `step(pos, mark_price, cfg) -> StateMachineDecision` (unchanged signature, mutates `pos`). States: `0=initial`, `1=breakeven`, `2=trailing`.
+- Produces: `ExitConfig(sl_loss_usdt, breakeven_usdt, trail_activate_usdt, trail_distance_usdt, tp_ceiling_pct)` — exactly five float fields. The yaml `exits:` block must contain exactly these five keys (the loader does `ExitConfig(**{k: float(v) for k, v in raw["exits"].items()})`, so any extra key raises `TypeError`).
+- Produces: `step(pos, mark_price, cfg) -> StateMachineDecision` (signature unchanged, mutates `pos`). States: `0=initial`, `1=breakeven`, `2=trailing`. `initial_sl(pos, cfg) -> float` unchanged signature.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Trim the `ExitConfig` dataclass**
+
+In `scripts/apex/src/apex_bridge/config.py`, replace the `ExitConfig` definition:
+
+```python
+@dataclass
+class ExitConfig:
+    sl_loss_usdt: float
+    breakeven_usdt: float
+    lock_profit_activate_usdt: float
+    lock_profit_usdt: float
+    trail_activate_usdt: float
+    trail_start_usdt: float
+    trail_distance_usdt: float
+    tp_ceiling_pct: float
+```
+
+with:
+
+```python
+@dataclass
+class ExitConfig:
+    sl_loss_usdt: float
+    breakeven_usdt: float
+    trail_activate_usdt: float
+    trail_distance_usdt: float
+    tp_ceiling_pct: float
+```
+
+- [ ] **Step 2: Write the failing tests**
 
 Create `scripts/apex/tests/test_state_machine.py`:
 
@@ -218,15 +250,15 @@ def test_short_symmetry_at_35():
     assert pos.sl_price == pytest.approx(_price_for_pnl(pos, 20.0), abs=1e-4)
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 3: Run the tests to verify they fail**
 
 Run:
 ```bash
 cd scripts/apex && python -m pytest tests/test_state_machine.py -q
 ```
-Expected: FAIL — current `step()` uses the 4-state ladder and reads `lock_profit_*` / `trail_start_*` fields the new `ExitConfig` (Task 3) will not have. (Before Task 3, expect failures/errors; that is fine — this task rewrites `step` to the 3-state form.)
+Expected: FAIL — the copied `step()` still uses the 4-state ladder and reads the now-removed `lock_profit_*` / `trail_start_*` fields, so it raises `AttributeError` on the trimmed `ExitConfig`.
 
-- [ ] **Step 3: Rewrite `state_machine.py` to 3 states**
+- [ ] **Step 4: Rewrite `state_machine.py` to 3 states**
 
 Replace the body of `scripts/apex/src/apex_bridge/state_machine.py` with:
 
@@ -340,136 +372,7 @@ def step(pos: OpenPosition, mark_price: float, cfg: ExitConfig) -> StateMachineD
     return StateMachineDecision(close=False)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
-
-Run:
-```bash
-cd scripts/apex && python -m pytest tests/test_state_machine.py -q
-```
-Expected: PASS (8 tests). If `ExitConfig(...)` raises `TypeError` for unexpected/missing kwargs, do Task 3 first, then re-run.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add scripts/apex/src/apex_bridge/state_machine.py scripts/apex/tests/test_state_machine.py
-git commit -m "feat(apex): collapse exit ladder to 3 stages (SL/-30 -> BE/+20 -> trail @+35 lock +20, $15)"
-```
-
----
-
-### Task 3: Trim `ExitConfig` to the 3-stage fields and fix every reference
-
-**Files:**
-- Modify: `scripts/apex/src/apex_bridge/config.py`
-- Modify: `scripts/apex/src/apex_bridge/main.py` (startup log line that prints removed fields)
-- Create: `scripts/apex/tests/test_config_exit.py`
-
-**Interfaces:**
-- Produces: `ExitConfig(sl_loss_usdt, breakeven_usdt, trail_activate_usdt, trail_distance_usdt, tp_ceiling_pct)` — exactly five float fields. The yaml `exits:` block must contain exactly these five keys (the loader does `ExitConfig(**{k: float(v) for k, v in raw["exits"].items()})`, so any extra key raises `TypeError`).
-
-- [ ] **Step 1: Write the failing test**
-
-Create `scripts/apex/tests/test_config_exit.py`:
-
-```python
-import textwrap
-from apex_bridge.config import load_config
-
-
-APEX_YAML = textwrap.dedent("""
-connection: {host: "https://example", initial_collateral_usdc: 3000}
-signal_source: webhook
-exit_model: trail
-symbols:
-  SOL: {market_id: 2, enabled: true, margin_usdt: 250, leverage: 30}
-pine: {sensitivity: 8, noise: 0.0, fakeout: 0.2, range_filter: 0.2}
-entry:
-  timeframe: "5m"
-  ema_period: 9
-  slope_lookback_bars: 3
-  retest_overshoot_pct: 0.2
-  retest_timeout_bars: 6
-  require_retest: true
-  require_reclaim: false
-  max_gap_pct: 0.0
-  min_abs_slope_pct: 0.15
-  block_body_band: [0.3, 0.5]
-  block_weekdays: []
-exits:
-  sl_loss_usdt: 30.0
-  breakeven_usdt: 20.0
-  trail_activate_usdt: 35.0
-  trail_distance_usdt: 15.0
-  tp_ceiling_pct: 2.0
-webhook: {enabled: true, path: "/webhook/apex", port: 8080}
-control: {telegram_enabled: true}
-cooldown: {enabled: true, consec_losses: 3, minutes: 60}
-sizing: {mode: fixed}
-log: {level: INFO, db_path: data/apex.db}
-""")
-
-
-def test_apex_exit_config_has_exactly_three_stage_fields(tmp_path):
-    p = tmp_path / "config.apex.yaml"
-    p.write_text(APEX_YAML)
-    cfg = load_config(p)
-    e = cfg.exits
-    assert (e.sl_loss_usdt, e.breakeven_usdt, e.trail_activate_usdt,
-            e.trail_distance_usdt, e.tp_ceiling_pct) == (30.0, 20.0, 35.0, 15.0, 2.0)
-    assert not hasattr(e, "lock_profit_usdt")
-
-
-def test_apex_entry_and_cooldown_loaded(tmp_path):
-    p = tmp_path / "config.apex.yaml"
-    p.write_text(APEX_YAML)
-    cfg = load_config(p)
-    assert cfg.signal_source == "webhook"
-    assert cfg.entry.require_reclaim is False
-    assert cfg.entry.min_abs_slope_pct == 0.15
-    assert cfg.entry.block_body_band == (0.3, 0.5)
-    assert cfg.entry.block_weekdays == []
-    assert cfg.cooldown.enabled and cfg.cooldown.consec_losses == 3 and cfg.cooldown.minutes == 60
-    assert cfg.control.telegram_enabled is True
-```
-
-- [ ] **Step 2: Run to verify failure**
-
-Run:
-```bash
-cd scripts/apex && python -m pytest tests/test_config_exit.py -q
-```
-Expected: FAIL — the copied `ExitConfig` still declares `lock_profit_activate_usdt`, `lock_profit_usdt`, `trail_start_usdt`, so the 5-key yaml raises `TypeError: __init__() missing ... required positional arguments`.
-
-- [ ] **Step 3: Trim the `ExitConfig` dataclass**
-
-In `scripts/apex/src/apex_bridge/config.py`, replace the `ExitConfig` definition:
-
-```python
-@dataclass
-class ExitConfig:
-    sl_loss_usdt: float
-    breakeven_usdt: float
-    lock_profit_activate_usdt: float
-    lock_profit_usdt: float
-    trail_activate_usdt: float
-    trail_start_usdt: float
-    trail_distance_usdt: float
-    tp_ceiling_pct: float
-```
-
-with:
-
-```python
-@dataclass
-class ExitConfig:
-    sl_loss_usdt: float
-    breakeven_usdt: float
-    trail_activate_usdt: float
-    trail_distance_usdt: float
-    tp_ceiling_pct: float
-```
-
-- [ ] **Step 4: Fix the startup log that prints removed fields**
+- [ ] **Step 5: Fix the startup log that prints removed fields**
 
 In `scripts/apex/src/apex_bridge/main.py`, find the trail-exit startup log (the `else:` branch around the bridge banner that prints `lock_act=$%.0f`):
 
@@ -489,160 +392,39 @@ replace with:
                      self.cfg.exits.tp_ceiling_pct)
 ```
 
-- [ ] **Step 5: Confirm no other references to the removed fields**
+- [ ] **Step 6: Confirm no other references to the removed fields**
 
 Run:
 ```bash
 grep -rn "lock_profit\|trail_start_usdt" scripts/apex/src
 ```
-Expected: NO matches. If any remain, remove/replace them (they belong to the old 4-state ladder, which Task 2 deleted).
+Expected: NO matches. If any remain, remove/replace them (they belong to the old 4-state ladder, now deleted).
 
-- [ ] **Step 6: Run the full suite**
+- [ ] **Step 7: Run the state-machine tests, then the full suite**
 
 Run:
 ```bash
-cd scripts/apex && python -m pytest -q
+cd scripts/apex && python -m pytest tests/test_state_machine.py -q && python -m pytest -q
 ```
-Expected: PASS (config, state machine, and the inherited tests). Reclaim's `test_reclaim_gap.py` exercises the reclaim ENTRY path (still present, just unused by Apex's config) and should still pass.
+Expected: state-machine tests PASS (8), then the whole suite PASS. Reclaim's `test_reclaim_gap.py` exercises the reclaim ENTRY path (still present, just unused by Apex's config) and should still pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add scripts/apex/src/apex_bridge/config.py scripts/apex/src/apex_bridge/main.py scripts/apex/tests/test_config_exit.py
-git commit -m "feat(apex): trim ExitConfig to 3-stage fields + fix startup log"
+git add scripts/apex/src/apex_bridge/state_machine.py scripts/apex/src/apex_bridge/config.py scripts/apex/src/apex_bridge/main.py scripts/apex/tests/test_state_machine.py
+git commit -m "feat(apex): collapse exit ladder to 3 stages (SL -30 -> BE +20 -> trail @+35 lock +20, $15)"
 ```
 
 ---
 
-### Task 4: Wire trail-mode closes into the cooldown breaker
-
-**Files:**
-- Modify: `scripts/apex/src/apex_bridge/main.py` (trail close block in `position_check_loop`, ~lines 1100-1129)
-- Create: `scripts/apex/tests/test_cooldown_trail.py`
-
-**Interfaces:**
-- Consumes: existing `Bridge._register_close(reason: str, pnl: float)` and `Bridge._cooldown_active()` (already defined; currently only called from `_close_regime`).
-- Produces: after any trail-mode close, `_register_close(decision.reason, pnl)` is called so 3 consecutive losing closes arm the cooldown.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `scripts/apex/tests/test_cooldown_trail.py`:
-
-```python
-"""3 consecutive losing trail closes arm the cooldown (basket-wide, auto-resume)."""
-import types
-
-from apex_bridge.config import CooldownConfig
-
-
-class _Bridge:
-    """Minimal stand-in exercising the real _register_close / _cooldown_active logic.
-    We bind the real methods onto a bare object carrying just the state they touch.
-    """
-    pass
-
-
-def _make_bridge(consec=3, minutes=60):
-    from apex_bridge.main import Bridge
-    b = object.__new__(Bridge)               # skip __init__ (needs a full cfg)
-    b.cfg = types.SimpleNamespace(
-        cooldown=CooldownConfig(enabled=True, consec_losses=consec, minutes=minutes),
-        notify=types.SimpleNamespace(close=False),
-    )
-    b._cd_consec = 0
-    b._cd_until = 0.0
-    b._cd_armed = False
-    return b
-
-
-def test_three_losses_arm_cooldown():
-    b = _make_bridge()
-    assert not b._cooldown_active()
-    b._register_close("sl", -12.0)
-    b._register_close("sl_be", -3.0)
-    assert not b._cooldown_active()          # 2 losses, not yet
-    b._register_close("trail_sl", -8.0)
-    assert b._cooldown_active()              # 3rd loss arms it
-
-
-def test_a_win_resets_the_streak():
-    b = _make_bridge()
-    b._register_close("sl", -12.0)
-    b._register_close("trail_sl", +25.0)     # win resets
-    b._register_close("sl", -5.0)
-    b._register_close("sl", -5.0)
-    assert not b._cooldown_active()          # only 2 in a row after the win
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run:
-```bash
-cd scripts/apex && python -m pytest tests/test_cooldown_trail.py -q
-```
-Expected: tests for `_register_close` PASS already (the method exists). The point of this task is that the trail CLOSE PATH calls it — covered by Step 3 + the integration assertion in Step 4. If `_make_bridge` errors on import, fix imports before proceeding. (If both tests pass immediately, keep them as regression guards and proceed — the real change is Step 3.)
-
-- [ ] **Step 3: Call `_register_close` from the trail close path**
-
-In `scripts/apex/src/apex_bridge/main.py`, inside `position_check_loop`, locate the trail close block where `pnl` is computed and the trade is booked (right after `del self.trade_ids[symbol]`, before/around the `notify.notify_close` call):
-
-```python
-                        del self.trade_ids[symbol]
-                        # Telegram close alert
-                        if self.cfg.notify.close:
-                            asyncio.create_task(notify.notify_close(
-```
-
-insert the cooldown feed so it runs on every trail close:
-
-```python
-                        del self.trade_ids[symbol]
-                        # Feed the 3-loss cooldown breaker (trail mode).
-                        self._register_close(decision.reason, pnl)
-                        # Telegram close alert
-                        if self.cfg.notify.close:
-                            asyncio.create_task(notify.notify_close(
-```
-
-- [ ] **Step 4: Add an integration assertion that the trail path feeds the breaker**
-
-Append to `scripts/apex/tests/test_cooldown_trail.py`:
-
-```python
-import inspect
-from apex_bridge.main import Bridge
-
-
-def test_trail_close_path_calls_register_close():
-    src = inspect.getsource(Bridge.position_check_loop)
-    assert "_register_close(decision.reason" in src, \
-        "trail close path must feed the cooldown breaker"
-```
-
-- [ ] **Step 5: Run the tests**
-
-Run:
-```bash
-cd scripts/apex && python -m pytest tests/test_cooldown_trail.py -q
-```
-Expected: PASS (3 tests).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add scripts/apex/src/apex_bridge/main.py scripts/apex/tests/test_cooldown_trail.py
-git commit -m "feat(apex): feed trail-mode closes into the 3-loss cooldown breaker"
-```
-
----
-
-### Task 5: Write `config.apex.yaml`
+### Task 3: Write `config.apex.yaml` and its load test
 
 **Files:**
 - Create: `scripts/apex/config.apex.yaml`
+- Create: `scripts/apex/tests/test_config_exit.py`
 
 **Interfaces:**
-- Consumes: `load_config` schema (Tasks 3). Produces the live Apex config consumed by `run_bridge.py --config config.apex.yaml`.
+- Consumes: the trimmed `ExitConfig` and `load_config` schema from Task 2. Produces the live Apex config consumed by `run_bridge.py --config config.apex.yaml`.
 
 - [ ] **Step 1: Write the config file**
 
@@ -728,7 +510,49 @@ log:
   db_path: data/apex.db
 ```
 
-- [ ] **Step 2: Verify it loads**
+- [ ] **Step 2: Write the load test**
+
+Create `scripts/apex/tests/test_config_exit.py`:
+
+```python
+from apex_bridge.config import load_config
+
+CONFIG = "config.apex.yaml"   # tests run from scripts/apex/
+
+
+def test_apex_exit_config_has_exactly_three_stage_fields():
+    cfg = load_config(CONFIG)
+    e = cfg.exits
+    assert (e.sl_loss_usdt, e.breakeven_usdt, e.trail_activate_usdt,
+            e.trail_distance_usdt, e.tp_ceiling_pct) == (30.0, 20.0, 35.0, 15.0, 2.0)
+    assert not hasattr(e, "lock_profit_usdt")
+
+
+def test_apex_entry_sizing_cooldown_control_loaded():
+    cfg = load_config(CONFIG)
+    assert cfg.signal_source == "webhook"
+    assert list(cfg.symbols) == ["SOL", "HYPE", "ZEC"]
+    assert cfg.symbols["SOL"].margin_usdt == 250 and cfg.symbols["SOL"].leverage == 30
+    assert cfg.entry.require_retest is True
+    assert cfg.entry.require_reclaim is False
+    assert cfg.entry.max_gap_pct == 0.0
+    assert cfg.entry.min_abs_slope_pct == 0.15
+    assert cfg.entry.block_body_band == (0.3, 0.5)
+    assert cfg.entry.block_weekdays == []
+    assert cfg.cooldown.enabled and cfg.cooldown.consec_losses == 3 and cfg.cooldown.minutes == 60
+    assert cfg.control.telegram_enabled is True
+    assert cfg.webhook.enabled and cfg.webhook.path == "/webhook/apex"
+```
+
+- [ ] **Step 3: Run the load test**
+
+Run:
+```bash
+cd scripts/apex && python -m pytest tests/test_config_exit.py -q
+```
+Expected: PASS (2 tests). If `load_config` cannot find `config.apex.yaml`, confirm the test runs with cwd `scripts/apex` (it does under the command above).
+
+- [ ] **Step 4: Sanity-print the loaded config**
 
 Run:
 ```bash
@@ -736,26 +560,134 @@ cd scripts/apex && python -c "import sys; sys.path.insert(0,'src'); from apex_br
 ```
 Expected: `webhook ['SOL', 'HYPE', 'ZEC'] 30.0 60 True`
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/apex/config.apex.yaml
+git add scripts/apex/config.apex.yaml scripts/apex/tests/test_config_exit.py
 git commit -m "feat(apex): config.apex.yaml — webhook+retest, 3 coins, 3-stage exits, cooldown, TG control"
 ```
 
 ---
 
-### Task 6: Rebrand Reclaim → Apex in operator-facing strings
+### Task 4: Wire trail-mode closes into the cooldown breaker
 
 **Files:**
-- Modify: `scripts/apex/src/apex_bridge/main.py` (startup banner, `_close_generic` reason prefix if any, status header)
+- Modify: `scripts/apex/src/apex_bridge/main.py` (trail close block in `position_check_loop`, ~lines 1100-1129)
+- Create: `scripts/apex/tests/test_cooldown_trail.py`
+
+**Interfaces:**
+- Consumes: existing `Bridge._register_close(reason: str, pnl: float)` and `Bridge._cooldown_active()` (already defined; currently only called from `_close_regime`).
+- Produces: after any trail-mode close, `_register_close(decision.reason, pnl)` is called so 3 consecutive losing closes arm the cooldown.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `scripts/apex/tests/test_cooldown_trail.py`:
+
+```python
+"""3 consecutive losing trail closes arm the cooldown (basket-wide, auto-resume)."""
+import inspect
+import types
+
+from apex_bridge.config import CooldownConfig
+from apex_bridge.main import Bridge
+
+
+def _make_bridge(consec=3, minutes=60):
+    b = object.__new__(Bridge)               # skip __init__ (needs a full cfg)
+    b.cfg = types.SimpleNamespace(
+        cooldown=CooldownConfig(enabled=True, consec_losses=consec, minutes=minutes),
+        notify=types.SimpleNamespace(close=False),
+    )
+    b._cd_consec = 0
+    b._cd_until = 0.0
+    b._cd_armed = False
+    return b
+
+
+def test_three_losses_arm_cooldown():
+    b = _make_bridge()
+    assert not b._cooldown_active()
+    b._register_close("sl", -12.0)
+    b._register_close("sl_be", -3.0)
+    assert not b._cooldown_active()          # 2 losses, not yet
+    b._register_close("trail_sl", -8.0)
+    assert b._cooldown_active()              # 3rd loss arms it
+
+
+def test_a_win_resets_the_streak():
+    b = _make_bridge()
+    b._register_close("sl", -12.0)
+    b._register_close("trail_sl", +25.0)     # win resets
+    b._register_close("sl", -5.0)
+    b._register_close("sl", -5.0)
+    assert not b._cooldown_active()          # only 2 in a row after the win
+
+
+def test_trail_close_path_feeds_the_breaker():
+    """The trail close block in position_check_loop must call _register_close."""
+    src = inspect.getsource(Bridge.position_check_loop)
+    assert "_register_close(decision.reason" in src, \
+        "trail close path must feed the cooldown breaker"
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run:
+```bash
+cd scripts/apex && python -m pytest tests/test_cooldown_trail.py -q
+```
+Expected: the two `_register_close` behavior tests PASS (the method already exists); `test_trail_close_path_feeds_the_breaker` FAILS (the trail close block does not yet call `_register_close`).
+
+- [ ] **Step 3: Call `_register_close` from the trail close path**
+
+In `scripts/apex/src/apex_bridge/main.py`, inside `position_check_loop`, locate the trail close block where `pnl` is computed and the trade is booked (right after `del self.trade_ids[symbol]`, before the `notify.notify_close` call):
+
+```python
+                        del self.trade_ids[symbol]
+                        # Telegram close alert
+                        if self.cfg.notify.close:
+                            asyncio.create_task(notify.notify_close(
+```
+
+insert the cooldown feed so it runs on every trail close:
+
+```python
+                        del self.trade_ids[symbol]
+                        # Feed the 3-loss cooldown breaker (trail mode).
+                        self._register_close(decision.reason, pnl)
+                        # Telegram close alert
+                        if self.cfg.notify.close:
+                            asyncio.create_task(notify.notify_close(
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run:
+```bash
+cd scripts/apex && python -m pytest tests/test_cooldown_trail.py -q
+```
+Expected: PASS (3 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/apex/src/apex_bridge/main.py scripts/apex/tests/test_cooldown_trail.py
+git commit -m "feat(apex): feed trail-mode closes into the 3-loss cooldown breaker"
+```
+
+---
+
+### Task 5: Rebrand Reclaim → Apex in operator-facing strings
+
+**Files:**
+- Modify: `scripts/apex/src/apex_bridge/main.py` (startup banner, status header)
 - Modify: `scripts/apex/src/apex_bridge/__init__.py`
 - Modify: `scripts/apex/src/apex_bridge/notify.py` (any "Reclaim" in messages)
 - Modify: `scripts/apex/src/apex_bridge/telegram_control.py` (any "Reclaim" header)
-- Modify: `scripts/apex/src/apex_bridge/signals.py` (only module DOCSTRING mentions — do NOT rename the `check_reclaim` function; the reclaim ENTRY mechanic stays as dead-but-present code)
+- Modify: `scripts/apex/src/apex_bridge/signals.py` (module DOCSTRING mentions only — do NOT rename the `check_reclaim` function)
 
 **Interfaces:**
-- Produces: operator-facing strings (logs, Telegram startup/status) read "Apex". The `check_reclaim` function name is unchanged (it is a real entry primitive, just disabled by `require_reclaim: false`).
+- Produces: operator-facing strings (logs, Telegram startup/status) read "Apex". The `check_reclaim` function name, the `require_reclaim` config field, and docstrings describing that disabled entry mechanic are unchanged.
 
 - [ ] **Step 1: Find every operator-facing "Reclaim" string**
 
@@ -763,11 +695,11 @@ Run:
 ```bash
 grep -rn "Reclaim\|RECLAIM" scripts/apex/src/apex_bridge --include=*.py
 ```
-Note each hit. Classify: STRING literal in a log/notify/status (rename to "Apex"/"APEX") vs the `check_reclaim` function name / `require_reclaim` field / `reclaim` docstring describing the disabled feature (LEAVE these — renaming them would break the entry code or misdescribe it).
+Note each hit. Classify: STRING literal in a log/notify/status (rename to "Apex"/"APEX") vs the `check_reclaim` function name / `require_reclaim` field / docstring describing the disabled feature (LEAVE these — renaming them would break the entry code or misdescribe it).
 
 - [ ] **Step 2: Rename the operator-facing strings**
 
-For each STRING-literal hit (e.g. the startup banner `"RECLAIM PAPER BRIDGE ..."`, the `on_status` header `"📋 <b>Reclaim status</b>"`, the `notify.notify_error("Reclaim startup aborted...")`, any `"Reclaim starting up…"`), change the visible word to `Apex` / `APEX`. Example:
+For each STRING-literal hit (e.g. the startup banner `"RECLAIM PAPER BRIDGE ..."`, the `on_status` header `"📋 <b>Reclaim status</b>"`, `notify.notify_error("Reclaim startup aborted...")`, any `"Reclaim starting up…"`), change the visible word to `Apex` / `APEX`. Example:
 
 ```python
         log.info("RECLAIM PAPER BRIDGE — HA-V3 flip · EMA9 reclaim-retest · 0.05pct gap · trail exit")
@@ -810,7 +742,7 @@ git commit -m "chore(apex): rebrand operator-facing strings Reclaim -> Apex"
 
 ---
 
-### Task 7: Deploy scaffolding (compose, env, Traefik, TV alert doc)
+### Task 6: Deploy scaffolding (compose, env, Traefik, TV alert doc)
 
 **Files:**
 - Create: `scripts/apex/docker-compose.apex.yml`
@@ -824,7 +756,7 @@ git commit -m "chore(apex): rebrand operator-facing strings Reclaim -> Apex"
 
 - [ ] **Step 1: Write `docker-compose.apex.yml`**
 
-Create `scripts/apex/docker-compose.apex.yml` (webhook port published + Traefik labels; based on the Reclaim compose but with the inbound HTTP route the native-signal Reclaim did not need):
+Create `scripts/apex/docker-compose.apex.yml` (webhook port routed via Traefik; based on the Reclaim compose but with the inbound HTTP route the native-signal Reclaim did not need):
 
 ```yaml
 # Apex PAPER bridge — SMRT Pro V3 webhook -> EMA9 retest -> 3-stage trail, on Lighter.
@@ -885,9 +817,9 @@ BRIDGE_SECRET=choose-a-webhook-secret
 
 Run:
 ```bash
-grep -nE "(^|/)\.env|/data/|apex\.db" .gitignore || echo "MISSING"
+grep -nE "scripts/apex/\.env|scripts/apex/data|^\*\*/\.env|^\.env$" .gitignore || echo "CHECK"
 ```
-If `scripts/apex/.env` or `scripts/apex/data/` are not already covered, add to repo `.gitignore`:
+If `scripts/apex/.env` or `scripts/apex/data/` are not already covered by an existing pattern, append to repo `.gitignore`:
 
 ```
 scripts/apex/.env
@@ -900,7 +832,7 @@ Run:
 ```bash
 grep -n "config" scripts/apex/Dockerfile || echo "no hard-coded config — OK"
 ```
-If the Dockerfile `COPY`s or names `config.reclaim.yaml`, change it to copy nothing config-specific (the compose bind-mounts `config.apex.yaml`). The `command` in compose passes the config path, so the Dockerfile needs no config reference.
+If the Dockerfile `COPY`s or names `config.reclaim.yaml`, change it to not reference a specific config (the compose bind-mounts `config.apex.yaml` and passes it via `command`).
 
 - [ ] **Step 5: Write the TradingView alert doc**
 
@@ -930,7 +862,7 @@ Run:
 ```bash
 cd scripts/apex && docker build -t apex-bridge:latest . && echo BUILD_OK
 ```
-Expected: `BUILD_OK`. (If Docker is unavailable in this environment, skip and note it for the operator — the live build happens on the VPS.)
+Expected: `BUILD_OK`. If Docker is unavailable in this environment, skip and note it in the report for the operator — the live build happens on the VPS.
 
 - [ ] **Step 7: Commit**
 
@@ -941,7 +873,7 @@ git commit -m "feat(apex): deploy scaffolding — compose, env example, Traefik 
 
 ---
 
-### Task 8: Isolation acceptance gate + README
+### Task 7: Isolation acceptance gate + README
 
 **Files:**
 - Create: `scripts/apex/README.md`
@@ -1017,20 +949,20 @@ git commit -m "docs(apex): README + isolation acceptance verified"
 ## Self-Review
 
 **Spec coverage:**
-- Isolation / naming → Task 1 (+ Task 8 gate). ✓
-- SMRT Pro V3 webhook + 9 EMA retest → config (Task 5), reuse of webhook+process_pending; plain retest via `require_reclaim:false`, `max_gap_pct:0`. ✓
-- Slope 0.15 + ATR band on + Sunday on → Task 5 config + Task 3 load test. ✓
-- $250×30x, $3k → Task 5. ✓
-- 3-stage exit → Task 2 (logic) + Task 3 (config schema). ✓
-- Lighter venue → inherited from Reclaim; Task 8 grep proves no BloFin. ✓
-- 3-loss/60-min cooldown → Task 4 (wiring) + Task 5 (config). ✓
-- Telegram pause/stop → inherited `TelegramControl`; enabled in Task 5; token via env (Task 7). ✓
-- Domain apex.agentneo.cloud + webhook /webhook/apex → Task 5 + Task 7. ✓
-- Token never committed → Task 7 `.env` + Task 8 Step 2 gate. ✓
-- Dashboard deferred → not built; dir reserved at deploy (noted, out of scope). ✓
+- Isolation / naming → Task 1 (+ Task 7 gate). ✓
+- SMRT Pro V3 webhook + 9 EMA retest → config (Task 3), reuse of webhook+process_pending; plain retest via `require_reclaim:false`, `max_gap_pct:0`. ✓
+- Slope 0.15 + ATR band on + Sunday on → Task 3 config + load test. ✓
+- $250×30x, $3k → Task 3. ✓
+- 3-stage exit → Task 2 (logic + config schema). ✓
+- Lighter venue → inherited from Reclaim; Task 7 grep proves no BloFin. ✓
+- 3-loss/60-min cooldown → Task 4 (wiring) + Task 3 (config). ✓
+- Telegram pause/stop → inherited `TelegramControl`; enabled in Task 3; token via env (Task 6). ✓
+- Domain apex.agentneo.cloud + webhook /webhook/apex → Task 3 + Task 6. ✓
+- Token never committed → Task 6 `.env` + Task 7 Step 2 gate. ✓
+- Dashboard deferred → not built; dir reserved at deploy (out of scope). ✓
 
 **Placeholder scan:** no TBD/TODO; every code step shows full code; commands have expected output. ✓
 
-**Type consistency:** `ExitConfig` fields used in Task 2 tests/code (`sl_loss_usdt`, `breakeven_usdt`, `trail_activate_usdt`, `trail_distance_usdt`, `tp_ceiling_pct`) match the Task 3 dataclass exactly. `step(pos, mark_price, cfg)` signature unchanged from the caller in `main.py:1100`. `_register_close(reason, pnl)` matches the existing definition. ✓
+**Type consistency:** `ExitConfig` fields (`sl_loss_usdt`, `breakeven_usdt`, `trail_activate_usdt`, `trail_distance_usdt`, `tp_ceiling_pct`) are defined and used consistently across Task 2 (dataclass + state machine + tests) and Task 3 (yaml + load test). `step(pos, mark_price, cfg)` signature unchanged from the caller in `main.py:1100`. `_register_close(reason, pnl)` matches the existing definition. ✓
 
-**One open operator detail (not a plan gap):** the Traefik network name / certresolver on srv1370094 must match the live stack — flagged inline in Task 7 Step 1 for the operator to confirm against the existing reclaim/scalper routers before the live deploy.
+**One open operator detail (not a plan gap):** the Traefik network name / certresolver on srv1370094 must match the live stack — flagged inline in Task 6 Step 1 for the operator to confirm against the existing reclaim/scalper routers before the live deploy.
