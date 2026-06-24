@@ -1120,6 +1120,8 @@ class Bridge:
                             closed_at=datetime.now(timezone.utc).isoformat(),
                         )
                         del self.trade_ids[symbol]
+                        # Feed the 3-loss cooldown breaker (trail mode).
+                        self._register_close(decision.reason, pnl)
                         # Telegram close alert
                         if self.cfg.notify.close:
                             asyncio.create_task(notify.notify_close(
