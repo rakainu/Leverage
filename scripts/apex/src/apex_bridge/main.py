@@ -125,10 +125,10 @@ class Bridge:
                      rg.trend_len, rg.z_period, rg.z_entry, rg.limit_atr,
                      rg.sl_atr, rg.tp_frac, rg.max_bars)
         else:
-            log.info("Exits: SL=$%.0f BE=$%.0f lock_act=$%.0f trail_act=$%.0f trail_dist=$%.0f",
+            log.info("Exits: SL=$%.0f BE=$%.0f trail_act=$%.0f trail_dist=$%.0f tp_ceiling=%.1fx",
                      self.cfg.exits.sl_loss_usdt, self.cfg.exits.breakeven_usdt,
-                     self.cfg.exits.lock_profit_activate_usdt,
-                     self.cfg.exits.trail_activate_usdt, self.cfg.exits.trail_distance_usdt)
+                     self.cfg.exits.trail_activate_usdt, self.cfg.exits.trail_distance_usdt,
+                     self.cfg.exits.tp_ceiling_pct)
 
         if self.cfg.cooldown.enabled:
             log.info("Cooldown breaker: %d consec losses -> block entries %dm (auto-resume)",

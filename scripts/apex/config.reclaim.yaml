@@ -56,13 +56,10 @@ entry:
   block_body_band: [0.3, 0.5]         # F_LIVE — block the chop body band
   block_weekdays: [6]                 # F_LIVE — no Sunday
 
-exits:                                 # V3.2 trail ladder (TrailParams @ margin 250 / 30x)
+exits:                                 # 3-stage ladder (SL -$82.5 -> BE +$30 -> trail @+$75 lock +$37.5, $37.5)
   sl_loss_usdt: 82.5
   breakeven_usdt: 30.0
-  lock_profit_activate_usdt: 45.0
-  lock_profit_usdt: 37.5
   trail_activate_usdt: 75.0
-  trail_start_usdt: 80.0
   trail_distance_usdt: 37.5
   tp_ceiling_pct: 2.0                  # hard TP at 2x margin = $500
 

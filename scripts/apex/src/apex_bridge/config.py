@@ -42,10 +42,7 @@ class EntryConfig:
 class ExitConfig:
     sl_loss_usdt: float
     breakeven_usdt: float
-    lock_profit_activate_usdt: float
-    lock_profit_usdt: float
     trail_activate_usdt: float
-    trail_start_usdt: float
     trail_distance_usdt: float
     tp_ceiling_pct: float
 
