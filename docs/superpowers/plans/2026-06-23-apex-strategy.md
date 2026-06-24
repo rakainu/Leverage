@@ -30,7 +30,8 @@
 - Rename dir: `scripts/apex/src/lighter_bridge/` → `scripts/apex/src/apex_bridge/`
 - Modify: `scripts/apex/run_bridge.py` (import path)
 - Modify: `scripts/apex/tests/conftest.py` (import path)
-- Delete: `scripts/apex/config.reclaim.yaml`, `scripts/apex/docker-compose.reclaim.yml`, `scripts/apex/data/` (any copied `reclaim.db`), `scripts/apex/.env` (if copied)
+- Delete: `scripts/apex/docker-compose.reclaim.yml`, `scripts/apex/data/` (any copied `reclaim.db`), `scripts/apex/.env` (if copied)
+- Keep for now: `scripts/apex/config.reclaim.yaml` — `tests/test_reclaim_gap.py` loads it as a fixture. It is moved into `tests/fixtures/` and removed from the Apex root in Task 3 (where the config work lives), so Task 1 stays green.
 
 **Interfaces:**
 - Produces: importable package `apex_bridge` with all of Reclaim's modules under `scripts/apex/src/apex_bridge/`. Intra-package imports are relative (`.config`, `from . import notify`) so they survive the directory rename untouched; only absolute `lighter_bridge` references need fixing.
@@ -422,9 +423,15 @@ git commit -m "feat(apex): collapse exit ladder to 3 stages (SL -30 -> BE +20 ->
 **Files:**
 - Create: `scripts/apex/config.apex.yaml`
 - Create: `scripts/apex/tests/test_config_exit.py`
+- Move: `scripts/apex/config.reclaim.yaml` → `scripts/apex/tests/fixtures/reclaim_gap_config.yaml`
+- Modify: `scripts/apex/tests/test_reclaim_gap.py` (repoint the fixture path)
 
 **Interfaces:**
 - Consumes: the trimmed `ExitConfig` and `load_config` schema from Task 2. Produces the live Apex config consumed by `run_bridge.py --config config.apex.yaml`.
+
+This task also finishes the isolation cleanup deferred from Task 1: the inherited
+`config.reclaim.yaml` (a different strategy's deployable config sitting at the Apex
+root) becomes a pure test fixture so the Apex root holds only `config.apex.yaml`.
 
 - [ ] **Step 1: Write the config file**
 
@@ -560,11 +567,48 @@ cd scripts/apex && python -c "import sys; sys.path.insert(0,'src'); from apex_br
 ```
 Expected: `webhook ['SOL', 'HYPE', 'ZEC'] 30.0 60 True`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Move the inherited reclaim config into a test fixture (isolation cleanup)**
+
+`tests/test_reclaim_gap.py` loads `config.reclaim.yaml` from the Apex root (it tests the
+reclaim-entry code, which still ships but is disabled by Apex's config). Make it a fixture
+so the Apex root holds only `config.apex.yaml`:
 
 ```bash
-git add scripts/apex/config.apex.yaml scripts/apex/tests/test_config_exit.py
-git commit -m "feat(apex): config.apex.yaml — webhook+retest, 3 coins, 3-stage exits, cooldown, TG control"
+cd /c/Users/rakai/Leverage
+mkdir -p scripts/apex/tests/fixtures
+git mv scripts/apex/config.reclaim.yaml scripts/apex/tests/fixtures/reclaim_gap_config.yaml \
+  || mv scripts/apex/config.reclaim.yaml scripts/apex/tests/fixtures/reclaim_gap_config.yaml
+```
+
+In `scripts/apex/tests/test_reclaim_gap.py`, repoint the load (the line near the bottom that reads `config.reclaim.yaml`):
+
+```python
+    cfg = load_config(Path(__file__).resolve().parents[1] / "config.reclaim.yaml")
+```
+to:
+```python
+    cfg = load_config(Path(__file__).resolve().parent / "fixtures" / "reclaim_gap_config.yaml")
+```
+
+Confirm the Apex root no longer carries a foreign deployable config:
+```bash
+ls scripts/apex/*.yaml
+```
+Expected: only `config.apex.yaml`.
+
+- [ ] **Step 6: Run the full suite**
+
+Run (substitute the venv python from the dispatch):
+```bash
+cd scripts/apex && "<venv python>" -m pytest -q
+```
+Expected: PASS (config + reclaim-gap via the fixture path + all inherited tests).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add scripts/apex/config.apex.yaml scripts/apex/tests/test_config_exit.py scripts/apex/tests/fixtures/reclaim_gap_config.yaml scripts/apex/tests/test_reclaim_gap.py
+git commit -m "feat(apex): config.apex.yaml + move reclaim config to test fixture (isolation)"
 ```
 
 ---
