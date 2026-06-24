@@ -1,4 +1,4 @@
-"""Telegram control listener for the Reclaim bridge.
+"""Telegram control listener for the Apex bridge.
 
 Inbound counterpart to notify.py (which is send-only). Lets Rich flip per-ticker
 entry switches from his phone:
@@ -182,7 +182,7 @@ class TelegramControl:
                 await self._reply(await self.on_status())
             elif cmd.action == "help":
                 await self._reply(
-                    "Reclaim control:\n"
+                    "Apex control:\n"
                     "/kill — STOP ALL: close every open position + block all entries\n"
                     "/off SYM|ALL — block new entries (open trade still managed)\n"
                     "/on SYM|ALL — re-enable entries\n"
