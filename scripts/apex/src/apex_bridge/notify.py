@@ -148,44 +148,21 @@ def _fmt_duration(seconds: int) -> str:
 
 async def notify_startup(cfg, restored: Optional[list] = None) -> None:
     """Bridge-came-up alert. If `restored` is provided, list the rehydrated positions."""
-    _exit_model = getattr(cfg, "exit_model", "trail")
     lines = [
         f"🟢 <b>{SENDER_TAG.title()} UP</b>",
         f"Host: <code>{_esc(cfg.host)}</code>",
         f"Paper collateral: ${cfg.initial_collateral_usdc:,.0f}",
         f"Symbols: {', '.join(cfg.symbols.keys())}",
     ]
-    if _exit_model != "regime":
-        lines.append(
-            f"Entry: slope≥{cfg.entry.min_abs_slope_pct:.2f}%  "
-            f"body{cfg.entry.block_body_band}  noSun"
-        )
-    if _exit_model == "regime":
-        rg = cfg.regime
-        lines.append(
-            f"Strategy: regime-MR 15m | EMA({rg.trend_len}) slope-gate, "
-            f"z({rg.z_period}) fade |z|≥{rg.z_entry:g}"
-        )
-        lines.append(
-            f"Entry: maker limit {rg.limit_atr:g}×ATR  •  "
-            f"SL={rg.sl_atr:g}×ATR  TP={rg.tp_frac:g}×dist-to-VWAP  time={rg.max_bars}b"
-        )
-    elif _exit_model == "scaleout":
-        sc = cfg.scaleout
-        lines.append(
-            f"Exits: scale-out SL={sc.sl_atr:g}×ATR  "
-            f"TP={sc.tp_atr}×ATR  ratios={sc.ratios}  BE-after-TP1"
-        )
-    elif _exit_model == "pro_v3":
-        lines.append(
-            f"Exits: Pro V3 TP1/2/3 + SL (verbatim)  close {tuple(cfg.scaleout.ratios)}"
-        )
-    else:
-        lines.append(
-            f"Exits: SL=${cfg.exits.sl_loss_usdt:.0f}  "
-            f"BE=${cfg.exits.breakeven_usdt:.0f}  "
-            f"trail_dist=${cfg.exits.trail_distance_usdt:.0f}"
-        )
+    lines.append(
+        f"Entry: slope≥{cfg.entry.min_abs_slope_pct:.2f}%  "
+        f"body{cfg.entry.block_body_band}  noSun"
+    )
+    lines.append(
+        f"Exits: SL=${cfg.exits.sl_loss_usdt:.0f}  "
+        f"BE=${cfg.exits.breakeven_usdt:.0f}  "
+        f"trail_dist=${cfg.exits.trail_distance_usdt:.0f}"
+    )
     if restored:
         lines.append("")
         lines.append(f"<b>♻️ Restored {len(restored)} open position(s):</b>")

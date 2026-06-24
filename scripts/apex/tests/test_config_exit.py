@@ -19,8 +19,6 @@ def test_apex_entry_sizing_cooldown_control_loaded():
     assert list(cfg.symbols) == ["SOL", "HYPE", "ZEC"]
     assert cfg.symbols["SOL"].margin_usdt == 250 and cfg.symbols["SOL"].leverage == 30
     assert cfg.entry.require_retest is True
-    assert cfg.entry.require_reclaim is False
-    assert cfg.entry.max_gap_pct == 0.0
     assert cfg.entry.min_abs_slope_pct == 0.15
     assert cfg.entry.block_body_band == (0.3, 0.5)
     assert cfg.entry.block_weekdays == []

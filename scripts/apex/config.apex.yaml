@@ -30,8 +30,6 @@ entry:
   retest_overshoot_pct: 0.2   # wick may break EMA9 by <=0.2% and still count as a retest
   retest_timeout_bars: 6      # pending dies if no retest within 6 bars
   require_retest: true        # V3.1 plain retest
-  require_reclaim: false      # NOT the V3.2 reclaim close-back
-  max_gap_pct: 0.0            # no gap filter
   min_abs_slope_pct: 0.15     # slope gate (the proven V3.1 value)
   block_body_band: [0.3, 0.5] # ATR body-band chop filter ON
   block_weekdays: []          # Apex trades Sundays

@@ -149,22 +149,3 @@ def check_retest(side: str, ema_val: float, bar_low: float, bar_high: float,
     if side == "long":
         return bar_low <= ema_val and bar_low >= ema_val - overshoot
     return bar_high >= ema_val and bar_high <= ema_val + overshoot
-
-
-def check_reclaim(side: str, ema_val: float, bar_close: float) -> bool:
-    """Reclaim condition (M13) — after wicking to EMA9 the bar must CLOSE BACK on
-    the trade's side of EMA9: a confirmed bounce, not a breakdown. Long closes
-    above EMA9; short closes below. This is what distinguishes the winning
-    reclaim from the losing knife-through."""
-    if np.isnan(ema_val):
-        return False
-    return bar_close > ema_val if side == "long" else bar_close < ema_val
-
-
-def entry_gap_pct(ema_val: float, bar_close: float) -> float:
-    """How far the reclaim close sits from EMA9, in percent. The realizable
-    entry's distance from the engine's idealized EMA9 fill — the cost the gap
-    filter caps. Returns a large number if EMA9 is invalid (forces a skip)."""
-    if np.isnan(ema_val) or ema_val == 0:
-        return float("inf")
-    return abs(bar_close - ema_val) / ema_val * 100.0

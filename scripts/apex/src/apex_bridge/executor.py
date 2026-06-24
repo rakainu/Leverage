@@ -29,13 +29,8 @@ class OpenPosition:
     notional: float = 0.0
     state: int = 0       # 0=initial, 1=BE, 2=lock, 3=trail_set, 4=trailing
     sl_price: float = 0.0
-    tp_price: float = 0.0     # regime_mr fixed take-profit (maker target)
     trail_high: float = 0.0   # best favorable price seen (high for long, low for short)
     max_state: int = 0
-    # --- squeeze / atr_trail mode (unused in other modes) ---
-    atr_entry: float = 0.0    # ATR(14) at entry bar (fixes the trail distance)
-    best_close: float = 0.0   # best CLOSE since entry (long: max, short: min) — trail anchor
-    bars_held: int = 0        # closed bars since entry (for the time stop)
 
 
 @dataclass

@@ -1,13 +1,12 @@
-"""Inbound Pro V3 [SMRT Algo] webhook listener.
+"""Inbound SMRT Pro V3 [SMRT Algo] webhook listener.
 
 When signal_source == "webhook", the bridge runs this FastAPI app alongside its
-async loops. TradingView Pro V3 buy/sell alerts POST here; each valid signal is
+async loops. TradingView buy/sell alerts POST here; each valid signal is
 pushed onto an asyncio.Queue the bridge drains into its EMA9-retest pending queue
-— the exact same entry pipeline used by the live BloFin bridge, so entries match
-what was validated in pro_v3_real/.
+— the exact same entry pipeline used by the live BloFin bridge.
 
 Payload (matches the BloFin bridge, see scripts/scalping/docs/TV_ALERTS.md):
-  {"secret": "...", "symbol": "SOL-USDT", "action": "buy"|"sell", "source": "pro_v3"}
+  {"secret": "...", "symbol": "SOL-USDT", "action": "buy"|"sell"}
 """
 from __future__ import annotations
 
@@ -22,14 +21,13 @@ from fastapi.responses import JSONResponse
 log = logging.getLogger("webhook")
 
 
-ALLOWED_ACTIONS = {"buy", "sell", "tp1", "tp2", "tp3", "sl",
-                   "reversal_buy", "reversal_sell"}
+ALLOWED_ACTIONS = {"buy", "sell"}
 
 
 @dataclass
 class InboundSignal:
     symbol_key: str   # bridge symbol name, e.g. "SOL"
-    action: str       # buy|sell|tp1|tp2|tp3|sl|reversal_buy|reversal_sell
+    action: str       # buy|sell
 
 
 def _symbol_key(raw_symbol: str, known: set[str]) -> str | None:
@@ -43,7 +41,7 @@ def _symbol_key(raw_symbol: str, known: set[str]) -> str | None:
 
 def build_app(queue: "asyncio.Queue[InboundSignal]", secret: str,
               known_symbols: set[str], path: str) -> FastAPI:
-    app = FastAPI(title="pro-v3-scaleout webhook")
+    app = FastAPI(title="apex webhook")
 
     @app.get("/health")
     async def health():

@@ -33,13 +33,10 @@ from .executor import OpenPosition, PaperExecutor
 from . import notify
 from . import sizing
 from .signals import (
-    check_retest, check_reclaim, entry_gap_pct, compute_ema_and_slope,
+    check_retest, compute_ema_and_slope,
     generate_v3_signals, passes_entry_filters, prepare,
 )
 from .state_machine import step as state_step
-from . import scaleout as so
-from .squeeze import prepare_squeeze
-from .regime import prepare_regime, entry_levels
 # NOTE: webhook.py (fastapi/uvicorn) is imported lazily in start() only when
 # webhook mode is enabled, so the trail/replica bridge never needs those deps.
 
@@ -75,14 +72,8 @@ class Bridge:
         self.trade_ids: dict[str, int] = {}        # symbol -> DB row id while open
         self.db = TradeLogDB(cfg.log.db_path)
         self._stopped = False
-        # --- scale-out / webhook mode state (unused in legacy trail/replica mode) ---
+        # --- inbound webhook signal queue (Pro V3 buy/sell -> entry pipeline) ---
         self.signal_queue: "asyncio.Queue[InboundSignal]" = asyncio.Queue()
-        self.scale: dict[str, so.ScaleOutState] = {}   # symbol -> exit state
-        self.orig_base: dict[str, float] = {}          # symbol -> original base_amount
-        self.realized: dict[str, float] = {}           # symbol -> realized pnl so far
-        self.legs: dict[str, list] = {}                # symbol -> [(frac, exit_px, reason)]
-        self.tp_seen: dict[str, set] = {}              # symbol -> {tp levels already closed} (pro_v3 mode)
-        self.pending_entry: dict[str, dict] = {}       # symbol -> resting maker-limit entry (regime mode)
         # --- per-ticker entry switch (Telegram control) ---
         self.entries_enabled: dict[str, bool] = {}     # explicit overrides; missing = ON
         self.control = None                            # TelegramControl task holder
@@ -105,30 +96,10 @@ class Bridge:
         log.info("Entry: EMA9 retest=%s%s", self.cfg.entry.require_retest,
                  "" if self.cfg.entry.min_abs_slope_pct or self.cfg.entry.block_body_band
                  or self.cfg.entry.block_weekdays else " (no extra filters)")
-        if self.cfg.exit_model == "scaleout":
-            sc = self.cfg.scaleout
-            log.info("Scale-out: SL=%.2f×ATR TP=%s×ATR ratios=%s BE-after-TP1=%s",
-                     sc.sl_atr, sc.tp_atr, sc.ratios, sc.be_after_tp1)
-        elif self.cfg.exit_model == "pro_v3":
-            log.info("Exits: Pro V3 TP1/2/3 + SL (verbatim), close %s of original",
-                     tuple(self.cfg.scaleout.ratios))
-        elif self.cfg.exit_model == "atr_trail":
-            sq = self.cfg.squeeze
-            log.info("Squeeze: BB(%d,%.1f)-in-KC(%.1f) >=%d bars | SL=%.2f×ATR trail=%.2f×ATR "
-                     "max_bars=%d | risk=%.2f%%/trade lev<=%.0f×",
-                     sq.bb_len, sq.bb_mult, sq.kc_mult, sq.min_squeeze, sq.sl_atr,
-                     sq.trail_atr, sq.max_bars, sq.risk_frac * 100, sq.max_leverage)
-        elif self.cfg.exit_model == "regime":
-            rg = self.cfg.regime
-            log.info("Regime-MR: EMA(%d) slope-gate | z(%d) fade |z|>=%.2f | maker-limit %.2f×ATR "
-                     "| SL=%.2f×ATR TP=%.2f×dist-to-VWAP time=%d bars",
-                     rg.trend_len, rg.z_period, rg.z_entry, rg.limit_atr,
-                     rg.sl_atr, rg.tp_frac, rg.max_bars)
-        else:
-            log.info("Exits: SL=$%.0f BE=$%.0f trail_act=$%.0f trail_dist=$%.0f tp_ceiling=%.1fx",
-                     self.cfg.exits.sl_loss_usdt, self.cfg.exits.breakeven_usdt,
-                     self.cfg.exits.trail_activate_usdt, self.cfg.exits.trail_distance_usdt,
-                     self.cfg.exits.tp_ceiling_pct)
+        log.info("Exits: SL=$%.0f BE=$%.0f trail_act=$%.0f trail_dist=$%.0f tp_ceiling=%.1fx",
+                 self.cfg.exits.sl_loss_usdt, self.cfg.exits.breakeven_usdt,
+                 self.cfg.exits.trail_activate_usdt, self.cfg.exits.trail_distance_usdt,
+                 self.cfg.exits.tp_ceiling_pct)
 
         if self.cfg.cooldown.enabled:
             log.info("Cooldown breaker: %d consec losses -> block entries %dm (auto-resume)",
@@ -294,13 +265,6 @@ class Bridge:
 
     async def on_new_bar(self, symbol: str, df: pd.DataFrame):
         """Called by BarFeed every time a new closed bar lands."""
-        if self.cfg.signal_source == "squeeze":
-            await self._on_new_bar_squeeze(symbol, df)
-            return
-        if self.cfg.signal_source == "regime":
-            await self._on_new_bar_regime(symbol, df)
-            return
-
         is_bootstrap = symbol not in self.bars
 
         # Enrich with V3 signals + ema/slope
@@ -359,7 +323,6 @@ class Bridge:
         body_v = float(last["body_atr_ratio"])
         bar_low = float(last["Low"])
         bar_high = float(last["High"])
-        bar_close = float(last["Close"])
         new_pending: list[PendingSignal] = []
 
         for sig in self.pending[symbol]:
@@ -374,14 +337,6 @@ class Bridge:
             # EMA(9) retest
             if not check_retest(sig.side, ema_v, bar_low, bar_high,
                                 self.cfg.entry.retest_overshoot_pct):
-                new_pending.append(sig)
-                continue
-
-            # Reclaim (M13): the retest bar must CLOSE BACK across EMA9 on the
-            # trade's side — a confirmed bounce, not a breakdown. Keep the pending
-            # alive if it touched but hasn't reclaimed yet (a later bar within the
-            # timeout may bounce). This is the selection half of the honest twin.
-            if self.cfg.entry.require_reclaim and not check_reclaim(sig.side, ema_v, bar_close):
                 new_pending.append(sig)
                 continue
 
@@ -412,21 +367,6 @@ class Bridge:
                                    detected_at=datetime.now(timezone.utc).isoformat())
                 continue
 
-            # Max-entry-gap filter (M12/M13 cost control): skip when the reclaim
-            # close sits too far from EMA9 — past the validated 0.05% knee the edge
-            # is gone (the bounce already ran). The gap is causal: close + ema9 are
-            # both known on this closed bar. Consume the pending on a skip.
-            if self.cfg.entry.max_gap_pct > 0:
-                gap = entry_gap_pct(ema_v, bar_close)
-                if gap > self.cfg.entry.max_gap_pct:
-                    log.info("%s: %s skipped — entry gap %.3f%% > cap %.3f%% (close=%.4f ema9=%.4f)",
-                             symbol, sig.side, gap, self.cfg.entry.max_gap_pct, bar_close, ema_v)
-                    self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(sig.detected_at_bar_ts),
-                                       outcome="blocked_gap", ema9=ema_v, slope_pct=slope_v,
-                                       body_atr_ratio=body_v,
-                                       detected_at=datetime.now(timezone.utc).isoformat())
-                    continue
-
             # Fire entry
             pos = await self.executor.open_position(symbol, sig.side)
             if pos is None:
@@ -444,26 +384,6 @@ class Bridge:
                 adx_at_entry=float(last.get("adx", 0)),
             )
             self.trade_ids[symbol] = trade_id
-            # Arm exit tracking (no-op in trail mode)
-            if self.cfg.exit_model in ("scaleout", "pro_v3"):
-                self.orig_base[symbol] = pos.base_amount
-                self.realized[symbol] = 0.0
-                self.legs[symbol] = []
-                self.tp_seen[symbol] = set()
-                if self.cfg.exit_model == "scaleout":
-                    atr_v = float(last.get("atr14", 0.0) or 0.0)
-                    sc = self.cfg.scaleout
-                    params = so.ScaleOutParams(sl_atr=sc.sl_atr, tp_atr=tuple(sc.tp_atr),
-                                               ratios=tuple(sc.ratios), be_after_tp1=sc.be_after_tp1)
-                    self.scale[symbol] = so.init_levels(sig.side, pos.entry_price, atr_v, params)
-                    stx = self.scale[symbol]
-                    log.info("%s: scale-out armed entry=%.4f ATR=%.4f SL=%.4f TP=%s",
-                             symbol, pos.entry_price, atr_v, stx.sl_price,
-                             [round(x, 4) for x in stx.tp_px])
-                else:  # pro_v3 — exits come from Pro V3's TP1/2/3 + SL webhooks
-                    log.info("%s: Pro V3 exits armed entry=%.4f — awaiting TP1/2/3 + SL "
-                             "(close %s of original)", symbol, pos.entry_price,
-                             tuple(self.cfg.scaleout.ratios))
             # Telegram alert (fire-and-forget)
             if self.cfg.notify.open:
                 asyncio.create_task(notify.notify_open(pos))
@@ -476,8 +396,7 @@ class Bridge:
         self.pending[symbol] = new_pending
 
     async def webhook_consumer_loop(self):
-        """Drain inbound Pro V3 webhooks. buy/sell -> entry pipeline;
-        tp1/tp2/tp3/sl -> Pro V3 exit handler (event-driven, verbatim)."""
+        """Drain inbound Pro V3 webhooks. buy/sell -> EMA9-retest entry pipeline."""
         log.info("Webhook consumer started")
         while not self._stopped:
             sig = await self.signal_queue.get()
@@ -486,24 +405,11 @@ class Bridge:
                 log.warning("webhook: %s not enabled — dropping %s", symbol, action)
                 continue
 
-            # ----- Pro V3 EXIT events -----
-            if action in ("tp1", "tp2", "tp3", "sl"):
-                await self._handle_exit_action(symbol, action)
-                continue
-            if action in ("reversal_buy", "reversal_sell"):
-                # Defensive: a reversal closes the current position; the matching
-                # buy/sell alert opens the new one through the normal entry gate.
-                await self._handle_exit_action(symbol, "sl")
-                continue
-
             # ----- ENTRY events (buy/sell) -----
             side = "long" if action == "buy" else "short"
             df = self.bars.get(symbol)
             if df is None or len(df) == 0:
                 log.warning("webhook: %s has no bars yet — dropping %s", symbol, action)
-                continue
-            if not self.cfg.entry.require_retest:
-                await self._open_on_signal(symbol, side, df)
                 continue
             ts = df.index[-1]
             self.pending[symbol].append(PendingSignal(symbol, side, ts, len(df) - 1))
@@ -512,424 +418,6 @@ class Bridge:
                                outcome="detected",
                                detected_at=datetime.now(timezone.utc).isoformat())
             await self.process_pending(symbol, df)
-
-    async def _handle_exit_action(self, symbol: str, action: str):
-        """Execute a Pro V3 exit webhook (tp1/tp2/tp3/sl) on the open position.
-
-        Scaling is the configured per-TP fraction of the ORIGINAL size
-        (scaleout.ratios, e.g. 50/25/25). tp3 and sl always flatten whatever
-        remains. No bridge-computed levels — Pro V3 owns the exit prices.
-        """
-        pos = self.executor.positions.get(symbol)
-        if pos is None:
-            log.info("%s: Pro V3 %s but no open position — ignoring", symbol, action)
-            return
-        seen = self.tp_seen.setdefault(symbol, set())
-        if action in seen:
-            log.info("%s: Pro V3 %s already processed — ignoring duplicate", symbol, action)
-            return
-        seen.add(action)
-
-        # tp3 / sl flatten the remainder; tp1/tp2 close their fraction of original.
-        if action in ("tp3", "sl"):
-            res = await self.executor.reduce_position(symbol, pos.base_amount, action)
-            if res is not None:
-                self._book_leg(symbol, pos, res, action)
-            self._finalize_scaleout(symbol, pos)
-            return
-
-        ratios = {"tp1": self.cfg.scaleout.ratios[0], "tp2": self.cfg.scaleout.ratios[1]}
-        res = await self.executor.reduce_position(symbol, ratios[action] * self.orig_base[symbol], action)
-        if res is not None:
-            self._book_leg(symbol, pos, res, action)
-        if not self.executor.is_open(symbol):
-            self._finalize_scaleout(symbol, pos)
-
-    def _book_leg(self, symbol: str, pos, res, reason: str):
-        exit_p, filled = res.avg_price, res.filled_size
-        leg_pnl = ((exit_p - pos.entry_price) if pos.side == "long"
-                   else (pos.entry_price - exit_p)) * filled
-        self.realized[symbol] = self.realized.get(symbol, 0.0) + leg_pnl
-        frac = round(filled / self.orig_base.get(symbol, filled), 4) if self.orig_base.get(symbol) else 1.0
-        self.legs.setdefault(symbol, []).append((frac, exit_p, reason))
-        log.info("%s: %s leg %.4f @ $%.4f  pnl=$%+.2f", symbol, reason, filled, exit_p, leg_pnl)
-
-    async def _open_on_signal(self, symbol: str, side: str, df: pd.DataFrame):
-        """Open a position immediately on a raw Pro V3 webhook (no retest/filters)."""
-        last = df.iloc[-1]
-        last_ts = df.index[-1]
-        now = datetime.now(timezone.utc).isoformat()
-        if self.executor.is_open(symbol):
-            log.info("%s: PRO V3 %s — position already open, skipping (one at a time)", symbol, side)
-            self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts),
-                               outcome="skipped_open", detected_at=now)
-            return
-        if not self._entries_allowed(symbol):
-            log.info("%s: entries OFF — dropping PRO V3 %s", symbol, side)
-            self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts),
-                               outcome="blocked_switch", detected_at=now)
-            return
-        log.info("%s: PRO V3 %s webhook -> ENTER (raw signal)", symbol, side)
-        pos = await self.executor.open_position(symbol, side)
-        if pos is None:
-            log.error("%s: open_position failed for %s", symbol, side)
-            return
-        trade_id = self.db.log_trade(
-            symbol=symbol, side=side, entry_price=pos.entry_price,
-            margin_usdt=pos.margin_usdt, leverage=pos.leverage,
-            base_amount=pos.base_amount, notional=pos.notional,
-            opened_at=now, bar_time_open=str(last_ts),
-            slope_pct=float(last.get("slope_pct", 0)),
-            body_atr_ratio=float(last.get("body_atr_ratio", 0)),
-            adx_at_entry=float(last.get("adx", 0)),
-        )
-        self.trade_ids[symbol] = trade_id
-        atr_v = float(last.get("atr14", 0.0) or 0.0)
-        sc = self.cfg.scaleout
-        params = so.ScaleOutParams(sl_atr=sc.sl_atr, tp_atr=tuple(sc.tp_atr),
-                                   ratios=tuple(sc.ratios), be_after_tp1=sc.be_after_tp1)
-        self.scale[symbol] = so.init_levels(side, pos.entry_price, atr_v, params)
-        self.orig_base[symbol] = pos.base_amount
-        self.realized[symbol] = 0.0
-        self.legs[symbol] = []
-        stx = self.scale[symbol]
-        log.info("%s: scale-out armed entry=%.4f ATR=%.4f SL=%.4f TP=%s",
-                 symbol, pos.entry_price, atr_v, stx.sl_price,
-                 [round(x, 4) for x in stx.tp_px])
-        self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts),
-                           outcome="fired", ema9=float(last.get("ema9", 0)),
-                           slope_pct=float(last.get("slope_pct", 0)),
-                           body_atr_ratio=float(last.get("body_atr_ratio", 0)),
-                           detected_at=now)
-        if self.cfg.notify.open:
-            asyncio.create_task(notify.notify_open(pos))
-
-    async def _scaleout_tick(self, symbol: str, pos, mark: float):
-        """One scale-out evaluation for an open position; executes partial closes."""
-        st = self.scale.get(symbol)
-        if st is None:
-            return
-        sc = self.cfg.scaleout
-        params = so.ScaleOutParams(sl_atr=sc.sl_atr, tp_atr=tuple(sc.tp_atr),
-                                   ratios=tuple(sc.ratios), be_after_tp1=sc.be_after_tp1)
-        decision = so.step(st, mark, params)
-        if decision.be_moved:
-            log.info("%s: TP1 hit -> stop moved to breakeven $%.4f", symbol, st.entry_price)
-        for frac, reason in decision.closes:
-            res = await self.executor.reduce_position(symbol, frac * self.orig_base[symbol], reason)
-            if res is None:
-                continue
-            exit_p, filled = res.avg_price, res.filled_size
-            leg_pnl = ((exit_p - pos.entry_price) if pos.side == "long"
-                       else (pos.entry_price - exit_p)) * filled
-            self.realized[symbol] = self.realized.get(symbol, 0.0) + leg_pnl
-            self.legs[symbol].append((frac, exit_p, reason))
-            log.info("%s: %s leg %.4f @ $%.4f  pnl=$%+.2f", symbol, reason, filled, exit_p, leg_pnl)
-        if decision.done or not self.executor.is_open(symbol):
-            self._finalize_scaleout(symbol, pos)
-
-    def _finalize_scaleout(self, symbol: str, pos):
-        legs = self.legs.get(symbol, [])
-        total_pnl = self.realized.get(symbol, 0.0)
-        if legs:
-            tot = sum(f for f, _, _ in legs)
-            wavg = sum(f * px for f, px, _ in legs) / tot if tot > 0 else pos.entry_price
-            last_reason = legs[-1][2]
-        else:
-            wavg, last_reason = pos.entry_price, "unknown"
-        max_tp = (self.scale[symbol].max_tp_reached if symbol in self.scale
-                  else sum(1 for _, _, r in legs if r.startswith("tp")))
-        reason = f"{self.cfg.exit_model}:{last_reason}"
-        tid = self.trade_ids.get(symbol)
-        if tid is not None:
-            self.db.update_trade_close(
-                tid, exit_price=wavg, initial_sl=None,
-                exit_reason=reason, pnl_usdt=total_pnl,
-                pnl_pct_account=total_pnl / self.cfg.initial_collateral_usdc * 100,
-                duration_secs=int(time.time() - pos.opened_at), max_state=max_tp,
-                closed_at=datetime.now(timezone.utc).isoformat())
-            del self.trade_ids[symbol]
-        log.info("%s: CLOSED (%s) total_pnl=$%+.2f legs=%d avg_exit=$%.4f max_tp=%d",
-                 symbol, reason, total_pnl, len(legs), wavg, max_tp)
-        if self.cfg.notify.close:
-            asyncio.create_task(notify.notify_close(
-                symbol, pos.side, pos.entry_price, wavg, total_pnl,
-                reason, int(time.time() - pos.opened_at), max_tp,
-                starting_collateral=self.cfg.initial_collateral_usdc))
-        for d in (self.scale, self.orig_base, self.realized, self.legs, self.tp_seen):
-            d.pop(symbol, None)
-
-    # ------- Squeeze (compression->expansion) strategy -------
-
-    async def _on_new_bar_squeeze(self, symbol: str, df: pd.DataFrame):
-        """Native squeeze handler. On each new closed 1h bar: ratchet the trail of
-        any open position (and time-stop it), else fire an entry on a release."""
-        sq = self.cfg.squeeze
-        enriched = prepare_squeeze(df, bb_len=sq.bb_len, bb_mult=sq.bb_mult,
-                                   kc_mult=sq.kc_mult, min_squeeze=sq.min_squeeze,
-                                   atr_period=sq.atr_period)
-        is_bootstrap = symbol not in self.bars
-        self.bars[symbol] = enriched
-        last = enriched.iloc[-1]
-        last_ts = enriched.index[-1]
-
-        if is_bootstrap:
-            nl = int(enriched["sq_long"].sum()); ns = int(enriched["sq_short"].sum())
-            log.info("%s: squeeze bootstrap scan — %d long + %d short releases over %d bars "
-                     "(most recent %s)", symbol, nl, ns, len(enriched), last_ts)
-            return
-
-        # 1) manage an open position on this freshly-closed bar
-        if self.executor.is_open(symbol):
-            await self._squeeze_trail_update(symbol, enriched)
-            return  # one position at a time — no new entry while in a trade
-
-        # 2) entry on a release bar (the just-closed bar)
-        side = "long" if bool(last["sq_long"]) else ("short" if bool(last["sq_short"]) else None)
-        if side is None:
-            return
-        if not self._entries_allowed(symbol):
-            return  # entries OFF for this ticker
-        await self._open_squeeze(symbol, side, enriched)
-
-    async def _open_squeeze(self, symbol: str, side: str, enriched: pd.DataFrame):
-        last = enriched.iloc[-1]
-        last_ts = enriched.index[-1]
-        now = datetime.now(timezone.utc).isoformat()
-        sq = self.cfg.squeeze
-        atr_v = float(last.get("atr14", 0.0) or 0.0)
-        ref = self.executor.get_mark_price(symbol)
-        if atr_v <= 0 or ref is None or ref <= 0:
-            log.warning("%s: squeeze entry skipped (atr=%.4f mark=%s)", symbol, atr_v, ref)
-            return
-        # risk-based sizing: notional so the sl_atr*ATR stop risks risk_frac of equity
-        _, _, equity = self._equity_breakdown()
-        if equity <= 0:
-            equity = self.cfg.initial_collateral_usdc
-        stop_dist = sq.sl_atr * atr_v
-        stop_frac = stop_dist / ref
-        if stop_frac <= 0:
-            return
-        notional = min((sq.risk_frac * equity) / stop_frac, equity * sq.max_leverage)
-        base = notional / ref
-        pos = await self.executor.open_position(symbol, side, base_amount=base)
-        if pos is None:
-            return
-        # arm the ATR trailing exit state
-        pos.atr_entry = atr_v
-        pos.best_close = pos.entry_price
-        pos.bars_held = 0
-        pos.sl_price = (pos.entry_price - stop_dist) if side == "long" else (pos.entry_price + stop_dist)
-        eff_lev = pos.notional / equity
-        pos.leverage = round(eff_lev, 2)
-        pos.margin_usdt = round(pos.notional / sq.max_leverage, 2)
-        trade_id = self.db.log_trade(
-            symbol=symbol, side=side, entry_price=pos.entry_price,
-            margin_usdt=pos.margin_usdt, leverage=pos.leverage,
-            base_amount=pos.base_amount, notional=pos.notional,
-            initial_sl=pos.sl_price, opened_at=now, bar_time_open=str(last_ts),
-            adx_at_entry=0.0)
-        self.trade_ids[symbol] = trade_id
-        log.info("%s: SQUEEZE %s entry=%.4f ATR=%.4f SL=%.4f notional=$%.0f (eff_lev=%.1f×) risk=$%.2f",
-                 symbol, side.upper(), pos.entry_price, atr_v, pos.sl_price, pos.notional,
-                 eff_lev, sq.risk_frac * equity)
-        self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts), outcome="fired",
-                           detected_at=now)
-        if self.cfg.notify.open:
-            asyncio.create_task(notify.notify_open(pos))
-
-    async def _squeeze_trail_update(self, symbol: str, enriched: pd.DataFrame):
-        """On each new closed bar, ratchet the trailing stop off the bar CLOSE
-        (matches the backtest: trail armed on close, stop checked intrabar on the
-        5s mark). Time-stop the position at max_bars."""
-        pos = self.executor.positions.get(symbol)
-        if pos is None:
-            return
-        sq = self.cfg.squeeze
-        close = float(enriched.iloc[-1]["Close"])
-        trail_dist = sq.trail_atr * pos.atr_entry
-        pos.bars_held += 1
-        if pos.side == "long":
-            pos.best_close = max(pos.best_close, close)
-            pos.sl_price = max(pos.sl_price, pos.best_close - trail_dist)
-        else:
-            pos.best_close = min(pos.best_close, close)
-            pos.sl_price = min(pos.sl_price, pos.best_close + trail_dist)
-        if pos.bars_held >= sq.max_bars:
-            log.info("%s: squeeze time stop (%d bars) — closing", symbol, pos.bars_held)
-            await self._close_squeeze(symbol, pos, forced_reason="time")
-
-    async def _close_squeeze(self, symbol: str, pos, forced_reason: Optional[str] = None):
-        """Close a squeeze position at the live mark and book the trade."""
-        result = await self.executor.close_position(symbol, "atr_trail")
-        if result is None:
-            return
-        exit_p = result.avg_price
-        pnl = ((exit_p - pos.entry_price) if pos.side == "long"
-               else (pos.entry_price - exit_p)) * pos.base_amount
-        if forced_reason:
-            reason = forced_reason
-        else:
-            moved = (pos.sl_price > pos.entry_price) if pos.side == "long" else (pos.sl_price < pos.entry_price)
-            reason = "trail_sl" if moved else "sl"
-        duration = int(time.time() - pos.opened_at)
-        tid = self.trade_ids.get(symbol)
-        if tid is not None:
-            self.db.update_trade_close(
-                tid, exit_price=exit_p, exit_reason=reason, pnl_usdt=pnl,
-                pnl_pct_account=pnl / self.cfg.initial_collateral_usdc * 100,
-                duration_secs=duration, max_state=(1 if reason == "trail_sl" else 0),
-                closed_at=datetime.now(timezone.utc).isoformat())
-            del self.trade_ids[symbol]
-        log.info("%s: SQUEEZE CLOSED %s @ %.4f pnl=$%+.2f (%s, %d bars)",
-                 symbol, pos.side.upper(), exit_p, pnl, reason, pos.bars_held)
-        if self.cfg.notify.close:
-            asyncio.create_task(notify.notify_close(
-                symbol, pos.side, pos.entry_price, exit_p, pnl, reason, duration,
-                pos.max_state, starting_collateral=self.cfg.initial_collateral_usdc))
-
-    # ------- Regime-gated VWAP mean-reversion (regime_mr) strategy — Scalper -------
-
-    async def _on_new_bar_regime(self, symbol: str, df: pd.DataFrame):
-        """On each new closed 15m bar:
-          1) if a position is open: tick the time stop (SL/TP run on the 5s mark);
-          2) elif a resting maker-limit entry exists: try to fill it on THIS bar's
-             low/high (exactly the backtest rule), or expire it after entry_valid_bars;
-          3) else: evaluate a fresh regime_mr signal and arm a resting maker limit.
-        One position OR one pending entry per symbol at a time (matches the backtest)."""
-        rg = self.cfg.regime
-        enriched = prepare_regime(df, trend_len=rg.trend_len, slope_lb=rg.slope_lb,
-                                  z_period=rg.z_period, z_entry=rg.z_entry,
-                                  atr_period=rg.atr_period, accel_mult=rg.accel_mult,
-                                  min_slope_pct=rg.min_slope_pct)
-        is_bootstrap = symbol not in self.bars
-        self.bars[symbol] = enriched
-        last = enriched.iloc[-1]
-        last_ts = enriched.index[-1]
-
-        if is_bootstrap:
-            nl = int(enriched["reg_long"].sum()); ns = int(enriched["reg_short"].sum())
-            log.info("%s: regime bootstrap scan — %d long + %d short signals over %d bars "
-                     "(most recent %s)", symbol, nl, ns, len(enriched), last_ts)
-            return
-
-        # 1) manage an open position (time stop on bar close; SL/TP on the mark)
-        if self.executor.is_open(symbol):
-            pos = self.executor.positions[symbol]
-            pos.bars_held += 1
-            if pos.bars_held >= rg.max_bars:
-                log.info("%s: regime time stop (%d bars) — closing", symbol, pos.bars_held)
-                await self._close_regime(symbol, pos, "time")
-            return
-
-        # 2) try to fill a resting maker-limit entry against this just-closed bar
-        pe = self.pending_entry.get(symbol)
-        if pe is not None:
-            # entries switched OFF since this limit was armed -> cancel it (an
-            # unfilled limit is a not-yet-open NEW entry).
-            if not self._entries_allowed(symbol):
-                log.info("%s: entries OFF — cancelling resting maker-limit @ %.4f",
-                         symbol, pe["limit_px"])
-                self.pending_entry.pop(symbol, None)
-                return
-            pe["bars"] += 1
-            lo, hi = float(last["Low"]), float(last["High"])
-            filled = (lo <= pe["limit_px"]) if pe["side"] == "long" else (hi >= pe["limit_px"])
-            if filled:
-                await self._open_regime(symbol, pe, last_ts)
-                self.pending_entry.pop(symbol, None)
-            elif pe["bars"] >= rg.entry_valid_bars:
-                log.info("%s: regime %s limit @ %.4f unfilled after %d bars — cancel",
-                         symbol, pe["side"], pe["limit_px"], pe["bars"])
-                self.db.log_signal(symbol=symbol, side=pe["side"], bar_time=str(pe["signal_ts"]),
-                                   outcome="entry_unfilled",
-                                   detected_at=datetime.now(timezone.utc).isoformat())
-                self.pending_entry.pop(symbol, None)
-            return
-
-        # 3) flat & no pending: evaluate a fresh signal on the just-closed bar
-        if not self._entries_allowed(symbol):
-            return  # entries OFF for this ticker — don't arm a new maker limit
-        side = "long" if bool(last["reg_long"]) else ("short" if bool(last["reg_short"]) else None)
-        if side is None:
-            return
-        atr_v = float(last.get("atr14", 0.0) or 0.0)
-        vwap_v = float(last.get("vwap", 0.0) or 0.0)
-        close_v = float(last["Close"])
-        if atr_v <= 0 or vwap_v <= 0:
-            return
-        lv = entry_levels(side, close_v, atr_v, vwap_v, rg.limit_atr, rg.sl_atr, rg.tp_frac)
-        if lv["tp_dist"] <= 0:
-            return
-        self.pending_entry[symbol] = {
-            "side": side, "limit_px": lv["limit_px"], "sl_dist": lv["sl_dist"],
-            "tp_dist": lv["tp_dist"], "bars": 0, "signal_ts": last_ts,
-        }
-        log.info("%s: REGIME %s signal @ %s (close=%.4f z=%.2f slope=%.4f) -> maker limit %.4f "
-                 "SL_dist=%.4f TP_dist=%.4f", symbol, side.upper(), last_ts, close_v,
-                 float(last["zscore"]), float(last["slope"]), lv["limit_px"],
-                 lv["sl_dist"], lv["tp_dist"])
-        self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts), outcome="detected",
-                           slope_pct=float(last["slope"]),
-                           detected_at=datetime.now(timezone.utc).isoformat())
-
-    async def _open_regime(self, symbol: str, pe: dict, bar_ts):
-        """Fill the resting maker limit: open the paper position, then book the
-        entry at the LIMIT price (maker fill, no slippage — matches the backtest)."""
-        side = pe["side"]
-        now = datetime.now(timezone.utc).isoformat()
-        pos = await self.executor.open_position(symbol, side,
-                                                margin_override=self._entry_margin(symbol))
-        if pos is None:
-            return
-        # Override to the maker limit price (executor filled at the live mark).
-        pos.entry_price = pe["limit_px"]
-        pos.notional = pos.entry_price * pos.base_amount
-        pos.bars_held = 0
-        if side == "long":
-            pos.sl_price = pos.entry_price - pe["sl_dist"]
-            pos.tp_price = pos.entry_price + pe["tp_dist"]
-        else:
-            pos.sl_price = pos.entry_price + pe["sl_dist"]
-            pos.tp_price = pos.entry_price - pe["tp_dist"]
-        trade_id = self.db.log_trade(
-            symbol=symbol, side=side, entry_price=pos.entry_price,
-            margin_usdt=pos.margin_usdt, leverage=pos.leverage,
-            base_amount=pos.base_amount, notional=pos.notional,
-            initial_sl=pos.sl_price, initial_tp=pos.tp_price,
-            opened_at=now, bar_time_open=str(bar_ts), adx_at_entry=0.0)
-        self.trade_ids[symbol] = trade_id
-        log.info("%s: REGIME %s FILLED entry=%.4f SL=%.4f TP=%.4f notional=$%.0f",
-                 symbol, side.upper(), pos.entry_price, pos.sl_price, pos.tp_price, pos.notional)
-        self.db.log_signal(symbol=symbol, side=side, bar_time=str(bar_ts), outcome="fired",
-                           detected_at=now)
-        if self.cfg.notify.open:
-            asyncio.create_task(notify.notify_open(pos))
-
-    async def _close_regime(self, symbol: str, pos, reason: str):
-        """Close a regime position at the live mark and book the trade."""
-        result = await self.executor.close_position(symbol, reason)
-        if result is None:
-            return
-        exit_p = result.avg_price
-        pnl = ((exit_p - pos.entry_price) if pos.side == "long"
-               else (pos.entry_price - exit_p)) * pos.base_amount
-        duration = int(time.time() - pos.opened_at)
-        tid = self.trade_ids.get(symbol)
-        if tid is not None:
-            self.db.update_trade_close(
-                tid, exit_price=exit_p, exit_reason=reason, pnl_usdt=pnl,
-                pnl_pct_account=pnl / self.cfg.initial_collateral_usdc * 100,
-                duration_secs=duration, max_state=(1 if reason == "tp" else 0),
-                closed_at=datetime.now(timezone.utc).isoformat())
-            del self.trade_ids[symbol]
-        log.info("%s: REGIME CLOSED %s @ %.4f pnl=$%+.2f (%s, %d bars)",
-                 symbol, pos.side.upper(), exit_p, pnl, reason, pos.bars_held)
-        self._register_close(reason, pnl)
-        if self.cfg.notify.close:
-            asyncio.create_task(notify.notify_close(
-                symbol, pos.side, pos.entry_price, exit_p, pnl, reason, duration,
-                pos.max_state, starting_collateral=self.cfg.initial_collateral_usdc))
 
     # ------- Per-ticker entry switch (Telegram control) -------
 
@@ -947,7 +435,7 @@ class Bridge:
         return self._cd_until > 0 and time.time() < self._cd_until
 
     def _register_close(self, reason: str, pnl: float):
-        """Feed each booked regime close to the basket-wide cooldown breaker.
+        """Feed each booked close to the basket-wide cooldown breaker.
         After `consec_losses` losing closes in a row, block ALL entries for
         `minutes`, then auto-resume. Manual/kill closes do not count."""
         cd = self.cfg.cooldown
@@ -976,17 +464,16 @@ class Bridge:
                 asyncio.create_task(notify.send("\u2705 Cooldown lifted \u2014 entries resume."))
 
     async def on_set_switch(self, symbol: str, enabled: bool) -> str:
-        """Telegram /on|/off callback. Persists, then (on OFF) cancels any
-        not-yet-filled resting entry so no NEW position opens. Open positions
+        """Telegram /on|/off callback. Persists, then (on OFF) drops any
+        not-yet-fired pending signal so no NEW position opens. Open positions
         are deliberately left running so the bridge babysits them to exit."""
         self.entries_enabled[symbol] = enabled
         self.db.set_switch(symbol, enabled)
         note = ""
         if not enabled:
-            if self.pending_entry.pop(symbol, None) is not None:
-                note = " · cancelled resting limit"
             if self.pending.get(symbol):
                 self.pending[symbol] = []
+                note = " · cleared pending signals"
             if self.executor is not None and self.executor.is_open(symbol):
                 note += " · open position still managed to exit"
         state = "🟢 ON" if enabled else "⛔ OFF"
@@ -998,18 +485,7 @@ class Bridge:
         pos = self.executor.positions.get(symbol) if self.executor else None
         if pos is None:
             return f"{symbol}: no open position"
-        em = self.cfg.exit_model
-        if em == "regime":
-            await self._close_regime(symbol, pos, "manual")
-        elif em == "atr_trail":
-            await self._close_squeeze(symbol, pos, forced_reason="manual")
-        elif em in ("scaleout", "pro_v3"):
-            res = await self.executor.reduce_position(symbol, pos.base_amount, "manual")
-            if res is not None:
-                self._book_leg(symbol, pos, res, "manual")
-            self._finalize_scaleout(symbol, pos)
-        else:
-            await self._close_generic(symbol, pos, "manual")
+        await self._close_generic(symbol, pos, "manual")
         return f"🔻 {symbol}: force-closed {pos.side} @ entry ${pos.entry_price:.4f} (manual)"
 
     async def _close_generic(self, symbol: str, pos, reason: str):
@@ -1055,8 +531,8 @@ class Bridge:
             pos = self.executor.positions.get(sym)
             if pos is not None:
                 where = f"{pos.side} open @ ${pos.entry_price:.4f}"
-            elif self.pending_entry.get(sym) is not None:
-                where = "pending entry"
+            elif self.pending.get(sym):
+                where = "pending signal"
             else:
                 where = "flat"
             lines.append(f"{'🟢' if on else '⛔'} {sym}: entries "
@@ -1071,32 +547,6 @@ class Bridge:
                 mark = self.executor.get_mark_price(symbol)
                 if mark is None:
                     continue
-                if self.cfg.exit_model == "scaleout":
-                    await self._scaleout_tick(symbol, pos, mark)
-                    continue
-                if self.cfg.exit_model == "atr_trail":
-                    # trail level is ratcheted on bar close in _squeeze_trail_update;
-                    # here we only check whether the live mark has hit the stop.
-                    hit = (mark <= pos.sl_price) if pos.side == "long" else (mark >= pos.sl_price)
-                    if hit:
-                        await self._close_squeeze(symbol, pos, forced_reason=None)
-                    continue
-                if self.cfg.exit_model == "regime":
-                    # fixed SL + TP checked on the live mark; STOP WINS on a tie
-                    # (conservative, matches the backtest's both-hit rule).
-                    if pos.side == "long":
-                        hit_sl = mark <= pos.sl_price
-                        hit_tp = mark >= pos.tp_price
-                    else:
-                        hit_sl = mark >= pos.sl_price
-                        hit_tp = mark <= pos.tp_price
-                    if hit_sl:
-                        await self._close_regime(symbol, pos, "sl")
-                    elif hit_tp:
-                        await self._close_regime(symbol, pos, "tp")
-                    continue
-                if self.cfg.exit_model == "pro_v3":
-                    continue  # exits are driven by Pro V3 TP/SL webhooks, not ticked
                 decision = state_step(pos, mark, self.cfg.exits)
                 if decision.close:
                     result = await self.executor.close_position(symbol, decision.reason)
@@ -1479,38 +929,6 @@ class Bridge:
                 notional=float(row["notional"]),
                 trail_high=trail_high,
             )
-            # Squeeze (atr_trail) re-arm: restore a valid protective stop. We
-            # re-derive ATR(entry) from the stored initial_sl and re-arm the
-            # INITIAL stop, letting the trail re-ratchet from entry on the next
-            # bars (gives back any locked profit since entry, but is always
-            # protective — never leaves a position without a valid stop).
-            if self.cfg.exit_model == "atr_trail":
-                sq = self.cfg.squeeze
-                init_sl = row.get("initial_sl")
-                if init_sl:
-                    pos.atr_entry = abs(entry_price - float(init_sl)) / sq.sl_atr if sq.sl_atr else 0.0
-                    pos.sl_price = float(init_sl)
-                else:
-                    pos.sl_price = entry_price - 0.0  # no stored stop -> next bar re-arms
-                pos.best_close = entry_price
-                pos.bars_held = int(max(0, (time.time() - opened_at_unix) // 3600))
-                log.info("  %s: squeeze trail re-armed sl=%.4f atr_entry=%.4f bars_held=%d",
-                         symbol, pos.sl_price, pos.atr_entry, pos.bars_held)
-
-            # Regime-MR re-arm: restore the fixed SL + TP and the bar count for the
-            # time stop. SL/TP are stored at entry (initial_sl/initial_tp) so no
-            # replay is needed — the mark loop resumes guarding the position.
-            if self.cfg.exit_model == "regime":
-                init_sl = row.get("initial_sl")
-                init_tp = row.get("initial_tp")
-                if init_sl:
-                    pos.sl_price = float(init_sl)
-                if init_tp:
-                    pos.tp_price = float(init_tp)
-                pos.bars_held = int(max(0, (time.time() - opened_at_unix) // 900))  # 15m bars
-                log.info("  %s: regime re-armed sl=%.4f tp=%.4f bars_held=%d",
-                         symbol, pos.sl_price, pos.tp_price, pos.bars_held)
-
             self.executor.positions[symbol] = pos
             self.trade_ids[symbol] = int(row["id"])
             restored.append(pos)

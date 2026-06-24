@@ -28,14 +28,6 @@ class EntryConfig:
     slope_lookback_bars: int
     retest_timeout_bars: int
     require_retest: bool = True   # False = take the raw Pro V3 webhook immediately (no retest/filters)
-    # Reclaim entry (M13, the validated V3.2 honest twin). When require_reclaim is
-    # True the EMA9 retest must also CLOSE BACK across EMA9 on the trade's side (a
-    # confirmed bounce, not a breakdown) — entry then fires at that bar's close.
-    # max_gap_pct caps how far the close may sit from EMA9: skip the entry when
-    # |close-ema9|/ema9*100 > max_gap_pct (0 = no cap). 0.05 is the validated knee
-    # (PF 1.27, OOS-stable, 1m-magnifier confirmed). See v3.2-analysis/entry_v2_search.py.
-    require_reclaim: bool = False
-    max_gap_pct: float = 0.0
 
 
 @dataclass
@@ -53,62 +45,6 @@ class PineConfig:
     noise: float = 0.0
     fakeout: float = 0.2
     range_filter: float = 0.2
-
-
-@dataclass
-class ScaleOutConfig:
-    """ATR scale-out exit params (validated Pro V3 SOL config, 2026-05-29)."""
-    sl_atr: float = 3.5
-    tp_atr: tuple = (1.0, 2.0, 3.0)
-    ratios: tuple = (0.34, 0.33, 0.33)
-    be_after_tp1: bool = True
-    atr_period: int = 14
-
-
-@dataclass
-class RegimeConfig:
-    """Regime-gated VWAP mean-reversion ("regime_mr") — Scalper.
-    Validated 5-coin 15m basket (scripts/scalping/analysis/scalp_search_2026-05-30):
-    pooled PF 1.49, 89% WR, 192 trades/wk, OOS 1.42, walk-forward 4/4, 2x-slip 1.43.
-    Maker LIMIT entry; FIXED notional sizing (per-symbol margin x leverage in the
-    symbols block — $250 @ 10x = margin 25, leverage 10). Exits: hard sl_atr*ATR
-    stop, take-profit at tp_frac*(entry distance to VWAP), time stop max_bars."""
-    trend_len: int = 200       # EMA length for the higher-tf trend gate
-    slope_lb: int = 20         # slope = EMA - EMA.shift(slope_lb); sign = regime
-    z_period: int = 30         # z-score window for (Close - sessionVWAP)
-    z_entry: float = 1.5       # |z| threshold to fade
-    sl_atr: float = 2.0        # hard stop = entry -/+ sl_atr*ATR
-    tp_frac: float = 0.3       # take-profit = tp_frac * |VWAP - limit entry|
-    max_bars: int = 12         # time stop in bars (12 * 15m = 3h)
-    limit_atr: float = 0.25    # maker limit offset beyond close, in ATR
-    atr_period: int = 14
-    entry_valid_bars: int = 3  # cancel the resting limit if unfilled after N bars
-    accel_mult: float = 0.0    # acceleration guard: skip fading a signal bar whose
-                               # range >= accel_mult*ATR (news-rip / climax bar).
-                               # 0 = off. Validated 3.0: PF 1.46->1.54, lower DD.
-    min_slope_pct: float = 0.0  # trend-clarity gate: require |EMA-slope|% >= this
-                                # before fading against the trend (sign-only gate
-                                # shorts a flat-but-rising tape). 0 = off. Validated
-                                # 0.08: worst losing window -$926->-$126, total +20%.
-
-
-@dataclass
-class SqueezeConfig:
-    """Volatility compression->expansion (squeeze) params + risk-based sizing.
-    Validated 4-coin 1h basket (scripts/scalping/analysis/lighter_strat_2026-05-30).
-    Sizing is RISK-PER-TRADE (not fixed margin x leverage): each trade's notional
-    is set so the initial sl_atr*ATR stop risks `risk_frac` of current equity,
-    capped at `max_leverage` notional. Reproduces the backtested DD profile."""
-    bb_len: int = 20
-    bb_mult: float = 2.0
-    kc_mult: float = 1.5
-    min_squeeze: int = 10
-    sl_atr: float = 1.5
-    trail_atr: float = 3.0
-    max_bars: int = 48
-    atr_period: int = 14
-    risk_frac: float = 0.0075        # 0.75% of equity to the hard stop per trade
-    max_leverage: float = 20.0
 
 
 @dataclass
@@ -210,12 +146,9 @@ class BridgeConfig:
     pine: PineConfig = field(default_factory=PineConfig)
     loop: LoopConfig = field(default_factory=LoopConfig)
     log: LogConfig = field(default_factory=LogConfig)
-    # Strategy mode switches (default = legacy replica + trail bridge behavior)
+    # Strategy mode switches (Apex: webhook signal source + 3-stage trail exit)
     signal_source: str = "replica"             # "replica" | "webhook"
-    exit_model: str = "trail"                  # "trail" | "scaleout"
-    scaleout: ScaleOutConfig = field(default_factory=ScaleOutConfig)
-    squeeze: "SqueezeConfig" = field(default_factory=lambda: SqueezeConfig())
-    regime: "RegimeConfig" = field(default_factory=lambda: RegimeConfig())
+    exit_model: str = "trail"                  # "trail"
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
@@ -250,8 +183,6 @@ def load_config(path: str | Path) -> BridgeConfig:
         slope_lookback_bars=int(raw["entry"].get("slope_lookback_bars", 3)),
         retest_timeout_bars=int(raw["entry"].get("retest_timeout_bars", 6)),
         require_retest=bool(raw["entry"].get("require_retest", True)),
-        require_reclaim=bool(raw["entry"].get("require_reclaim", False)),
-        max_gap_pct=float(raw["entry"].get("max_gap_pct", 0.0)),
     )
 
     exits = ExitConfig(**{k: float(v) for k, v in raw["exits"].items()}) if raw.get("exits") else None
@@ -264,15 +195,6 @@ def load_config(path: str | Path) -> BridgeConfig:
 
     signal_source = raw.get("signal_source", "replica")
     exit_model = raw.get("exit_model", "trail")
-
-    so_raw = dict(raw.get("scaleout", {}))
-    if "tp_atr" in so_raw:
-        so_raw["tp_atr"] = tuple(so_raw["tp_atr"])
-    if "ratios" in so_raw:
-        so_raw["ratios"] = tuple(so_raw["ratios"])
-    scaleout = ScaleOutConfig(**so_raw)
-    squeeze = SqueezeConfig(**raw.get("squeeze", {}))
-    regime = RegimeConfig(**raw.get("regime", {}))
 
     webhook = WebhookConfig(**raw.get("webhook", {}))
     # BRIDGE_SECRET env overrides the yaml secret (so it's never committed).
@@ -304,9 +226,6 @@ def load_config(path: str | Path) -> BridgeConfig:
         log=log_cfg,
         signal_source=signal_source,
         exit_model=exit_model,
-        scaleout=scaleout,
-        squeeze=squeeze,
-        regime=regime,
         webhook=webhook,
         notify=notify,
         control=control,

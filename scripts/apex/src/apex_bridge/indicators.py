@@ -51,8 +51,7 @@ def calc_sma(series: pd.Series, period: int) -> pd.Series:
 
 
 def calc_stdev(series: pd.Series, period: int) -> pd.Series:
-    """Pine `ta.stdev(src, length)` — population stdev (ddof=0), matching the
-    squeeze backtest (strat_lib.squeeze_expansion uses std(ddof=0))."""
+    """Pine `ta.stdev(src, length)` — population stdev (ddof=0)."""
     return series.rolling(period, min_periods=period).std(ddof=0)
 
 
