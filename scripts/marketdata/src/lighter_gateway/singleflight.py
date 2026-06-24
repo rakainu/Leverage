@@ -15,7 +15,7 @@ class SingleFlight:
         existing = self._inflight.get(key)
         if existing is not None:
             return await existing
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         self._inflight[key] = fut
         try:
