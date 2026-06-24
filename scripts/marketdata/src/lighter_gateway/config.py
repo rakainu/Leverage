@@ -14,6 +14,10 @@ class GatewayConfig:
     cache_capacity: int
     ttl: dict[str, float] = field(default_factory=dict)
     default_ttl: float = 2.0
+    # Query params dropped from the cache key (volatile values that don't change
+    # the response within a TTL window, e.g. now-based candle timestamps). Without
+    # this, every candle poll is a unique key -> never cached -> token starvation.
+    cache_key_drop_params: frozenset[str] = field(default_factory=frozenset)
 
     def ttl_for(self, path: str) -> float:
         best_len, best_ttl = -1, self.default_ttl
@@ -40,4 +44,6 @@ def load_config(path: str) -> GatewayConfig:
         cache_capacity=int(raw.get("cache_capacity", 2000)),
         ttl={str(k): float(v) for k, v in ttl.items()},
         default_ttl=default_ttl,
+        cache_key_drop_params=frozenset(
+            str(p) for p in raw.get("cache_key_drop_params", [])),
     )

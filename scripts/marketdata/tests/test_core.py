@@ -26,6 +26,23 @@ async def test_cache_hit_skips_upstream():
     assert r2.source == "hit" and n["n"] == 1    # no extra upstream call
 
 @pytest.mark.asyncio
+async def test_drop_params_makes_volatile_keys_collapse():
+    # Candle polls carry now-based timestamps; with those dropped from the key,
+    # two requests differing only in end_timestamp share one cache entry.
+    t = [0.0]; n = {"n": 0}
+    cfg = _cfg(ttl={"/api/v1/candles": 20}, default_ttl=2.0,
+               cache_key_drop_params=frozenset({"start_timestamp", "end_timestamp"}))
+    gw = Gateway(cfg, make_fetch(n), clock=lambda: t[0])
+    r1 = await gw.handle("GET", "/api/v1/candles", "market_id=2&resolution=5m&count_back=10&start_timestamp=100&end_timestamp=200")
+    assert r1.source == "miss" and n["n"] == 1
+    t[0] = 5.0  # within 20s TTL; only the timestamps changed
+    r2 = await gw.handle("GET", "/api/v1/candles", "market_id=2&resolution=5m&count_back=10&start_timestamp=105&end_timestamp=205")
+    assert r2.source == "hit" and n["n"] == 1     # collapsed to the cached entry
+    # count_back is NOT dropped: a different count_back is a distinct key.
+    r3 = await gw.handle("GET", "/api/v1/candles", "market_id=2&resolution=5m&count_back=500&start_timestamp=105&end_timestamp=205")
+    assert r3.source == "miss" and n["n"] == 2
+
+@pytest.mark.asyncio
 async def test_ttl_expiry_refetches():
     t = [0.0]; n = {"n": 0}
     gw = Gateway(_cfg(), make_fetch(n), clock=lambda: t[0])

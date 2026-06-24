@@ -20,8 +20,9 @@ class GatewayResponse:
     source: str   # hit | miss | stale | throttled | passthrough
 
 
-def _norm_query(query: str) -> str:
-    pairs = sorted(parse_qsl(query, keep_blank_values=True))
+def _norm_query(query: str, drop: "frozenset[str]" = frozenset()) -> str:
+    pairs = sorted(p for p in parse_qsl(query, keep_blank_values=True)
+                   if p[0] not in drop)
     return urlencode(pairs)
 
 
@@ -43,7 +44,7 @@ class Gateway:
         return dict(self._stats)
 
     def _key(self, method: str, path: str, query: str) -> str:
-        return f"{method} {path}?{_norm_query(query)}"
+        return f"{method} {path}?{_norm_query(query, self.cfg.cache_key_drop_params)}"
 
     async def handle(self, method: str, path: str, query: str) -> GatewayResponse:
         if method.upper() != "GET":

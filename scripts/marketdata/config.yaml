@@ -4,6 +4,11 @@ rate_limit: { rate_per_s: 2.0, burst: 4 }   # hard upstream ceiling for the whol
                                             # (Lighter per-IP limit measured ~2.5-3/s; stay under it)
 max_stale_s: 30                              # serve cache past TTL up to this when throttled
 cache_capacity: 4000
+# Volatile query params stripped from the cache key. Candle polls use now-based
+# start/end timestamps that change every call; without dropping them every candle
+# request is a unique key -> never cached -> token starvation -> 503s. count_back
+# is NOT dropped (bootstrap=500 vs poll=10 must stay distinct).
+cache_key_drop_params: ["start_timestamp", "end_timestamp"]
 ttl:
   "/api/v1/candles": 20           # 5m bars; cheap freshness (SDK CandlestickApi path)
   "/api/v1/orderBookOrders": 4.0  # marks (book snapshot); >3s poll so single-bridge polls cache-hit
