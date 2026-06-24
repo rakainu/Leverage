@@ -1,0 +1,10 @@
+upstream: "https://mainnet.zklighter.elliot.ai"
+listen: { host: "0.0.0.0", port: 8060 }
+rate_limit: { rate_per_s: 4.0, burst: 8 }   # hard upstream ceiling for the whole box
+max_stale_s: 15                              # serve cache past TTL up to this when throttled
+cache_capacity: 4000
+ttl:
+  "/api/v1/candlesticks": 20      # 5m bars; cheap freshness
+  "/api/v1/orderBook": 2.5        # marks; matches today's 3s mark poll (no freshness loss)
+  "/api/v1/orderBooks": 300       # market-config metadata, near-static
+  default: 2.0
