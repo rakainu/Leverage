@@ -1,0 +1,17 @@
+# scripts/marketdata/docker-compose.gateway.yml
+services:
+  lighter-gateway:
+    build: .
+    container_name: lighter-gateway
+    restart: always
+    networks: [lighter-net]
+    # No published ports: only other containers on lighter-net reach it.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8060/__gw/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+
+networks:
+  lighter-net:
+    external: true
