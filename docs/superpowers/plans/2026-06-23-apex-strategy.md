@@ -870,13 +870,30 @@ scripts/apex/.env
 scripts/apex/data/
 ```
 
-- [ ] **Step 4: Confirm the Dockerfile is config-agnostic**
+Also ensure pytest cache noise is ignored (the copy left a `.pytest_cache/`); if `**/.pytest_cache/` is not already in repo `.gitignore`, add it.
 
-Run:
+- [ ] **Step 4: Fix the inherited Dockerfile (config name + healthcheck db name)**
+
+The copied `scripts/apex/Dockerfile` carries Reclaim-specific strings. Run:
 ```bash
-grep -n "config" scripts/apex/Dockerfile || echo "no hard-coded config — OK"
+grep -n "config\|reclaim" scripts/apex/Dockerfile
 ```
-If the Dockerfile `COPY`s or names `config.reclaim.yaml`, change it to not reference a specific config (the compose bind-mounts `config.apex.yaml` and passes it via `command`).
+Fix both classes of issue:
+- If it `COPY`s or names `config.reclaim.yaml`, change it to not reference a specific config (the compose bind-mounts `config.apex.yaml` and passes it via `command`).
+- If it has a `HEALTHCHECK` that names `reclaim.db` (e.g. `find /app/data/reclaim.db /app/data/reclaim.db-wal ...`), change `reclaim.db` → `apex.db` so the healthcheck watches Apex's real DB. (The compose healthcheck in Step 1 also targets `apex.db`; keep them consistent.)
+
+Then confirm no Reclaim db/config names remain in the Dockerfile:
+```bash
+grep -n "reclaim" scripts/apex/Dockerfile || echo "Dockerfile clean — OK"
+```
+
+- [ ] **Step 4b: Remove the inherited Reclaim deploy doc**
+
+The copy brought `scripts/apex/DEPLOY.md` (entirely Reclaim/scalper content). Apex's own
+docs are `README.md` (Task 7) + `TV_ALERTS.md` (Step 5 below), so delete the stale one:
+```bash
+git rm scripts/apex/DEPLOY.md 2>/dev/null || rm -f scripts/apex/DEPLOY.md
+```
 
 - [ ] **Step 5: Write the TradingView alert doc**
 
