@@ -8,8 +8,7 @@ from lighter_gateway.upstream import make_fetch
 from lighter_gateway.server import build_app
 
 
-async def _make_app() -> web.Application:
-    cfg = load_config(os.environ.get("GATEWAY_CONFIG", "config.yaml"))
+async def _make_app(cfg) -> web.Application:
     session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
     gw = Gateway(cfg, make_fetch(session, cfg.upstream))
     app = build_app(gw)
@@ -23,7 +22,7 @@ async def _make_app() -> web.Application:
 
 def main():
     cfg = load_config(os.environ.get("GATEWAY_CONFIG", "config.yaml"))
-    web.run_app(_make_app(), host=cfg.host, port=cfg.port)
+    web.run_app(_make_app(cfg), host=cfg.host, port=cfg.port)
 
 
 if __name__ == "__main__":
