@@ -32,8 +32,14 @@ services:
       retries: 3
     networks:
       - default
+      - lighter-net
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  default:
+  lighter-net:
+    external: true

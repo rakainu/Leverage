@@ -20,6 +20,9 @@ services:
       - ./src:/app/src
       - ./config.reclaim.yaml:/app/config.reclaim.yaml:ro
     command: ["python", "-u", "run_bridge.py", "--config", "config.reclaim.yaml"]
+    networks:
+      - default
+      - lighter-net
     healthcheck:
       test: ["CMD-SHELL", "find /app/data/reclaim.db /app/data/reclaim.db-wal -mmin -15 -type f 2>/dev/null | grep -q . || exit 1"]
       interval: 5m
@@ -31,3 +34,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  default:
+  lighter-net:
+    external: true

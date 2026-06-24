@@ -19,6 +19,9 @@ services:
       - ./src:/app/src
       - ./config.rebound.yaml:/app/config.rebound.yaml:ro
     command: ["python", "-u", "run_bridge.py", "--config", "config.rebound.yaml"]
+    networks:
+      - default
+      - lighter-net
     healthcheck:
       test: ["CMD-SHELL", "find /app/data/rebound.db /app/data/rebound.db-wal -mmin -90 -type f 2>/dev/null | grep -q . || exit 1"]
       interval: 5m
@@ -30,3 +33,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  default:
+  lighter-net:
+    external: true
