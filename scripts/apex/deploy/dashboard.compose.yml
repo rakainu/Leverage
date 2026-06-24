@@ -1,0 +1,21 @@
+# LIVE dashboard compose on srv1370094 (/docker/apex-dashboard/docker-compose.apex.yml).
+# Standalone: own src/templates/config; reads the bridge's apex.db read-only.
+# Shared runtime image lighter-dashboard:latest (run_dashboard.py baked in; src bind-mount overlays it).
+services:
+  apex-dashboard:
+    image: lighter-dashboard:latest
+    container_name: apex-dashboard
+    restart: unless-stopped
+    volumes:
+      - /docker/apex-bridge/data:/app/data          # apex.db (read-only via PRAGMA query_only)
+      - /docker/apex-dashboard/src:/app/src
+      - /docker/apex-dashboard/templates:/app/templates
+      - ./config.apex.yaml:/app/config.apex.yaml:ro
+    command: ["python","-u","run_dashboard.py","--config","config.apex.yaml","--host","0.0.0.0","--port","8080"]
+    ports:
+      - "127.0.0.1:8100:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

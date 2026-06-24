@@ -1,0 +1,22 @@
+# LIVE dashboard config (/docker/apex-dashboard/config.apex.yaml). Read-only view of apex.db.
+db_path: "data/apex.db"
+lighter_host: "https://mainnet.zklighter.elliot.ai"
+initial_collateral_usdc: 3000   # matches bridge config.apex.yaml
+title: "Apex"
+subtitle: "SMRT Pro V3 webhook · 9 EMA retest · 3-stage trail · Lighter zero-fee · HYPE/SOL/ZEC"
+symbols:
+  HYPE: 24
+  SOL: 2
+  ZEC: 90
+refresh:
+  live_ms: 3000
+  static_ms: 15000
+mark_cache_ttl_s: 2.0
+# Apex is Rich's discretionary strategy — NOT backtest-optimized. Neutral baselines.
+bt_wr: 50.0
+bt_pf: 1.0
+protections:
+  - {name: "Entry", value: "9 EMA retest · slope ≥ 0.15% · no body 0.3-0.5 · trades Sun"}
+  - {name: "Exit", value: "SL −$30 · BE +$20 · lock +$20 / trail $15 @ +$35"}
+  - {name: "Sizing", value: "fixed $250 · 30×"}
+  - {name: "Cooldown", value: "3 losses → block 60m"}

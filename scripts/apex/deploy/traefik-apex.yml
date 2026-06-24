@@ -1,0 +1,33 @@
+# LIVE Traefik file-provider route (/docker/traefik-mncm/config/apex.yml).
+# One host, path-split: /webhook + /health -> bridge (8099, no auth);
+# everything else -> dashboard (8100, radk9 basic-auth).
+http:
+  routers:
+    apex-webhook:
+      rule: "Host(`apex.agentneo.cloud`) && (PathPrefix(`/webhook`) || Path(`/health`))"
+      priority: 100
+      entryPoints: [websecure]
+      service: apex-webhook
+      tls:
+        certResolver: letsencrypt
+    apex-dashboard:
+      rule: "Host(`apex.agentneo.cloud`)"
+      priority: 1
+      entryPoints: [websecure]
+      service: apex-dashboard
+      middlewares: [apex-auth]
+      tls:
+        certResolver: letsencrypt
+  services:
+    apex-webhook:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8099"
+    apex-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8100"
+  middlewares:
+    apex-auth:
+      basicAuth:
+        usersFile: "/config/lighter.htpasswd"

@@ -1,0 +1,32 @@
+# LIVE bridge compose on srv1370094 (/docker/apex-bridge/docker-compose.apex.yml).
+# Differs from the repo root compose: NO traefik labels — this host uses the
+# Traefik file provider (see traefik-apex.yml). Publishes a loopback port that
+# the file route points at.
+services:
+  apex-bridge:
+    build: .
+    image: apex-bridge:latest
+    container_name: apex-bridge
+    restart: unless-stopped
+    env_file:
+      - .env                         # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BRIDGE_SECRET
+    environment:
+      TELEGRAM_SENDER_TAG: "APEX"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./config.apex.yaml:/app/config.apex.yaml:ro
+    command: ["python", "-u", "run_bridge.py", "--config", "config.apex.yaml"]
+    ports:
+      - "127.0.0.1:8099:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "find /app/data/apex.db /app/data/apex.db-wal -mmin -15 -type f 2>/dev/null | grep -q . || exit 1"]
+      interval: 5m
+      timeout: 15s
+      start_period: 3m
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
