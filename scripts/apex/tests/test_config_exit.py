@@ -1,6 +1,8 @@
+from pathlib import Path
+
 from apex_bridge.config import load_config
 
-CONFIG = "config.apex.yaml"   # tests run from scripts/apex/
+CONFIG = Path(__file__).resolve().parents[1] / "config.apex.yaml"
 
 
 def test_apex_exit_config_has_exactly_three_stage_fields():

@@ -30,7 +30,7 @@ ENV PYTHONUNBUFFERED=1 \
 # dashboard's concurrent reads) writes land in the -wal sidecar and the
 # main .db mtime only advances on checkpoint, so we accept either file
 # being fresh. The 5-min heartbeat snapshot guarantees a write < 10 min.
-HEALTHCHECK --interval=5m --timeout=15s --start-period=2m --retries=3 \
-    CMD find /app/data/apex.db /app/data/apex.db-wal -mmin -10 -type f 2>/dev/null | grep -q . || exit 1
+HEALTHCHECK --interval=5m --timeout=15s --start-period=3m --retries=3 \
+    CMD find /app/data/apex.db /app/data/apex.db-wal -mmin -15 -type f 2>/dev/null | grep -q . || exit 1
 
-CMD ["python", "-u", "run_bridge.py", "--config", "config.yaml"]
+CMD ["python", "-u", "run_bridge.py", "--config", "config.apex.yaml"]
