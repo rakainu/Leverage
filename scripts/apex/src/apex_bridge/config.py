@@ -145,7 +145,7 @@ class LoopConfig:
 @dataclass
 class LogConfig:
     level: str = "INFO"
-    db_path: str = "data/reclaim.db"
+    db_path: str = "data/apex.db"
 
 
 @dataclass

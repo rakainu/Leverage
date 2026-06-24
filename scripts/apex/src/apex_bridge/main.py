@@ -8,7 +8,7 @@ Per symbol:
     + slope gate + entry filters; if all pass, fire entry via PaperExecutor
   - State machine ticks every 5s while a position is open
 
-Logs both fills and signals to SQLite (data/reclaim.db).
+Logs both fills and signals to SQLite (data/apex.db).
 """
 from __future__ import annotations
 
