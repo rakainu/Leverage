@@ -2,7 +2,9 @@ upstream: "https://mainnet.zklighter.elliot.ai"
 listen: { host: "0.0.0.0", port: 8060 }
 rate_limit: { rate_per_s: 2.0, burst: 4 }   # hard upstream ceiling for the whole box
                                             # (Lighter per-IP limit measured ~2.5-3/s; stay under it)
-max_stale_s: 30                              # serve cache past TTL up to this when throttled
+max_stale_s: 60                              # serve cache past TTL up to this when throttled
+                                            # (high so a throttled request serves slightly-old data,
+                                            #  never a 503, as long as ANY cached copy exists)
 cache_capacity: 4000
 # Volatile query params stripped from the cache key. Candle polls use now-based
 # start/end timestamps that change every call; without dropping them every candle
@@ -11,7 +13,7 @@ cache_capacity: 4000
 cache_key_drop_params: ["start_timestamp", "end_timestamp"]
 ttl:
   "/api/v1/candles": 20           # 5m bars; cheap freshness (SDK CandlestickApi path)
-  "/api/v1/orderBookOrders": 4.0  # marks (book snapshot); >3s poll so single-bridge polls cache-hit
-  "/api/v1/orderBookDetails": 4.0 # marks (book details)
+  "/api/v1/orderBookOrders": 6.0  # marks (book snapshot); >3s poll so polls cache-hit, frees token budget
+  "/api/v1/orderBookDetails": 6.0 # marks (book details)
   "/api/v1/orderBooks": 300       # market-config metadata, near-static
   default: 2.0
