@@ -29,6 +29,17 @@ reproduce exactly how Rich trades it; tuning comes later, only at Rich's directi
 - No new UI yet — that is a separate, later project. This build leaves a clean,
   isolated dashboard directory but does not build the dashboard.
 
+**In scope (added 2026-06-23):**
+- **3-loss cooldown breaker:** after 3 consecutive losing closes (basket-wide),
+  block ALL new entries for **60 minutes**, then auto-resume. Uses the existing
+  `CooldownConfig` + `_register_close` / `_maybe_notify_cooldown_resume`. One code
+  fix required: the trail-mode close path does not currently feed `_register_close`
+  (only the regime path does) — Apex must wire it in.
+- **Telegram pause/stop control:** `@apexbot` accepts `/off`, `/on`, `/close`,
+  `/status`, and kill-all to pause or stop trading on demand. Uses the existing
+  `TelegramControl` (`control.telegram_enabled: true`). Bot token supplied via the
+  `TELEGRAM_BOT_TOKEN` env var (NEVER committed — `.env` only).
+
 ---
 
 ## 2. Naming & Isolation
@@ -45,6 +56,8 @@ Everything namespaced to `apex`, nothing reaching back into `scripts/scalping/`:
 | Telegram bot | `@apexbot` (new token) |
 | Dashboard dir | `/docker/apex-dashboard/` (created, not populated this build) |
 | Webhook path | `/webhook/apex` (own secret) |
+| Domain | `apex.agentneo.cloud` (Traefik file-provider, own router) |
+| Telegram bot | `@apexbot` — token in `.env` via `TELEGRAM_BOT_TOKEN`, never committed |
 
 **Isolation rule:** Apex imports nothing from `scripts/scalping/` or any other bridge.
 The Lighter execution layer is copied in (from the proven Reclaim/Scalper bridges), not
@@ -148,6 +161,8 @@ baseline (per-coin overrides possible later, not in this build).
 | Lighter client | Place/cancel orders, fetch price, fetch instrument (copied from proven bridge) |
 | `state` / `db` | Persist positions, SL order ids, trade log → `apex.db` |
 | `notify` | `@apexbot` — entry + exit messages only (silent on trail steps) |
+| `telegram_control` | `@apexbot` inbound — `/off` `/on` `/close` `/status` + kill-all (pause/stop trading) |
+| cooldown breaker | 3 consecutive losing closes → block all entries 60 min, auto-resume |
 | `config` | `config.apex.yaml` — all knobs above |
 
 ---
@@ -164,6 +179,11 @@ baseline (per-coin overrides possible later, not in this build).
 5. Sizing: $250 × 30x = $7,500 notional, isolated margin, on HYPE/SOL/ZEC.
 6. Sunday entries are NOT blocked.
 7. Orders route to Lighter, not BloFin.
+8. 3 consecutive losing trail closes block all new entries for 60 min, then
+   auto-resume (unit-tested: trail close feeds `_register_close`).
+9. `@apexbot` `/off` / `/on` / `/close` / `/status` / kill-all pause and resume
+   trading; bot token read from `TELEGRAM_BOT_TOKEN` env, absent from all
+   committed files.
 
 ---
 
