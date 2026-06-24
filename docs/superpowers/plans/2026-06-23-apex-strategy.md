@@ -954,9 +954,10 @@ Expected: empty for all three. Any hit is an isolation leak — fix it before co
 
 - [ ] **Step 2: Prove the secret is not committed anywhere**
 
-Run:
+Scan for any Telegram bot token by its *shape* (`<digits>:AA<35+ chars>`) so no real
+token is embedded in this plan or the scan itself:
 ```bash
-grep -rn "8907501121" scripts/ docs/ ; echo "exit=$?"
+grep -rEn "[0-9]{8,12}:AA[0-9A-Za-z_-]{30,}" scripts/apex docs/ ; echo "exit=$?"
 ```
 Expected: NO matches (the bot token must live only in the untracked `.env`). If it appears, remove it and move it to `.env`.
 
