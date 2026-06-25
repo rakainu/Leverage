@@ -47,13 +47,13 @@ _SIGNAL_LOOKBACK_HOURS = 12
 # small a sample to keep/cut). PF thresholds mirror the strategy kill-switch.
 _SCOREBOARD_MIN_SAMPLE = 10
 
-# Backtest reference the live edge is measured against (validated regime_mr
-# basket). The dashboard's whole "is the edge holding?" framing compares live to
-# these. WR ~88% / PF ~1.5 are the conservative validated baselines.
+# FALLBACK baselines/protections, used only when a book's config does not set its
+# own bt_wr / bt_pf / protections. Each dashboard should set these in its config
+# (config.<book>.yaml) so it shows ITS OWN edge baseline and guards — see
+# _build_state, which reads cfg.bt_wr / cfg.bt_pf / cfg.protections. These defaults
+# mirror the scalper (regime_mr) book.
 _BT_WR = 88.0
 _BT_PF = 1.5
-# Deployed bridge protections, shown so the operator can see the guards are on.
-# Mirror scalper-bridge config.scalper.yaml (regime block).
 _PROTECTIONS = [
     {"name": "Accel guard", "value": "skip range ≥ 3.0×ATR"},
     {"name": "Trend gate", "value": "min slope 0.08%"},
@@ -63,13 +63,13 @@ _PROTECTIONS = [
 _MIN_EDGE_SAMPLE = 20   # below this, the hero reads WARMING UP
 
 
-def _edge_verdict(n: int, pf, cushion) -> tuple[str, str, str]:
+def _edge_verdict(n: int, pf, cushion, bt_pf: float) -> tuple[str, str, str]:
     """(verdict_label, chip_label, css_class) for the edge-health hero."""
     if n < _MIN_EDGE_SAMPLE:
         return "WARMING UP", f"{n} / {_MIN_EDGE_SAMPLE} closed", "warn"
     if pf is None or pf < 1.0 or (cushion is not None and cushion < 0):
         return "BLEEDING", "below water", "bad"
-    if pf < _BT_PF * 0.9 or (cushion is not None and cushion < 4):
+    if pf < bt_pf * 0.9 or (cushion is not None and cushion < 4):
         return "LAGGING · THIN", (f"cushion +{cushion:.1f}pt" if cushion is not None else "thin"), "warn"
     return "ON TRACK", (f"cushion +{cushion:.1f}pt" if cushion is not None else "tracking"), "good"
 
@@ -222,7 +222,7 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
                 pass
         target = cfg.initial_collateral_usdc * 3  # withdrawal target ~3x base
 
-        v_label, v_chip, v_cls = _edge_verdict(n, pf_live, cushion)
+        v_label, v_chip, v_cls = _edge_verdict(n, pf_live, cushion, cfg.bt_pf)
         streak = stats.recent_streak(ordered, 3)
         cd_active = streak == "L L L"
 
@@ -276,20 +276,20 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
                      "coins": [s.replace("-USDT", "") for s in cfg.symbols.keys()],
                      "tz": _tz_label()},
             "edge": {"n": n, "verdict": v_label, "chip": v_chip, "cls": v_cls,
-                     "wr_live": wr_live, "wr_bt": _BT_WR, "be_pct": be_pct, "cushion": cushion,
-                     "pf_live": pf_live, "pf_bt": _BT_PF, "pf_roll": pf_roll,
+                     "wr_live": wr_live, "wr_bt": cfg.bt_wr, "be_pct": be_pct, "cushion": cushion,
+                     "pf_live": pf_live, "pf_bt": cfg.bt_pf, "pf_roll": pf_roll,
                      "avg_trade": avg_trade, "avg_win": avg_win, "avg_loss": avg_loss,
                      "trades_per_day": n / days if days else 0},
             "stat": {"net": realized, "net_per_day": realized / days if days else 0,
                      "max_dd": max_dd, "max_consec": stats.max_consecutive_losses(ordered),
                      "withdrawn": withdrawn},
-            "sides": sides, "protections": _PROTECTIONS, "streak": streak,
+            "sides": sides, "protections": (cfg.protections or _PROTECTIONS), "streak": streak,
             "cooldown_active": cd_active,
             "equity_curve": eq_curve, "per_coin": per_coin, "positions": pos,
             "recent": recent, "exits": exits, "signals": sigs,
             "withdrawals": {"total": withdrawn, "account_now": equity, "target": target},
             "fillq": {"maker_pct": fq["maker_pct"], "slip": fq["avg_slip_bps"],
-                      "n": fq["n"], "live_wr": wr_live, "bt_wr": _BT_WR},
+                      "n": fq["n"], "live_wr": wr_live, "bt_wr": cfg.bt_wr},
         }
 
     @app.get("/api/state")
@@ -363,7 +363,7 @@ def create_app(cfg: DashboardConfig, marks=None) -> FastAPI:
         live_wr = (sum(1 for p in pnls if p > 0) / len(pnls) * 100.0) if pnls else None
         return templates.TemplateResponse(
             request, "partials/fillquality.html",
-            {"fq": fq, "live_wr": live_wr, "n_closed": len(pnls), "bt_wr": 88.0,
+            {"fq": fq, "live_wr": live_wr, "n_closed": len(pnls), "bt_wr": cfg.bt_wr,
              "tz_label": _tz_label()},
         )
 
