@@ -18,7 +18,11 @@ class DashboardConfig:
     title: str = "Lighter"             # dashboard heading; per-book override (default preserves legacy)
     subtitle: str = "paper bridge"     # heading sub-label (Booster = "testnet · real orders")
     footer: str = "regime_mr · accel 3.0 · trend-gate 0.08 · cooldown 3/180"  # foot strategy descriptor; per-book override
-    show_fill_quality: bool = False    # real-order books (Booster) show the fill-quality panel
+    show_fill_quality: bool = False    # maker-order books (scalper) show the fill-quality panel; market-entry books hide it
+    show_withdrawals: bool = True      # compounding/skim books show the withdrawals panel; off-books (Apex) hide it
+    bt_wr: float = 88.0                # backtest WR baseline the live edge is measured against (per-book)
+    bt_pf: float = 1.5                 # backtest PF baseline (per-book)
+    protections: list | None = None    # per-strategy guard chips (None -> app default)
 
 
 def load_config(path: str | Path) -> DashboardConfig:
@@ -36,4 +40,8 @@ def load_config(path: str | Path) -> DashboardConfig:
         subtitle=str(data.get("subtitle", "paper bridge")),
         footer=str(data.get("footer", "regime_mr · accel 3.0 · trend-gate 0.08 · cooldown 3/180")),
         show_fill_quality=bool(data.get("show_fill_quality", False)),
+        show_withdrawals=bool(data.get("show_withdrawals", True)),
+        bt_wr=float(data.get("bt_wr", 88.0)),
+        bt_pf=float(data.get("bt_pf", 1.5)),
+        protections=data.get("protections"),
     )

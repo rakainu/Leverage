@@ -6,6 +6,7 @@ lighter_host: "https://mainnet.zklighter.elliot.ai"
 initial_collateral_usdc: 3600   # MUST match bridge config.scalper.yaml (connection.initial_collateral_usdc) — else phantom equity/DD
 title: "Scalper"
 subtitle: "regime_mr · VWAP-z fade · Lighter zero-fee · 8 coins"
+show_fill_quality: true   # scalper arms resting maker limits — maker-edge panel is meaningful
 symbols:                          # name -> market_id (live Lighter ids); LIVE 8-coin basket (2026-06-20)
   ETH: 0
   BTC: 1

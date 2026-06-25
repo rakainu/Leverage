@@ -205,16 +205,20 @@ td{font-family:var(--mono);font-size:14px;padding:8px 9px;border-bottom:1px soli
         <div class="label">Exit mix</div>
         <div id="exitmix"></div>
       </section>
+      {% if cfg.show_withdrawals %}
       <section class="panel">
         <div class="label">Profit withdrawals — skim above target</div>
         <div class="kchip" id="withdrawals"></div>
         <div class="note" id="wdnote"></div>
       </section>
+      {% endif %}
+      {% if cfg.show_fill_quality %}
       <section class="panel">
         <div class="label">Fill quality — does the maker edge hold?</div>
         <div class="kchip" id="fillq"></div>
         <div class="note" id="fqnote"></div>
       </section>
+      {% endif %}
     </div>
     <section class="panel feed" style="height:100%">
       <div class="label">Signal feed — last 10</div>
@@ -356,23 +360,27 @@ function render(s){
     <span class="st">${p.time}</span></div>`).join('')
     :'<div class="empty">no recent signals</div>';
 
-  // withdrawals
+  // withdrawals (panel gated by cfg.show_withdrawals)
   const w=s.withdrawals;
-  $('withdrawals').innerHTML=`
-    <div class="kc"><div class="kv ${w.total>0?'pos':'dim'}">${dol(w.total,2)}</div><div class="kl">Total withdrawn</div></div>
-    <div class="kc"><div class="kv">${dol(w.account_now,0)}</div><div class="kl">Account now</div></div>
-    <div class="kc"><div class="kv dim">${dol(w.target,0)}</div><div class="kl">Skim target</div></div>
-    <div class="kc"><div class="kv">${(w.account_now/w.target*100).toFixed(0)}%</div><div class="kl">To target</div></div>`;
-  $('wdnote').textContent='compounds until target, then skims realized profit weekly.';
+  if($('withdrawals')){
+    $('withdrawals').innerHTML=`
+      <div class="kc"><div class="kv ${w.total>0?'pos':'dim'}">${dol(w.total,2)}</div><div class="kl">Total withdrawn</div></div>
+      <div class="kc"><div class="kv">${dol(w.account_now,0)}</div><div class="kl">Account now</div></div>
+      <div class="kc"><div class="kv dim">${dol(w.target,0)}</div><div class="kl">Skim target</div></div>
+      <div class="kc"><div class="kv">${(w.account_now/w.target*100).toFixed(0)}%</div><div class="kl">To target</div></div>`;
+    $('wdnote').textContent='compounds until target, then skims realized profit weekly.';
+  }
 
-  // fill quality
+  // fill quality (panel gated by cfg.show_fill_quality)
   const f=s.fillq;
-  $('fillq').innerHTML=`
-    <div class="kc"><div class="kv ${f.maker_pct>=95?'pos':''}">${f.n?f.maker_pct.toFixed(0)+'%':'—'}</div><div class="kl">Maker-fill rate</div></div>
-    <div class="kc"><div class="kv ${f.slip>5?'neg':''}">${f.n?f.slip.toFixed(1)+' bps':'—'}</div><div class="kl">Avg slippage</div></div>
-    <div class="kc"><div class="kv ${f.live_wr!==null&&f.live_wr>=84?'pos':'warn'}">${f.live_wr===null?'—':f.live_wr.toFixed(0)+'%'}</div><div class="kl">Live WR</div></div>
-    <div class="kc"><div class="kv dim">${f.bt_wr}%</div><div class="kl">Backtest WR</div></div>`;
-  $('fqnote').textContent=f.n?'clean maker fills → any live-vs-backtest WR gap is regime, not execution.':'no real fills logged yet.';
+  if($('fillq')){
+    $('fillq').innerHTML=`
+      <div class="kc"><div class="kv ${f.maker_pct>=95?'pos':''}">${f.n?f.maker_pct.toFixed(0)+'%':'—'}</div><div class="kl">Maker-fill rate</div></div>
+      <div class="kc"><div class="kv ${f.slip>5?'neg':''}">${f.n?f.slip.toFixed(1)+' bps':'—'}</div><div class="kl">Avg slippage</div></div>
+      <div class="kc"><div class="kv ${f.live_wr!==null&&f.live_wr>=84?'pos':'warn'}">${f.live_wr===null?'—':f.live_wr.toFixed(0)+'%'}</div><div class="kl">Live WR</div></div>
+      <div class="kc"><div class="kv dim">${f.bt_wr}%</div><div class="kl">Backtest WR</div></div>`;
+    $('fqnote').textContent=f.n?'clean maker fills → any live-vs-backtest WR gap is regime, not execution.':'no real fills logged yet.';
+  }
 }
 
 render(window.__STATE__);
