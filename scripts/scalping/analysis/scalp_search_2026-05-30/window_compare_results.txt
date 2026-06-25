@@ -1,0 +1,16 @@
+fetch ['ETH', 'HYPE', 'BNB'] 60d (warmup), score live window entries >= 2026-06-15 ...
+  ETH: 5761 bars -> 2026-06-25
+  HYPE: 5761 bars -> 2026-06-25
+  BNB: 5761 bars -> 2026-06-25
+
+--- SIM over the live window (06-15 -> now), keepers ---
+sim NEW guards (accel+slope) n=142 WR= 92.3% PF= 1.90 net=$    +423 avgW=$  6.82 avgL=$ -42.82 beWR=86.3%
+sim OLD bare (pre-06-20 cfg) n=168 WR= 92.9% PF= 2.23 net=$    +646 avgW=$  7.51 avgL=$ -43.78 beWR=85.4%
+
+--- SIM split at guards-live 06-20 (bare before, guards after) ---
+sim bare  06-15->06-20       n= 77 WR= 93.5% PF= 2.13 net=$    +254 avgW=$  6.66 avgL=$ -45.03 beWR=87.1%
+sim guards 06-20->now        n= 69 WR= 91.3% PF= 1.79 net=$    +197 avgW=$  7.09 avgL=$ -41.54 beWR=85.4%
+
+LIVE keepers (from DB): all=81.8% PF1.57 | pre-crash<06-22=81.7% PF1.26
+compare: if sim OLD bare WR drops toward ~82%, the gap is mostly the
+sim crediting guards that weren't live yet (+ the 0.05% slip being light).
