@@ -17,6 +17,7 @@ class DashboardConfig:
     mark_cache_ttl_s: float
     title: str = "Lighter"             # dashboard heading; per-book override (default preserves legacy)
     subtitle: str = "paper bridge"     # heading sub-label (Booster = "testnet · real orders")
+    footer: str = "regime_mr · accel 3.0 · trend-gate 0.08 · cooldown 3/180"  # foot strategy descriptor; per-book override
     show_fill_quality: bool = False    # real-order books (Booster) show the fill-quality panel
 
 
@@ -33,5 +34,6 @@ def load_config(path: str | Path) -> DashboardConfig:
         mark_cache_ttl_s=float(data.get("mark_cache_ttl_s", 2.0)),
         title=str(data.get("title", "Lighter")),
         subtitle=str(data.get("subtitle", "paper bridge")),
+        footer=str(data.get("footer", "regime_mr · accel 3.0 · trend-gate 0.08 · cooldown 3/180")),
         show_fill_quality=bool(data.get("show_fill_quality", False)),
     )

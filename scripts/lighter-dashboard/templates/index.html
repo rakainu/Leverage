@@ -223,7 +223,7 @@ td{font-family:var(--mono);font-size:14px;padding:8px 9px;border-bottom:1px soli
   </div>
 
   <div class="foot">
-    <span>regime_mr · accel 3.0 · trend-gate 0.08 · cooldown 3/180 · read-only</span>
+    <span>{{ cfg.footer|default('regime_mr · accel 3.0 · trend-gate 0.08 · cooldown 3/180', true) }} · read-only</span>
     <span id="coinsfoot">—</span>
   </div>
 </div>
@@ -299,7 +299,7 @@ function render(s){
     <div class="sn ${x.net>=0?'pos':'neg'}">${money(x.net,0)}</div>
     <div class="sm">${x.wr.toFixed(0)}% WR</div></div>`).join('') || '<div class="empty">no trades yet</div>';
   const wkside=s.sides.reduce((a,b)=>(!a||b.net<a.net)?b:a,null);
-  $('sidenote').textContent=wkside?`weakest side: ${wkside.side} (${money(wkside.net,0)}). the trend-gate targets the flat-trend fades that drag it.`:'';
+  $('sidenote').textContent=wkside?`weakest side: ${wkside.side} (${money(wkside.net,0)}).`:'';
 
   // edge trend
   const rp=e.pf_roll;
