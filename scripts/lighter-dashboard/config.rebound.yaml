@@ -18,7 +18,17 @@ symbols:
   HYPE: 24
 title: "Rebound"
 subtitle: "1h VWAP-fade · paper"
+footer: "1H VWAP-anchored fade · ADX < 20 · bank 70% + runner trail"
 show_fill_quality: false         # paper sim has no real fills — hide the fill-quality panel
+show_withdrawals: false          # Rebound skim/withdrawals off
+# Edge baselines the dashboard measures live against — Rebound's OWN validated
+# numbers (OOS PF 1.31 / WR 71%), NOT the scalper's.
+bt_wr: 71.0
+bt_pf: 1.31
+protections:
+  - {name: "Entry", value: "1H VWAP fade · ADX < 20 (range regime)"}
+  - {name: "Exit", value: "bank 70% @ VWAP · runner trail 2.0 ATR · hard stop 2.5 ATR · 24-bar stop"}
+  - {name: "Sizing", value: "2.5% equity risk (compounds) · cap 20×"}
 refresh:
   live_ms: 3000
   static_ms: 15000

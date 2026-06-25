@@ -6,6 +6,9 @@ lighter_host: "https://mainnet.zklighter.elliot.ai"
 initial_collateral_usdc: 3600   # MUST match bridge config.reclaim.yaml connection.initial_collateral_usdc
 title: "Reclaim"
 subtitle: "HA-V3 flip · EMA9 reclaim-retest · 0.05% gap · trail exit · Lighter zero-fee · 7 coins"
+footer: "HA-V3 → EMA9 reclaim · gap ≤ 0.05% · slope ≥ 0.15% · V3.2 trail"
+show_fill_quality: false          # native market entries — no maker edge
+show_withdrawals: false           # Reclaim withdrawals off
 symbols:
   BTC: 1
   SOL: 2
