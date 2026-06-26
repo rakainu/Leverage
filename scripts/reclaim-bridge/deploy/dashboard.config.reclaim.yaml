@@ -1,0 +1,35 @@
+# Dashboard config for the Reclaim paper bridge — CAMPAIGN-TUNED 2026-06-25.
+# Deployed to VPS at /docker/lighter-dashboard/config.reclaim.yaml (shared
+# lighter-dashboard image, pointed at /docker/reclaim-bridge/data/reclaim.db RO).
+db_path: "data/reclaim.db"
+lighter_host: "https://mainnet.zklighter.elliot.ai"
+initial_collateral_usdc: 3600   # MUST match bridge config.reclaim.yaml
+title: "Reclaim"
+subtitle: "HA-V3 flip · EMA12 reclaim-retest · 0.05% gap · Apex trail · Lighter zero-fee · 5 coins"
+footer: "HA-V3 → EMA12 reclaim · gap ≤ 0.05% · slope ≥ 0.08% · block UTC 3-6 · Apex trail (SL $60)"
+show_fill_quality: false          # native market entries (maker-entry is the live A/B)
+show_withdrawals: false
+symbols:
+  BTC: 1
+  SOL: 2
+  DOGE: 3
+  BNB: 25
+  ZEC: 90
+refresh:
+  live_ms: 3000
+  static_ms: 15000
+mark_cache_ttl_s: 2.0
+
+# Edge baseline the dashboard measures live against. Campaign validated PF 1.67
+# / WR 79% @0.06% slip (OOS 1.66, 100% rolling stability), but live underperforms
+# sim (the execution gap), and the 0.12%-slip stress floor is PF 1.31 — so the
+# realistic target is set between them (a healthy live book shouldn't read
+# "below target" constantly). Raise toward 1.67 once live fills are measured.
+bt_wr: 78.0
+bt_pf: 1.50
+protections:
+  - {name: "Reclaim gate", value: "close back across EMA12"}
+  - {name: "Gap filter", value: "skip if > 0.05% from EMA12"}
+  - {name: "Entry filter", value: "slope ≥ 0.08% · no body 0.3-0.5 · no Sun · block UTC 3-6"}
+  - {name: "Cooldown", value: "3 losses in a row → 60m pause"}
+  - {name: "Sizing", value: "fixed $250 · 30×"}

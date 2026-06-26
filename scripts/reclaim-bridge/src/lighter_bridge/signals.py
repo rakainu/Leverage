@@ -127,9 +127,17 @@ def passes_entry_filters(
     block_weekdays: list[int],
     min_abs_slope_pct: float,
     block_body_band: tuple[float, float] | None,
+    block_hours: list[int] | None = None,
 ) -> bool:
-    """Apply the locked-config entry filters. Returns True if the signal should fire."""
+    """Apply the locked-config entry filters. Returns True if the signal should fire.
+
+    block_hours: UTC hours-of-day to skip (the low-liquidity dead zone). Validated
+    on the Reclaim campaign (step3_hours.py): blocking UTC 3-6 lifted OOS PF
+    1.17->1.31 and net +43% by skipping the structurally dead/high-slip window.
+    """
     if block_weekdays and ts.weekday() in block_weekdays:
+        return False
+    if block_hours and ts.hour in block_hours:
         return False
     if min_abs_slope_pct and abs(slope_pct) < min_abs_slope_pct:
         return False

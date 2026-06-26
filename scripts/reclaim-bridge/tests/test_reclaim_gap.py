@@ -70,9 +70,10 @@ def _decide(side, ema, low, high, close, slope, body, ts,
 
 
 class _TS:
-    """Minimal timestamp stub with weekday() (Wed = not blocked)."""
-    def __init__(self, wd=2):
+    """Minimal timestamp stub with weekday() (Wed = not blocked) + hour (UTC)."""
+    def __init__(self, wd=2, hour=12):
         self._wd = wd
+        self.hour = hour
     def weekday(self):
         return self._wd
 
@@ -105,24 +106,55 @@ def test_short_clean_reclaim_fires():
     assert _decide("short", 100.0, 99.9, 100.1, 99.97, slope=-0.3, body=1.0, ts=_TS()) == "fire"
 
 
-# ---- config wiring -------------------------------------------------------
+# ---- dead-hours filter (Reclaim campaign Step 3: block UTC 3-6) -----------
+def test_entry_blocked_in_dead_hour():
+    # clean reclaim, but at 04:00 UTC (in the blocked dead zone) -> filtered out
+    assert passes_entry_filters(_TS(hour=4), 0.3, 1.0, [6], 0.08, (0.3, 0.5),
+                                block_hours=[3, 4, 5, 6]) is False
+
+
+def test_entry_allowed_outside_dead_hours():
+    # same setup at 12:00 UTC -> fires
+    assert passes_entry_filters(_TS(hour=12), 0.3, 1.0, [6], 0.08, (0.3, 0.5),
+                                block_hours=[3, 4, 5, 6]) is True
+
+
+def test_block_hours_defaults_off():
+    # no block_hours given -> hour never blocks (backward compatible)
+    assert passes_entry_filters(_TS(hour=4), 0.3, 1.0, [6], 0.08, (0.3, 0.5)) is True
+
+
+# ---- config wiring (campaign-tuned 2026-06-25) ---------------------------
 def test_config_loads_reclaim_fields():
     from pathlib import Path
     from lighter_bridge.config import load_config
     cfg = load_config(Path(__file__).resolve().parents[1] / "config.reclaim.yaml")
+    # entry — campaign-tuned values
     assert cfg.entry.require_reclaim is True
     assert cfg.entry.max_gap_pct == 0.05
-    assert cfg.entry.min_abs_slope_pct == 0.15
+    assert cfg.entry.ema_period == 12              # Step 6
+    assert cfg.entry.retest_overshoot_pct == 0.10  # tightened
+    assert cfg.entry.retest_timeout_bars == 9      # lengthened
+    assert cfg.entry.min_abs_slope_pct == 0.08     # Entry B
     assert cfg.entry.block_body_band == (0.3, 0.5)
+    assert cfg.entry.block_weekdays == [6]
+    assert cfg.entry.block_hours == [3, 4, 5, 6]   # Step 3 dead-zone filter
     assert cfg.signal_source == "replica"
     assert cfg.exit_model == "trail"
-    assert cfg.exits.sl_loss_usdt == 82.5
+    # exits — Apex-style ladder, NO $82 SL
+    assert cfg.exits.sl_loss_usdt == 60.0
+    assert cfg.exits.breakeven_usdt == 25.0
+    assert cfg.exits.trail_distance_usdt == 8.0
     assert cfg.exits.tp_ceiling_pct == 2.0
-    # all 7 coins, fixed $250/30x
-    assert set(cfg.symbols) == {"BTC", "SOL", "DOGE", "XRP", "HYPE", "BNB", "ZEC"}
+    # final 5-coin set (HYPE/XRP cut), fixed $250/30x
+    assert set(cfg.symbols) == {"BTC", "SOL", "DOGE", "BNB", "ZEC"}
     for s in cfg.symbols.values():
         assert s.margin_usdt == 250 and s.leverage == 30 and s.enabled
     assert cfg.sizing.mode == "fixed"
+    # cooldown breaker: 3 losses -> 60m pause
+    assert cfg.cooldown.enabled is True
+    assert cfg.cooldown.consec_losses == 3
+    assert cfg.cooldown.minutes == 60
 
 
 if __name__ == "__main__":

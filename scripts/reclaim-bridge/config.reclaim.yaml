@@ -1,39 +1,43 @@
-# Reclaim — the V3.2 "closest honest twin" PAPER bridge (Lighter zero-fee).
+# Reclaim — V3.2 "honest twin" PAPER bridge (Lighter zero-fee). CAMPAIGN-TUNED.
 #
 # Native signals (no webhooks): the bridge computes the HA-V3 momentum-flip
-# signal on its own 5m candle feed, waits for price to pull back and RECLAIM
-# the EMA9 (M13), and only enters when the reclaim close sits within max_gap_pct
-# of EMA9 — the causal "honest twin" of the engine's non-causal ema[i] phantom
-# fill. Both sides, fixed $250 margin @ 30x, V3.2 trail-ladder exit.
+# signal on its own 5m candle feed, waits for price to pull back and RECLAIM the
+# EMA, and only enters when the reclaim close sits within max_gap_pct of EMA —
+# the causal "honest twin" of the engine's non-causal ema[i] phantom fill.
+# Both sides, fixed $250 margin @ 30x.
 #
-# Validated: scripts/scalping/v3.2-analysis/entry_v2_search.py
-#   zero-fee 90d 7-coin basket — PF 1.27, OOS-stable (IS 1.28 / OOS 1.27),
-#   maxDD -$292, sharp gap-cliff at 0.06% (edge inverts past it), 30x = the
-#   leverage knee. Bar-magnifier (1m ground-truth): 5m-avg +$302 -> 1m-avg +$437
-#   (PF 1.44) -> 1m pessimistic +$581 (PF 1.59) — the edge STRENGTHENS at true
-#   intrabar resolution. BloFin fees kill it; this is a Lighter-only strategy.
+# 2026-06-25 EDGE CAMPAIGN (scripts/scalping/v3.2-analysis/RECLAIM_CAMPAIGN_SCORECARD.md)
+# rebuilt this config from a LOSING live setup (PF 0.85, -$1528 @0.06% slip on
+# 300d) to a validated edge: PF 1.67 / +$4702 / OOS PF 1.66 / survives 0.12% slip
+# (PF 1.31) / 100% rolling-window stability. Changes vs the old live config:
+#   entry  : EMA 9->12 | overshoot 0.2->0.10 | timeout 6->9 | slope 0.15->0.08
+#   exits  : V3.2 $82.5 ladder -> Apex-style SL60/BE25/act25/dist8 (no $82 SL)
+#   filter : + block_hours UTC 3-6 (dead-zone; OOS net +43%, PF 1.17->1.31)
+#   coins  : 7 -> 5 (cut HYPE/XRP: net-negative + low rolling stability under EMA12)
+#   risk   : + cooldown 3-loss/60m breaker
+# Pending live A/B (Step 8): maker-limit entry — deploy MARKET, measure real
+# entry slip, switch to maker if it's >~0.04% (the sim can't reward it).
 #
 # Deploy:  docker compose -f docker-compose.reclaim.yml up -d --build
 # Separate DB (reclaim.db) + container + Telegram bot ("Reclaim") from all other
-# bridges. The existing BloFin scalping-v3.2 is UNTOUCHED.
+# bridges. Each bridge's cooldown counter is its OWN in-memory state — other
+# strategies' losses never affect this one.
 
 connection:
-  host: "http://lighter-gateway:8060"   # via shared lighter-gateway (scripts/marketdata); was https://mainnet.zklighter.elliot.ai
-  initial_collateral_usdc: 3600        # 7 coins x $250 margin = $1,750 max if all open + buffer
+  host: "http://lighter-gateway:8060"
+  initial_collateral_usdc: 3600        # 5 coins x $250 margin = $1,250 max if all open + buffer
 
-signal_source: replica                 # native HA-V3 flip -> EMA9 reclaim-retest
-exit_model: trail                      # V3.2 trail ladder (state_machine.step)
+signal_source: replica                 # native HA-V3 flip -> EMA reclaim-retest
+exit_model: trail                      # trail ladder (state_machine.step)
 
-# 7-coin basket — all confirmed listed on Lighter (market_ids verified live
-# 2026-06-20). FIXED $250 margin @ 30x = $7,500 notional each (the exact unit the
-# PF 1.27 result is built on). NO cuts: BTC/ZEC/DOGE drag in the 45d sample but
-# have mean-reverted before; per-coin question is settled live, not on n=3.
+# 5-coin basket (campaign Step 9, EMA12 + rolling stability). FIXED $250 @ 30x.
+# Cut from the old 7: HYPE/XRP were net-negative with low rolling-window keep%
+# (XRP 25%, HYPE 50%) under the tuned config. Removed market_ids for easy re-add:
+#   XRP=7, HYPE=24. Final-set coins all STABLE-KEEP (75-100% window stability).
 symbols:
   BTC:  { market_id: 1,  enabled: true, margin_usdt: 250, leverage: 30 }
   SOL:  { market_id: 2,  enabled: true, margin_usdt: 250, leverage: 30 }
   DOGE: { market_id: 3,  enabled: true, margin_usdt: 250, leverage: 30 }
-  XRP:  { market_id: 7,  enabled: true, margin_usdt: 250, leverage: 30 }
-  HYPE: { market_id: 24, enabled: true, margin_usdt: 250, leverage: 30 }
   BNB:  { market_id: 25, enabled: true, margin_usdt: 250, leverage: 30 }
   ZEC:  { market_id: 90, enabled: true, margin_usdt: 250, leverage: 30 }
 
@@ -45,29 +49,38 @@ pine:                                  # HA-V3 signal params (byte-identical to 
 
 entry:
   timeframe: "5m"
-  ema_period: 9
+  ema_period: 12                       # campaign Step 6: 9->12 (same net, half the DD, OOS PF 1.42)
   slope_lookback_bars: 3
-  retest_overshoot_pct: 0.2            # wick may break EMA9 by <=0.2% and still count
-  retest_timeout_bars: 6              # pending dies if no reclaim within 6 bars
+  retest_overshoot_pct: 0.10           # Step: tightened 0.2->0.10 (wick may pierce EMA by <=0.10%)
+  retest_timeout_bars: 9               # Step: 6->9 bars to form the reclaim
   require_retest: true
-  require_reclaim: true                # M13 — bar must CLOSE BACK across EMA9 (bounce)
-  max_gap_pct: 0.05                    # the validated knee: skip if |close-ema9|/ema9 > 0.05%
-  min_abs_slope_pct: 0.15             # F_LIVE
-  block_body_band: [0.3, 0.5]         # F_LIVE — block the chop body band
-  block_weekdays: [6]                 # F_LIVE — no Sunday
+  require_reclaim: true                # M13 — bar must CLOSE BACK across EMA (bounce)
+  max_gap_pct: 0.05                    # validated knee: skip if |close-ema|/ema > 0.05%
+  min_abs_slope_pct: 0.08              # Step: 0.15->0.08 (Entry B)
+  block_body_band: [0.3, 0.5]          # block the chop body band
+  block_weekdays: [6]                  # no Sunday
+  block_hours: [3, 4, 5, 6]            # Step 3: block the UTC dead zone (OOS net +43%, PF 1.17->1.31)
 
-exits:                                 # V3.2 trail ladder (TrailParams @ margin 250 / 30x)
-  sl_loss_usdt: 82.5
-  breakeven_usdt: 30.0
-  lock_profit_activate_usdt: 45.0
-  lock_profit_usdt: 37.5
-  trail_activate_usdt: 75.0
-  trail_start_usdt: 80.0
-  trail_distance_usdt: 37.5
-  tp_ceiling_pct: 2.0                  # hard TP at 2x margin = $500
+exits:                                 # Apex-style ladder (NO $82 SL). $250 @ 30x.
+  sl_loss_usdt: 60.0                   # hard stop -$60
+  breakeven_usdt: 25.0                 # at +$25 -> SL to entry
+  lock_profit_activate_usdt: 25.0      # at +$25 lock...
+  lock_profit_usdt: 20.0               # ...+$20
+  trail_activate_usdt: 25.0            # ...and start trailing
+  trail_start_usdt: 25.0
+  trail_distance_usdt: 8.0             # trail $8 behind the favorable extreme
+  tp_ceiling_pct: 2.0                  # hard TP cap = 2x margin = $500 (near-never safety)
 
 sizing:
-  mode: fixed                          # fixed $250/coin — matches the validated unit exactly
+  mode: fixed                          # fixed $250/coin (switch to compound once proven live)
+
+# News-rip circuit breaker (Rich, 2026-06-25): 3 losing closes in a row across
+# Reclaim's OWN basket -> block ALL Reclaim entries 60m, then auto-resume.
+# This counter is per-bridge; other strategies' losses do not affect it.
+cooldown:
+  enabled: true
+  consec_losses: 3
+  minutes: 60
 
 notify:
   startup: true

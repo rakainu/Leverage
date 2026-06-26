@@ -28,6 +28,7 @@ class EntryConfig:
     slope_lookback_bars: int
     retest_timeout_bars: int
     require_retest: bool = True   # False = take the raw Pro V3 webhook immediately (no retest/filters)
+    block_hours: list[int] = field(default_factory=list)  # UTC hours to skip (dead-zone filter)
     # Reclaim entry (M13, the validated V3.2 honest twin). When require_reclaim is
     # True the EMA9 retest must also CLOSE BACK across EMA9 on the trade's side (a
     # confirmed bounce, not a breakdown) — entry then fires at that bar's close.
@@ -248,6 +249,7 @@ def load_config(path: str | Path) -> BridgeConfig:
         min_abs_slope_pct=float(raw["entry"]["min_abs_slope_pct"]),
         block_body_band=body_band,
         block_weekdays=list(raw["entry"].get("block_weekdays", [])),
+        block_hours=[int(h) for h in raw["entry"].get("block_hours", [])],
         ema_period=int(raw["entry"].get("ema_period", 9)),
         retest_overshoot_pct=float(raw["entry"].get("retest_overshoot_pct", 0.2)),
         slope_lookback_bars=int(raw["entry"].get("slope_lookback_bars", 3)),

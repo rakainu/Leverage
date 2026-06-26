@@ -93,16 +93,17 @@ class Bridge:
 
     async def start(self):
         log.info("=" * 70)
-        log.info("RECLAIM PAPER BRIDGE — HA-V3 flip · EMA9 reclaim-retest · 0.05pct gap · trail exit")
+        log.info("RECLAIM PAPER BRIDGE — HA-V3 flip · EMA%d reclaim-retest · %.2fpct gap · trail exit",
+                 self.cfg.entry.ema_period, self.cfg.entry.max_gap_pct)
         log.info("=" * 70)
         log.info("Host: %s", self.cfg.host)
         log.info("Paper collateral: $%.0f", self.cfg.initial_collateral_usdc)
         log.info("Symbols: %s", list(self.cfg.symbols.keys()))
-        log.info("Entry: slope>=%.2f%%  body_band=%s  block_weekdays=%s",
+        log.info("Entry: slope>=%.2f%%  body_band=%s  block_weekdays=%s  block_hours(UTC)=%s",
                  self.cfg.entry.min_abs_slope_pct, self.cfg.entry.block_body_band,
-                 self.cfg.entry.block_weekdays)
+                 self.cfg.entry.block_weekdays, self.cfg.entry.block_hours)
         log.info("Signal source: %s | Exit model: %s", self.cfg.signal_source, self.cfg.exit_model)
-        log.info("Entry: EMA9 retest=%s%s", self.cfg.entry.require_retest,
+        log.info("Entry: EMA%d retest=%s%s", self.cfg.entry.ema_period, self.cfg.entry.require_retest,
                  "" if self.cfg.entry.min_abs_slope_pct or self.cfg.entry.block_body_band
                  or self.cfg.entry.block_weekdays else " (no extra filters)")
         if self.cfg.exit_model == "scaleout":
@@ -400,13 +401,14 @@ class Bridge:
                 new_pending.append(sig)
                 continue
 
-            # Locked-config entry filters (slope >= 0.12, body band, weekday)
+            # Locked-config entry filters (slope, body band, weekday, dead-hours)
             if not passes_entry_filters(last_ts, slope_v, body_v,
                                         self.cfg.entry.block_weekdays,
                                         self.cfg.entry.min_abs_slope_pct,
-                                        self.cfg.entry.block_body_band):
-                log.info("%s: %s blocked by entry filters (slope=%.3f body=%.3f weekday=%d)",
-                         symbol, sig.side, slope_v, body_v, last_ts.weekday())
+                                        self.cfg.entry.block_body_band,
+                                        self.cfg.entry.block_hours):
+                log.info("%s: %s blocked by entry filters (slope=%.3f body=%.3f weekday=%d hour=%d)",
+                         symbol, sig.side, slope_v, body_v, last_ts.weekday(), last_ts.hour)
                 self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(sig.detected_at_bar_ts),
                                    outcome="blocked_filter",
                                    detected_at=datetime.now(timezone.utc).isoformat())
