@@ -52,7 +52,7 @@ entry:
   ema_period: 12                       # campaign Step 6: 9->12 (same net, half the DD, OOS PF 1.42)
   slope_lookback_bars: 3
   retest_overshoot_pct: 0.10           # Step: tightened 0.2->0.10 (wick may pierce EMA by <=0.10%)
-  retest_timeout_bars: 9               # Step: 6->9 bars to form the reclaim
+  retest_timeout_bars: 15              # 2026-06-27: 9->15. Live funnel: 61% of signals EXPIRED (retest not done in 9 bars) -> 0 fills/1.6d. 5-coin M13 sweep: to15 = +27% fills, net 4727->6040, PF 1.67->1.68, OOS PF 1.68->1.70. Knee ~15; >18 decays.
   require_retest: true
   require_reclaim: true                # M13 — bar must CLOSE BACK across EMA (bounce)
   max_gap_pct: 0.05                    # validated knee: skip if |close-ema|/ema > 0.05%
