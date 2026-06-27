@@ -1,5 +1,5 @@
 # Reclaim PAPER bridge — the V3.2 "closest honest twin" on Lighter (zero-fee).
-# HA-V3 flip -> EMA9 reclaim-retest + 0.05% gap filter, both sides, fixed $250/30x,
+# HA-V3 flip -> EMA12 reclaim-retest + 0.05% gap filter, both sides, fixed $250/30x,
 # V3.2 trail exit. Own image, own DB (data/reclaim.db), own container, own Telegram
 # bot ("Reclaim"). No inbound port (native signals, no webhook). The existing BloFin
 # scalping-v3.2 and the Lighter scalper-bridge are UNTOUCHED.

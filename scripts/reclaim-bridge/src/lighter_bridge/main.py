@@ -4,7 +4,7 @@ Per symbol:
   - BarFeed pulls 5m bars (REST poll every 30s)
   - On new closed bar: regenerate V3 Pine signals
   - On fresh buy/sell signal: add to pending queue
-  - Pending queue (max 6 bars old) — on each new bar, check EMA(9) retest
+  - Pending queue (max retest_timeout_bars old) — on each new bar, check EMA retest
     + slope gate + entry filters; if all pass, fire entry via PaperExecutor
   - State machine ticks every 5s while a position is open
 
@@ -56,7 +56,7 @@ log = logging.getLogger("bridge")
 
 @dataclass
 class PendingSignal:
-    """A V3 signal awaiting EMA(9) retest confirmation."""
+    """A V3 signal awaiting EMA retest confirmation."""
     symbol: str
     side: str               # "long" or "short"
     detected_at_bar_ts: pd.Timestamp
@@ -333,7 +333,7 @@ class Bridge:
             log.info("%s: NEW BUY signal @ %s  (close=%.4f)", symbol, last_ts, last["Close"])
             self.db.log_signal(symbol=symbol, side="long",
                                bar_time=str(last_ts), outcome="detected",
-                               ema9=float(last["ema9"]), slope_pct=float(last["slope_pct"]),
+                               ema=float(last["ema"]), slope_pct=float(last["slope_pct"]),
                                body_atr_ratio=float(last["body_atr_ratio"]),
                                detected_at=datetime.now(timezone.utc).isoformat())
         if self.cfg.signal_source != "webhook" and bool(last["sell_sig"]):
@@ -341,7 +341,7 @@ class Bridge:
             log.info("%s: NEW SELL signal @ %s  (close=%.4f)", symbol, last_ts, last["Close"])
             self.db.log_signal(symbol=symbol, side="short",
                                bar_time=str(last_ts), outcome="detected",
-                               ema9=float(last["ema9"]), slope_pct=float(last["slope_pct"]),
+                               ema=float(last["ema"]), slope_pct=float(last["slope_pct"]),
                                body_atr_ratio=float(last["body_atr_ratio"]),
                                detected_at=datetime.now(timezone.utc).isoformat())
 
@@ -355,7 +355,7 @@ class Bridge:
         last_idx = len(enriched) - 1
         last = enriched.iloc[-1]
         last_ts = enriched.index[-1]
-        ema_v = float(last["ema9"])
+        ema_v = float(last["ema"])
         slope_v = float(last["slope_pct"])
         body_v = float(last["body_atr_ratio"])
         bar_low = float(last["Low"])
@@ -372,13 +372,13 @@ class Bridge:
                                    detected_at=datetime.now(timezone.utc).isoformat())
                 continue
 
-            # EMA(9) retest
+            # EMA retest
             if not check_retest(sig.side, ema_v, bar_low, bar_high,
                                 self.cfg.entry.retest_overshoot_pct):
                 new_pending.append(sig)
                 continue
 
-            # Reclaim (M13): the retest bar must CLOSE BACK across EMA9 on the
+            # Reclaim (M13): the retest bar must CLOSE BACK across the EMA on the
             # trade's side — a confirmed bounce, not a breakdown. Keep the pending
             # alive if it touched but hasn't reclaimed yet (a later bar within the
             # timeout may bounce). This is the selection half of the honest twin.
@@ -415,16 +415,16 @@ class Bridge:
                 continue
 
             # Max-entry-gap filter (M12/M13 cost control): skip when the reclaim
-            # close sits too far from EMA9 — past the validated 0.05% knee the edge
-            # is gone (the bounce already ran). The gap is causal: close + ema9 are
+            # close sits too far from the EMA — past the validated 0.05% knee the edge
+            # is gone (the bounce already ran). The gap is causal: close + ema are
             # both known on this closed bar. Consume the pending on a skip.
             if self.cfg.entry.max_gap_pct > 0:
                 gap = entry_gap_pct(ema_v, bar_close)
                 if gap > self.cfg.entry.max_gap_pct:
-                    log.info("%s: %s skipped — entry gap %.3f%% > cap %.3f%% (close=%.4f ema9=%.4f)",
+                    log.info("%s: %s skipped — entry gap %.3f%% > cap %.3f%% (close=%.4f ema=%.4f)",
                              symbol, sig.side, gap, self.cfg.entry.max_gap_pct, bar_close, ema_v)
                     self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(sig.detected_at_bar_ts),
-                                       outcome="blocked_gap", ema9=ema_v, slope_pct=slope_v,
+                                       outcome="blocked_gap", ema=ema_v, slope_pct=slope_v,
                                        body_atr_ratio=body_v,
                                        detected_at=datetime.now(timezone.utc).isoformat())
                     continue
@@ -470,7 +470,7 @@ class Bridge:
             if self.cfg.notify.open:
                 asyncio.create_task(notify.notify_open(pos))
             self.db.log_signal(symbol=symbol, side=sig.side, bar_time=str(sig.detected_at_bar_ts),
-                               outcome="fired", ema9=ema_v, slope_pct=slope_v,
+                               outcome="fired", ema=ema_v, slope_pct=slope_v,
                                body_atr_ratio=body_v,
                                detected_at=datetime.now(timezone.utc).isoformat())
             # Drop other same-side pendings; opposite-side stays (matches live)
@@ -599,7 +599,7 @@ class Bridge:
                  symbol, pos.entry_price, atr_v, stx.sl_price,
                  [round(x, 4) for x in stx.tp_px])
         self.db.log_signal(symbol=symbol, side=side, bar_time=str(last_ts),
-                           outcome="fired", ema9=float(last.get("ema9", 0)),
+                           outcome="fired", ema=float(last.get("ema", 0)),
                            slope_pct=float(last.get("slope_pct", 0)),
                            body_atr_ratio=float(last.get("body_atr_ratio", 0)),
                            detected_at=now)

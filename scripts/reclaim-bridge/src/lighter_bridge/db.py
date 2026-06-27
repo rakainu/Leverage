@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS signal_log (
     symbol          TEXT    NOT NULL,
     side            TEXT    NOT NULL,
     bar_time        TEXT    NOT NULL,
-    outcome         TEXT,           -- 'fired', 'blocked_filter', 'blocked_lock', 'expired'
-    ema9            REAL,
+    outcome         TEXT,           -- 'fired', 'blocked_filter', 'blocked_gap', 'expired'
+    ema             REAL,           -- EMA value at the signal/decision bar (period = entry.ema_period)
     slope_pct       REAL,
     body_atr_ratio  REAL,
     detected_at     TEXT
@@ -93,6 +93,12 @@ class TradeLogDB:
             self.conn.execute("ALTER TABLE trade_log ADD COLUMN initial_tp REAL")
         except sqlite3.OperationalError:
             pass  # column already exists
+        # Migration: signal_log.ema9 -> ema (period-agnostic name). Idempotent:
+        # no-op on a fresh DB (schema already created `ema`) or after one run.
+        try:
+            self.conn.execute("ALTER TABLE signal_log RENAME COLUMN ema9 TO ema")
+        except sqlite3.OperationalError:
+            pass  # already renamed (no ema9 column) — nothing to do
         self.conn.commit()
         log.info("DB ready at %s", self.path)
 

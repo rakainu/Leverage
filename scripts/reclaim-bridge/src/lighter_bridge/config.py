@@ -30,11 +30,12 @@ class EntryConfig:
     require_retest: bool = True   # False = take the raw Pro V3 webhook immediately (no retest/filters)
     block_hours: list[int] = field(default_factory=list)  # UTC hours to skip (dead-zone filter)
     # Reclaim entry (M13, the validated V3.2 honest twin). When require_reclaim is
-    # True the EMA9 retest must also CLOSE BACK across EMA9 on the trade's side (a
+    # True the EMA retest must also CLOSE BACK across the EMA on the trade's side (a
     # confirmed bounce, not a breakdown) — entry then fires at that bar's close.
-    # max_gap_pct caps how far the close may sit from EMA9: skip the entry when
-    # |close-ema9|/ema9*100 > max_gap_pct (0 = no cap). 0.05 is the validated knee
+    # max_gap_pct caps how far the close may sit from the EMA: skip the entry when
+    # |close-ema|/ema*100 > max_gap_pct (0 = no cap). 0.05 is the validated knee
     # (PF 1.27, OOS-stable, 1m-magnifier confirmed). See v3.2-analysis/entry_v2_search.py.
+    # The EMA period is ema_period (12 for the campaign config), not hard-wired to 9.
     require_reclaim: bool = False
     max_gap_pct: float = 0.0
 

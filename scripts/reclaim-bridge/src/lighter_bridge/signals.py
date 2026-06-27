@@ -1,8 +1,9 @@
 """V3 Pine signal regeneration. Mirrors sweeps/2026-05-20/strategy.py.
 
-Computes the V3 buy/sell signals + EMA(9) + slope + body/ATR ratio on a
+Computes the V3 buy/sell signals + EMA(period) + slope + body/ATR ratio on a
 DataFrame of OHLCV bars. Used by main.py to detect new signals as fresh
-bars close.
+bars close. The EMA period is config-driven (entry.ema_period); the column
+is named "ema" (period-agnostic), NOT hard-wired to 9.
 """
 from __future__ import annotations
 
@@ -98,7 +99,7 @@ def generate_v3_signals(
 
 def compute_ema_and_slope(df: pd.DataFrame, ema_period: int = 9,
                           slope_lookback: int = 3) -> pd.DataFrame:
-    """Add ema9 + slope_pct columns (used by entry gate)."""
+    """Add ema (period = ema_period) + slope_pct columns (used by entry gate)."""
     df = df.copy()
     ema = calc_ema(df["Close"], ema_period).values
     n = len(df)
@@ -107,7 +108,7 @@ def compute_ema_and_slope(df: pd.DataFrame, ema_period: int = 9,
         prev = ema[i - slope_lookback]
         if prev and not np.isnan(prev) and not np.isnan(ema[i]):
             slope_pct[i] = (ema[i] - prev) / prev * 100.0
-    df["ema9"] = ema
+    df["ema"] = ema
     df["slope_pct"] = slope_pct
     return df
 
@@ -150,7 +151,7 @@ def passes_entry_filters(
 
 def check_retest(side: str, ema_val: float, bar_low: float, bar_high: float,
                  overshoot_pct: float = 0.2) -> bool:
-    """EMA(9) retest condition — bar touched or briefly broke EMA on the right side."""
+    """EMA retest condition — bar touched or briefly broke EMA on the right side."""
     if np.isnan(ema_val):
         return False
     overshoot = ema_val * (overshoot_pct / 100.0)
@@ -160,19 +161,19 @@ def check_retest(side: str, ema_val: float, bar_low: float, bar_high: float,
 
 
 def check_reclaim(side: str, ema_val: float, bar_close: float) -> bool:
-    """Reclaim condition (M13) — after wicking to EMA9 the bar must CLOSE BACK on
-    the trade's side of EMA9: a confirmed bounce, not a breakdown. Long closes
-    above EMA9; short closes below. This is what distinguishes the winning
-    reclaim from the losing knife-through."""
+    """Reclaim condition (M13) — after wicking to the EMA the bar must CLOSE BACK
+    on the trade's side of the EMA: a confirmed bounce, not a breakdown. Long
+    closes above the EMA; short closes below. This is what distinguishes the
+    winning reclaim from the losing knife-through."""
     if np.isnan(ema_val):
         return False
     return bar_close > ema_val if side == "long" else bar_close < ema_val
 
 
 def entry_gap_pct(ema_val: float, bar_close: float) -> float:
-    """How far the reclaim close sits from EMA9, in percent. The realizable
-    entry's distance from the engine's idealized EMA9 fill — the cost the gap
-    filter caps. Returns a large number if EMA9 is invalid (forces a skip)."""
+    """How far the reclaim close sits from the EMA, in percent. The realizable
+    entry's distance from the engine's idealized EMA fill — the cost the gap
+    filter caps. Returns a large number if the EMA is invalid (forces a skip)."""
     if np.isnan(ema_val) or ema_val == 0:
         return float("inf")
     return abs(bar_close - ema_val) / ema_val * 100.0

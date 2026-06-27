@@ -2,7 +2,7 @@
 
 When signal_source == "webhook", the bridge runs this FastAPI app alongside its
 async loops. TradingView Pro V3 buy/sell alerts POST here; each valid signal is
-pushed onto an asyncio.Queue the bridge drains into its EMA9-retest pending queue
+pushed onto an asyncio.Queue the bridge drains into its EMA-retest pending queue
 — the exact same entry pipeline used by the live BloFin bridge, so entries match
 what was validated in pro_v3_real/.
 
