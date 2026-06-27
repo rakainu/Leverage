@@ -9,7 +9,7 @@
 # Separate DB (scalper.db) + container + Telegram bot ("Scalper") from other bridges.
 
 connection:
-  host: "http://lighter-gateway:8060"   # via shared lighter-gateway (scripts/marketdata); was https://mainnet.zklighter.elliot.ai
+  host: "http://lighter-gateway:8060"
   initial_collateral_usdc: 3600        # 6 coins x $500 margin ($3000 notional) + 20% buffer
 
 signal_source: regime                  # native regime_mr signal computation
@@ -23,11 +23,11 @@ exit_model: regime                     # fixed SL + TP (maker target) + time sto
 # Per-ticker entries toggle live via Telegram (/off SYM, /on SYM) — see `control:`.
 symbols:                               # market_id : 24h vol on Lighter
   ETH:  { market_id: 0,  enabled: true, margin_usdt: 500, leverage: 10 }   # $558M
-  BTC:  { market_id: 1,  enabled: true, margin_usdt: 500, leverage: 10 }   # $1.68B (re-enabled)
-  SOL:  { market_id: 2,  enabled: true, margin_usdt: 500, leverage: 10 }   # $71M
+  BTC:  { market_id: 1,  enabled: false, margin_usdt: 500, leverage: 10 }   # $1.68B (re-enabled)
+  SOL:  { market_id: 2,  enabled: false, margin_usdt: 500, leverage: 10 }   # $71M
   HYPE: { market_id: 24, enabled: true, margin_usdt: 500, leverage: 10 }   # $218M
   BNB:  { market_id: 25, enabled: true, margin_usdt: 500, leverage: 10 }   # $4.2M
-  XMR:  { market_id: 77, enabled: true, margin_usdt: 500, leverage: 10 }   # $4.8M
+  XMR:  { market_id: 77, enabled: false, margin_usdt: 500, leverage: 10 }   # $4.8M
   # Basket expansion 2026-06-20. Validated on 90d OKX 15m, live regime_mr params
   # + accel 3.0 (regime_newcoins.py): both clear the bar IN and OUT of sample at
   # the existing-basket profile. DOGE OOS +$113/PF 2.34/92%WR; SUI OOS +$61/PF
@@ -35,14 +35,14 @@ symbols:                               # market_id : 24h vol on Lighter
   # cut as a loser.) Per-coin sizing unchanged ($500@10x); collateral left at
   # 3600 (sizing is per-coin, not basket-scaled) — watch logs for margin
   # contention if 8 coins open at once. REVERT = set enabled:false on both.
-  DOGE: { market_id: 3,  enabled: true, margin_usdt: 500, leverage: 10 }
-  SUI:  { market_id: 16, enabled: true, margin_usdt: 500, leverage: 10 }
+  DOGE: { market_id: 3,  enabled: false, margin_usdt: 500, leverage: 10 }
+  SUI:  { market_id: 16, enabled: false, margin_usdt: 500, leverage: 10 }
 regime:
   trend_len: 200          # EMA length for the higher-tf trend gate
   slope_lb: 20            # slope = EMA - EMA.shift(20); sign sets the regime
   z_period: 30            # z-score window for (Close - sessionVWAP)
   z_entry: 1.5            # |z| threshold to fade
-  sl_atr: 2.0             # hard stop = entry -/+ 2.0*ATR
+  sl_atr: 1.75             # hard stop = entry -/+ 1.75*ATR
   tp_frac: 0.3            # take-profit = 0.3 * |VWAP - limit entry|
   max_bars: 12            # time stop (12 * 15m = 3h)
   limit_atr: 0.25         # maker limit offset beyond close, in ATR
@@ -64,6 +64,15 @@ regime:
   # windows stay above baseline — drops only net-losing ambiguous-trend fades,
   # not good trades. REVERT = set min_slope_pct: 0.0 + restart.
   min_slope_pct: 0.08
+  # Per-side overrides (2026-06-26). Longs left on the base (z 1.5 / slope 0.08);
+  # shorts loosened to take MORE shorts — the validated edge. Live long/short review
+  # (PF: short 1.55 vs long 0.81) + sim validation (side_asym_validate.py, 180d
+  # IS/OOS + 6 regime segments): OOS net +23->+28%, PF held 1.94, DD better, 0 liq,
+  # shorts net-POSITIVE in every UP-drift segment. Longs UNTOUCHED (they earn over a
+  # cycle; the recent long bleed was regime, not structure). REVERT = delete these
+  # two lines + restart (falls back to symmetric base).
+  z_entry_short: 1.25
+  min_slope_pct_short: 0.05
 
 # Entry block: only `timeframe` is used by the regime path (drives the bar feed).
 entry:

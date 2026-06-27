@@ -120,9 +120,16 @@ class Bridge:
                      sq.trail_atr, sq.max_bars, sq.risk_frac * 100, sq.max_leverage)
         elif self.cfg.exit_model == "regime":
             rg = self.cfg.regime
-            log.info("Regime-MR: EMA(%d) slope-gate | z(%d) fade |z|>=%.2f | maker-limit %.2f×ATR "
+            zl = rg.z_entry if rg.z_entry_long is None else rg.z_entry_long
+            zs = rg.z_entry if rg.z_entry_short is None else rg.z_entry_short
+            msl = rg.min_slope_pct if rg.min_slope_pct_long is None else rg.min_slope_pct_long
+            mss = rg.min_slope_pct if rg.min_slope_pct_short is None else rg.min_slope_pct_short
+            z_desc = f"|z|>={rg.z_entry:.2f}" if zl == zs else f"|z|>=L{zl:.2f}/S{zs:.2f}"
+            slope_desc = (f"slope>={rg.min_slope_pct:.2f}%" if msl == mss
+                          else f"slope>=L{msl:.2f}/S{mss:.2f}%")
+            log.info("Regime-MR: EMA(%d) %s | z(%d) fade %s | maker-limit %.2f×ATR "
                      "| SL=%.2f×ATR TP=%.2f×dist-to-VWAP time=%d bars",
-                     rg.trend_len, rg.z_period, rg.z_entry, rg.limit_atr,
+                     rg.trend_len, slope_desc, rg.z_period, z_desc, rg.limit_atr,
                      rg.sl_atr, rg.tp_frac, rg.max_bars)
         else:
             log.info("Exits: SL=$%.0f BE=$%.0f lock_act=$%.0f trail_act=$%.0f trail_dist=$%.0f",
