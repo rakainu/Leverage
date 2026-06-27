@@ -85,6 +85,16 @@ class RegimeConfig:
                                 # before fading against the trend (sign-only gate
                                 # shorts a flat-but-rising tape). 0 = off. Validated
                                 # 0.08: worst losing window -$926->-$126, total +20%.
+    # Per-side overrides (2026-06-26). None => fall back to the symmetric base above
+    # (z_entry / min_slope_pct). The long/short review + sim validation
+    # (side_asym_sweep.py / side_asym_validate.py) found shorts are the edge and
+    # longs a regime diversifier; the validated lift takes MORE shorts WITHOUT
+    # touching longs (short z_entry 1.5->1.25, short min_slope_pct 0.08->0.05:
+    # OOS net +23->+28%, PF held, DD better, 0 liq, shorts +ve in every UP window).
+    z_entry_long: float | None = None
+    z_entry_short: float | None = None
+    min_slope_pct_long: float | None = None
+    min_slope_pct_short: float | None = None
 
 
 @dataclass

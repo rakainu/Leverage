@@ -62,7 +62,11 @@ def _session_vwap(df: pd.DataFrame) -> pd.Series:
 def prepare_regime(df: pd.DataFrame, trend_len: int = 200, slope_lb: int = 20,
                    z_period: int = 30, z_entry: float = 1.5,
                    atr_period: int = 14, accel_mult: float = 0.0,
-                   min_slope_pct: float = 0.0) -> pd.DataFrame:
+                   min_slope_pct: float = 0.0,
+                   z_entry_long: float | None = None,
+                   z_entry_short: float | None = None,
+                   min_slope_pct_long: float | None = None,
+                   min_slope_pct_short: float | None = None) -> pd.DataFrame:
     """accel_mult>0 = acceleration guard: a signal bar whose range (High-Low) is
     >= accel_mult*ATR is a volatility-climax / news-rip bar; decline to fade it.
     Fading into an accelerating move is what turns the rare loss into a full
@@ -77,7 +81,19 @@ def prepare_regime(df: pd.DataFrame, trend_len: int = 200, slope_lb: int = 20,
     losers had near-zero slope. Validated across 9 time-chunks (slope_gate_test.py):
     0.08 nearly eliminates the worst losing window (-$926 -> -$126), LIFTS total
     net +20%, and the good windows stay above baseline — NOT conservatism, it
-    drops only net-losing ambiguous-trend fades. Default 0.0 = OFF."""
+    drops only net-losing ambiguous-trend fades. Default 0.0 = OFF.
+
+    z_entry_long/short and min_slope_pct_long/short (2026-06-26) override the
+    symmetric base PER SIDE; None => use the base (z_entry / min_slope_pct), so
+    behavior is byte-for-byte unchanged when they are unset. The validated lift
+    takes MORE shorts without touching longs (short z_entry 1.5->1.25, short
+    min_slope_pct 0.08->0.05; see side_asym_validate.py). Since `up = slope>0`
+    routes each bar to exactly one side, applying the threshold per side is
+    identical to the old whole-bar gate when the per-side values equal the base."""
+    zl = z_entry if z_entry_long is None else z_entry_long
+    zs = z_entry if z_entry_short is None else z_entry_short
+    msl = min_slope_pct if min_slope_pct_long is None else min_slope_pct_long
+    mss = min_slope_pct if min_slope_pct_short is None else min_slope_pct_short
     out = df.copy()
     c = out["Close"].astype(float)
     e = _ema(c, trend_len)
@@ -96,13 +112,19 @@ def prepare_regime(df: pd.DataFrame, trend_len: int = 200, slope_lb: int = 20,
             continue
         if accel_mult > 0 and (hv[i] - lv[i]) >= accel_mult * av[i]:
             continue  # acceleration guard: don't fade a volatility-climax bar
-        if min_slope_pct > 0 and ev[i] and abs(slv[i] / ev[i] * 100.0) < min_slope_pct:
-            continue  # trend-clarity gate: don't fade a flat/ambiguous trend
         up = slv[i] > 0
-        if zv[i] <= -z_entry and up:
-            reg_long[i] = True
-        elif zv[i] >= z_entry and not up:
-            reg_short[i] = True
+        slope_pct = abs(slv[i] / ev[i] * 100.0) if ev[i] else None
+        if up:
+            # trend-clarity gate (long side); then the long z threshold
+            if msl > 0 and slope_pct is not None and slope_pct < msl:
+                continue
+            if zv[i] <= -zl:
+                reg_long[i] = True
+        else:
+            if mss > 0 and slope_pct is not None and slope_pct < mss:
+                continue
+            if zv[i] >= zs:
+                reg_short[i] = True
 
     out["ema_trend"] = e
     out["slope"] = slope
